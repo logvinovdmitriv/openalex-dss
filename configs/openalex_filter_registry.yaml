@@ -1,0 +1,81 @@
+version: "1.0"
+filters:
+  subject_primary_topic:
+    label: "Основная тема работы"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "primary_topic"
+      supports_levels: ["field", "subfield", "topic"]
+  subject_topics_any:
+    label: "Любая тема работы"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "topics"
+      supports_levels: ["field", "subfield", "topic"]
+  keyword:
+    label: "OpenAlex keyword"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "keywords.id"
+  country:
+    label: "Страна организации автора"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "authorships.institutions.country_code"
+  institution:
+    label: "Организация автора"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "authorships.institutions.id"
+      max_or_values: 100
+  author:
+    label: "Автор"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "authorships.author.id"
+      max_or_values: 100
+  source:
+    label: "Источник / журнал"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "primary_location.source.id"
+      max_or_values: 100
+  work_type:
+    label: "Тип публикации"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "type"
+  language:
+    label: "Язык публикации"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "language"
+  open_access:
+    label: "Открытый доступ"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "open_access.is_oa"
+  min_citations:
+    label: "Минимум цитирований работы"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "cited_by_count"
+      operator: ">"
+  min_local_h:
+    label: "Минимальный локальный h-index"
+    class: "derived_after_metrics"
+    derived_field: "h"
+  min_local_publications:
+    label: "Минимум публикаций автора в срезе"
+    class: "derived_after_metrics"
+    derived_field: "p"
+unsupported:
+  city:
+    label: "Город"
+    reason: "Works API не имеет прямого надежного city-фильтра. Возможен будущий UI-presets слой city -> institution IDs."
+  gender:
+    label: "Пол автора"
+    reason: "OpenAlex не предоставляет это поле."
+  age:
+    label: "Возраст автора"
+    reason: "OpenAlex не предоставляет это поле."

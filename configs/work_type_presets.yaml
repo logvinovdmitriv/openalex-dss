@@ -1,0 +1,21 @@
+version: "1.0"
+work_types:
+  - preset_id: "articles"
+    label: "Журнальные статьи"
+    public_description: "Самый чистый базовый корпус для сравнения индексов."
+    openalex_types:
+      - "article"
+  - preset_id: "articles_reviews"
+    label: "Статьи и обзоры"
+    public_description: "Корпус статей вместе с обзорными публикациями."
+    openalex_types:
+      - "article"
+      - "review"
+  - preset_id: "it_broad"
+    label: "Статьи, обзоры, конференции"
+    public_description: "Расширенный корпус для ИТ-направлений, где важны конференции."
+    openalex_types:
+      - "article"
+      - "review"
+      - "conference-paper"
+

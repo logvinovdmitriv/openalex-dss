@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import sys
+from typing import Any
+
+from app.core.paths import JSON_FILES, ROOT, SRC
+from app.services import author_slice, warehouse
+
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from openalex_mvp.config import config_to_dict, load_config  # noqa: E402
+
+
+STAGE_DEFINITIONS = [
+    {
+        "id": "slice",
+        "label": "Срез",
+        "description": "Выбраны предметный срез OpenAlex, период публикаций и необязательная страна организации автора.",
+    },
+    {
+        "id": "ingestion",
+        "label": "Загрузка",
+        "description": "Создан или импортирован фиксированный OpenAlex Works JSONL-дамп.",
+    },
+    {
+        "id": "flatten",
+        "label": "Таблицы",
+        "description": "JSON приведён к плоским таблицам работ и авторств.",
+    },
+    {
+        "id": "indices",
+        "label": "Индексы",
+        "description": "Сформированы индексы P, C, C_frac, CPP, h, i10, g, m_local и экспериментальные метрики ISLV/IUPV/LRDI.",
+    },
+    {
+        "id": "analytics",
+        "label": "Аналитика",
+        "description": "Построены распределения, устойчивость и рейтинг авторов.",
+    },
+    {
+        "id": "export",
+        "label": "Экспорт",
+        "description": "Результаты доступны через CSV/JSON/BI-витрину.",
+    },
+]
+
+
+def state() -> dict[str, Any]:
+    tables = warehouse.list_tables()
+    fetch_meta = warehouse.read_json_doc("fetch_meta") or {}
+    quality = warehouse.read_json_doc("quality") or {}
+    cfg = load_config(ROOT / "config/slice.yaml")
+    preview = author_slice.preview(config_to_dict(cfg))
+
+    rows = {name: int(info.get("rows") or 0) for name, info in tables.items()}
+    readiness = {
+        "slice": bool(cfg.entity_level and cfg.entity_id_short),
+        "ingestion": bool(fetch_meta.get("fetched_works") or rows.get("works")),
+        "flatten": rows.get("works", 0) > 0 and rows.get("authorships", 0) > 0,
+        "indices": rows.get("indices", 0) > 0 and rows.get("ratings", 0) > 0,
+        "analytics": JSON_FILES["stats"].exists() and JSON_FILES["theory"].exists(),
+        "export": rows.get("ratings", 0) > 0,
+    }
+    stages = [
+        {
+            **stage,
+            "status": "ready" if readiness[stage["id"]] else "pending",
+            "ready": readiness[stage["id"]],
+        }
+        for stage in STAGE_DEFINITIONS
+    ]
+    active = next((stage for stage in stages if not stage["ready"]), stages[-1])
+    quality_counts = quality.get("quality_counts") or {}
+    return {
+        "active_stage": active["id"],
+        "stages": stages,
+        "current_slice": preview["slice"],
+        "request": preview["request"],
+        "calculation": preview["calculation"],
+        "source": fetch_meta.get("source_type") or preview["source"]["id"],
+        "quality_summary": {
+            "quality_flags": sum(int(value or 0) for value in quality_counts.values()),
+            "authors": rows.get("indices", 0),
+            "works": rows.get("works", 0),
+            "authorships": rows.get("authorships", 0),
+            "authors_indexed": rows.get("indices", 0),
+        },
+        "next_action": _next_action(active["id"]),
+        "modes": {
+            "strict_works": "Основной исследовательский контур: Works/Authorships и локальные индексы.",
+            "author_preview": "Быстрая витрина: Authors API для предварительного отбора и local-vs-global сравнения.",
+        },
+    }
+
+
+def _next_action(stage_id: str) -> str:
+    return {
+        "slice": "Выберите тему OpenAlex и страну автора.",
+        "ingestion": "Нажмите «Скачать дамп» или выберите локальный OpenAlex Works JSONL.",
+        "flatten": "Нажмите «Построить из дампа» или импортируйте локальный JSONL: плоские таблицы ещё не готовы.",
+        "indices": "Пересчитайте индексы после локального импорта данных.",
+        "analytics": "Пересчитайте аналитику и проверьте распределение.",
+        "export": "Экспортируйте текущий рейтинг или подготовьте BI-витрину.",
+    }.get(stage_id, "Рабочий процесс завершён.")

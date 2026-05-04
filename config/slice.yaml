@@ -1,0 +1,33 @@
+slice_name: subfield_2604_all_2020_2024_primary_topic_article_v1
+workflow_mode: strict_works
+entity_level: subfield
+entity_id_short: 2604
+entity_id_full: https://openalex.org/subfields/2604
+entity_display_name: Applied Mathematics
+filter_mode: primary_topic
+keyword_id: 
+keyword_display_name: 
+text_search_query: 
+institution_id: 
+institution_display_name: 
+affiliation_mode: historical
+from_publication_date: 2020-01-01
+to_publication_date: 2024-12-31
+work_type: article
+exclude_retracted: true
+exclude_paratext: true
+include_xpac: false
+country_code: 
+sort: publication_date:asc,openalex:asc
+per_page: 100
+max_works: 1000
+api_key_env: OPENALEX_API_KEY
+fraction_modes: strict_authors_count,renorm_valid_authors,integer
+fraction_mode_default: strict_authors_count
+select_fields: id,doi,display_name,publication_year,publication_date,type,cited_by_count,is_retracted,is_paratext,is_xpac,is_authors_truncated,authorships,primary_topic,topics,primary_location,ids,created_date,updated_date
+iupv_n0: 5.0
+iupv_lambda: 0.35
+lrdi_p0: 5.0
+lrdi_lambda: 0.15
+analysis_year: 2026
+random_seed: 42

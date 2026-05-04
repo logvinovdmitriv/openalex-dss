@@ -1,0 +1,33 @@
+mapping_version: "v0.1"
+status: "не указано"
+purpose: "Рабочий слой для ручного соответствия специальностей ВАК сущностям OpenAlex."
+rules:
+  - "OpenAlex не поддерживает прямой фильтр по коду ВАК."
+  - "Финальный воспроизводимый срез строится по OpenAlex IDs, а не по свободному тексту."
+  - "Выбранные сущности фиксируются в resolved_entity.json и паспорте среза."
+vak_codes:
+  "2.3.4":
+    label: "Управление в организационных системах"
+    mapping_status: "не указано"
+    candidate_topic_queries:
+      - "decision support systems"
+      - "information systems"
+      - "management science"
+      - "software engineering"
+    selected_openalex_ids: []
+  "5.3.3":
+    label: "Психология труда, инженерная психология, когнитивная эргономика"
+    mapping_status: "не указано"
+    candidate_topic_queries:
+      - "human-computer interaction"
+      - "cognitive ergonomics"
+      - "engineering psychology"
+    selected_openalex_ids: []
+  "5.12.4":
+    label: "Когнитивные исследования"
+    mapping_status: "не указано"
+    candidate_topic_queries:
+      - "cognitive science"
+      - "cognitive psychology"
+      - "decision making"
+    selected_openalex_ids: []

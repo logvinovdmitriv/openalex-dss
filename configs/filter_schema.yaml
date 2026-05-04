@@ -1,0 +1,77 @@
+version: "1.0"
+ui_modes:
+  simple:
+    label: "Простой режим"
+    visible_filter_groups:
+      - subject
+      - geography
+      - organization
+      - years
+      - work_types
+      - data_limit
+  advanced:
+    label: "Расширенный режим"
+    visible_filter_groups:
+      - subject
+      - geography
+      - organization
+      - keywords
+      - authors
+      - sources
+      - years
+      - work_types
+      - citations
+      - open_access
+      - data_limit
+  technical:
+    label: "Технический режим"
+    visible_filter_groups:
+      - openalex_ids
+      - raw_filters
+      - query_plan
+      - data_source_priority
+      - api_budget
+filters:
+  subject:
+    label: "Предметная область"
+    type: "multi_entity_picker"
+    visible: true
+    source:
+      - domain_presets
+      - openalex_topics
+      - openalex_keywords
+    advanced_fields:
+      - openalex_topic_id
+      - openalex_subfield_id
+      - primary_topic_mode
+  geography:
+    label: "Территория"
+    type: "geo_picker"
+    visible: true
+    modes:
+      - all
+      - country
+      - region
+      - city
+  organization:
+    label: "Организация"
+    type: "organization_picker"
+    visible: true
+    source:
+      - organization_presets
+      - openalex_institutions
+      - ror
+  years:
+    label: "Период"
+    type: "year_range"
+    visible: true
+  work_types:
+    label: "Типы публикаций"
+    type: "checkbox_group"
+    visible: true
+    values_source: "work_type_presets"
+  data_limit:
+    label: "Ограничение выборки"
+    type: "select"
+    visible: true
+

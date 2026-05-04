@@ -1,0 +1,31 @@
+version: "1.0"
+description: "User-facing organization presets. Additional organizations should be added here or resolved at runtime."
+organizations:
+  - organization_id: "all"
+    label: "Любая организация"
+    public_description: "Не ограничивать выборку конкретной организацией."
+    aliases:
+      - "любая организация"
+      - "без ограничения"
+    default_mapping:
+      openalex_id: ""
+      display_name: ""
+      country_code: ""
+      confidence: "system"
+
+  - organization_id: "bstu"
+    label: "БГТУ"
+    public_description: "Брянский государственный технический университет."
+    aliases:
+      - "БГТУ"
+      - "Брянский государственный технический университет"
+      - "Bryansk State Technical University"
+      - "BSTU"
+    default_mapping:
+      openalex_id: "https://openalex.org/I4210146325"
+      display_name: "Bryansk State Technical University"
+      country_code: "RU"
+      ror: ""
+      confidence: "high"
+      validation_required: true
+

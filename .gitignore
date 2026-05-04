@@ -1,0 +1,53 @@
+# Python / local runtime
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / frontend build
+node_modules/
+apps/*/node_modules/
+apps/web/dist/
+*.tsbuildinfo
+output/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Data must live outside the repository.
+# Default external root: ../openalex-dss-data
+data/*
+!data/
+!data/README.md
+
+# Large generated artifacts if someone points the data root back into project
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite3
+*.db
+*.parquet
+*.jsonl
+*.jsonl.gz
+*.csv.gz
+*.xlsx
+*.zip
+
+# Generated local report/artifact folders
+artifacts/
+exports/
+reports/
+warehouse/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/

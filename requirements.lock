@@ -1,0 +1,12 @@
+# Core smoke pipeline intentionally uses only the Python standard library.
+# Optional analysis/export packages for the next iteration:
+# requests
+# pyyaml
+# pandas
+# pyarrow
+# duckdb
+# scipy
+# statsmodels
+# matplotlib
+# seaborn
+# pytest

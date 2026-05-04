@@ -1,0 +1,135 @@
+version: "1.0"
+metrics:
+  - metric_id: "p"
+    label: "Число публикаций"
+    group: "Публикационная активность"
+    formula: "count_distinct(work_id)"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "c"
+    label: "Суммарные цитирования"
+    group: "Цитируемость"
+    formula: "sum(cited_by_count)"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "c_frac"
+    label: "Дробные цитирования"
+    group: "Цитируемость с учетом соавторства"
+    formula: "sum(cited_by_count / authors_count_used)"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "cpp"
+    label: "Цитирований на публикацию"
+    group: "Цитируемость"
+    formula: "C / P"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "h"
+    label: "Локальный индекс Хирша"
+    group: "Устойчивое цитируемое ядро"
+    algorithm: "h_index"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "g"
+    label: "Локальный g-index"
+    group: "Сильные цитируемые работы"
+    algorithm: "g_index"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "i10"
+    label: "i10-index"
+    group: "Пороговые индексы"
+    algorithm: "count_works_with_citations_at_least"
+    params:
+      threshold: 10
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "m_local"
+    label: "Локальный m-index"
+    group: "Пороговые индексы"
+    formula: "h / local_publication_age"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "top1_share"
+    label: "Доля цитирований top-1 работы"
+    group: "Диагностика концентрации"
+    formula: "max(cited_by_count) / sum(cited_by_count)"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "f5"
+    label: "f5, операционная версия"
+    group: "Экспериментальные индексы"
+    formula: "count(works where cited_by_count >= 5)"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+    warning: "Операционное определение; первоисточник Полянина должен быть подтвержден перед диссертационным использованием."
+  - metric_id: "fm5"
+    label: "fm5, операционная версия"
+    group: "Экспериментальные индексы"
+    formula: "sum(credit_weight for works where cited_by_count >= 5)"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+    warning: "Операционное определение; первоисточник Полянина должен быть подтвержден перед диссертационным использованием."
+  - metric_id: "iupv"
+    label: "IUPV"
+    group: "Собственные индексы"
+    formula: "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "islv"
+    label: "ISLV"
+    group: "Собственные индексы"
+    formula: "100 * weighted_geometric_mean(pr(h), pr(C_frac), pr(g), pr(i10), pr(P)) * concentration_penalty"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+  - metric_id: "lrdi"
+    label: "LRDI"
+    group: "Экспериментальные индексы"
+    formula: "local robust discounted fractional impact"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: true
+native_metrics:
+  - metric_id: "p"
+    label: "Глобальное число работ OpenAlex"
+    group: "Быстрая витрина Authors API"
+    source: "openalex_author_object"
+    source_field: "works_count"
+    warning: "Не является локальным числом работ в выбранном срезе."
+  - metric_id: "c"
+    label: "Глобальные цитирования OpenAlex"
+    group: "Быстрая витрина Authors API"
+    source: "openalex_author_object"
+    source_field: "cited_by_count"
+    warning: "Не является локальной цитируемостью в выбранном срезе."
+  - metric_id: "h"
+    label: "Глобальный h-index OpenAlex"
+    group: "Быстрая витрина Authors API"
+    source: "openalex_author_object"
+    source_field: "summary_stats.h_index"
+    warning: "Используется только для предварительного просмотра, не для научного вывода по срезу."
+  - metric_id: "i10"
+    label: "Глобальный i10-index OpenAlex"
+    group: "Быстрая витрина Authors API"
+    source: "openalex_author_object"
+    source_field: "summary_stats.i10_index"
+    warning: "Используется только для предварительного просмотра, не для научного вывода по срезу."
+  - metric_id: "two_year_mean_citedness"
+    label: "2-year mean citedness OpenAlex"
+    group: "Быстрая витрина Authors API"
+    source: "openalex_author_object"
+    source_field: "summary_stats.2yr_mean_citedness"
+    warning: "Глобальное профильное поле OpenAlex Authors."

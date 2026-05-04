@@ -1,0 +1,11 @@
+[project]
+name = "openalex-mvp-indices"
+version = "0.1.0"
+description = "Reproducible MVP for author-level scientometric indices on an OpenAlex subject slice."
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
