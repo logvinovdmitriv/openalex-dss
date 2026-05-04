@@ -61,6 +61,18 @@ def write_csv_dicts(path: str | Path, rows: Iterable[dict], fieldnames: list[str
     return count
 
 
+def write_parquet_dicts(path: str | Path, rows: Iterable[dict], fieldnames: list[str]) -> int:
+    try:
+        import polars as pl
+    except ImportError:
+        return 0
+    data = [{key: row.get(key) for key in fieldnames} for row in rows]
+    p = ensure_parent(path)
+    frame = pl.DataFrame(data) if data else pl.DataFrame({key: [] for key in fieldnames})
+    frame.write_parquet(p)
+    return len(data)
+
+
 def _csv_value(value: object) -> object:
     if value is None:
         return ""

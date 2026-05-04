@@ -1,6 +1,6 @@
-import { FRACTION_MODES, type ActiveFilters, type SelectOption, countryLabel, filterParams, fmt } from "./domain";
+import { FRACTION_MODES, type ActiveFilters, countryLabel, filterParams, fmt } from "./domain";
 
-export type View = "slices" | "estimate" | "data" | "enrichment" | "rankings" | "statistics" | "reports" | "passports";
+export type View = "slices" | "data" | "enrichment" | "rankings" | "cohorts" | "statistics" | "reports" | "passports";
 export type ResolverTab = "subject" | "organization" | "author" | "source";
 
 export type EntitySuggestion = {
@@ -52,14 +52,19 @@ export type PipelinePayload = {
   exclude_retracted: boolean;
   exclude_paratext: boolean;
   sort: string;
-  max_works: number;
-  max_dump_bytes?: number;
   fraction_modes: readonly string[];
   fraction_mode_default: string;
   lrdi_p0: number;
   lrdi_lambda: number;
   analysis_year: number;
   api_key?: string;
+};
+
+export type DownloadPolicy = {
+  max_records_to_download: number;
+  max_raw_bytes: number;
+  complete_slice_required: boolean;
+  allow_incomplete_preview: boolean;
 };
 
 export type WorkbenchRun = {
@@ -80,28 +85,28 @@ export type WorkbenchState = {
 
 export const VIEW_DEFINITIONS: Record<View, { label: string; lead: string }> = {
   slices: {
-    label: "Срезы",
-    lead: "Сначала задается логический предметный срез. Дамп и API-запросы являются производными артефактами.",
-  },
-  estimate: {
-    label: "Оценка и загрузка",
-    lead: "Оцените объем, выберите профиль материализации и только затем создавайте физический мини-дамп.",
+    label: "Срез и загрузка",
+    lead: "В одном месте задается срез, выполняется оценка объема и настраивается скачивание локального пакета.",
   },
   data: {
     label: "Локальные данные",
     lead: "Контроль сохраненных JSONL/Parquet/витрин без смешения с логикой отбора.",
   },
   enrichment: {
-    label: "Обогащение",
-    lead: "Точечная дозагрузка авторов, организаций, ORCID/ROR и недостающих справочников.",
+    label: "Точечное обогащение",
+    lead: "Дозагрузка отдельных авторов, организаций, ORCID/ROR и работ без смешения с локальными индексами среза.",
   },
   rankings: {
     label: "Индексы и рейтинги",
     lead: "Локальные индексы считаются только по работам выбранного среза.",
   },
+  cohorts: {
+    label: "Когорты авторов",
+    lead: "Фиксируйте Top-N или ручную выборку авторов перед статистикой и отчетом.",
+  },
   statistics: {
     label: "Сравнение и статистика",
-    lead: "Корреляции, распределения и устойчивость рейтингов для математического вывода.",
+    lead: "Корреляции, распределения и устойчивость рейтингов считаются для выбранной авторской когорты.",
   },
   reports: {
     label: "Отчеты",
@@ -113,20 +118,7 @@ export const VIEW_DEFINITIONS: Record<View, { label: string; lead: string }> = {
   },
 };
 
-export const MATERIALIZATION_PROFILES: SelectOption[] = [
-  { value: "minimal_analytics", label: "Минимальный для рейтингов", description: "Работы, авторства, темы и цитирования. Профиль по умолчанию." },
-  { value: "evidence_package", label: "Расширенный для отчета", description: "Добавляет OpenAlex IDs и даты обновления для паспорта." },
-];
-
-export const TOP_N_OPTIONS: SelectOption[] = [
-  { value: "25", label: "Top-25 авторов" },
-  { value: "50", label: "Top-50 авторов" },
-  { value: "100", label: "Top-100 авторов" },
-  { value: "250", label: "Top-250 авторов" },
-  { value: "500", label: "Top-500 авторов" },
-];
-
-export function buildPayload(filters: ActiveFilters, fractionMode: string, maxWorks: number, maxDumpBytes: number, apiKey = ""): PipelinePayload {
+export function buildSlicePayload(filters: ActiveFilters, fractionMode: string, apiKey = "", fractionModes: readonly string[] = FRACTION_MODES): PipelinePayload {
   return {
     slice_name: sliceName(filters),
     workflow_mode: "strict_works",
@@ -161,9 +153,7 @@ export function buildPayload(filters: ActiveFilters, fractionMode: string, maxWo
     exclude_retracted: true,
     exclude_paratext: true,
     sort: "publication_date:asc,openalex:asc",
-    max_works: maxWorks,
-    max_dump_bytes: maxDumpBytes,
-    fraction_modes: FRACTION_MODES,
+    fraction_modes: fractionModes,
     fraction_mode_default: fractionMode,
     lrdi_p0: 5,
     lrdi_lambda: 0.15,
@@ -172,10 +162,19 @@ export function buildPayload(filters: ActiveFilters, fractionMode: string, maxWo
   };
 }
 
+export function buildDownloadPolicy(maxRecordsToDownload: number, maxRawBytes: number, allowIncompletePreview = false): DownloadPolicy {
+  return {
+    max_records_to_download: maxRecordsToDownload,
+    max_raw_bytes: maxRawBytes,
+    complete_slice_required: !allowIncompletePreview,
+    allow_incomplete_preview: allowIncompletePreview,
+  };
+}
+
 export function sliceName(filters: ActiveFilters) {
   return [
-    filters.subject_level,
-    filters.subject_id,
+    filters.subject_level || "all_subjects",
+    filters.subject_id || "all",
     filters.country_code || "all",
     filters.institution_id ? "org" : "all_orgs",
     filters.from_publication_date.slice(0, 4),
@@ -185,7 +184,7 @@ export function sliceName(filters: ActiveFilters) {
 }
 
 export function humanSliceTitle(filters: ActiveFilters) {
-  return `${filters.subject_name || "направление не выбрано"} / ${filters.institution_name || (filters.country_code ? countryLabel(filters.country_code) : "все страны")} / ${filters.from_publication_date.slice(0, 4)}-${filters.to_publication_date.slice(0, 4)}`;
+  return `${filters.subject_name || "все направления"} / ${filters.institution_name || (filters.country_code ? countryLabel(filters.country_code) : "все страны")} / ${filters.from_publication_date.slice(0, 4)}-${filters.to_publication_date.slice(0, 4)}`;
 }
 
 export function rankingChartRows(rows: Record<string, unknown>[], metric: string) {
@@ -206,6 +205,7 @@ export function mutationError(error: unknown) {
 
 export function viewFromHash(hash: string): View {
   const raw = hash.replace(/^#/, "");
+  if (raw === "estimate") return "slices";
   return Object.keys(VIEW_DEFINITIONS).includes(raw) ? (raw as View) : "slices";
 }
 

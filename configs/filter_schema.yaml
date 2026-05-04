@@ -8,7 +8,6 @@ ui_modes:
       - organization
       - years
       - work_types
-      - data_limit
   advanced:
     label: "Расширенный режим"
     visible_filter_groups:
@@ -22,7 +21,6 @@ ui_modes:
       - work_types
       - citations
       - open_access
-      - data_limit
   technical:
     label: "Технический режим"
     visible_filter_groups:
@@ -31,6 +29,8 @@ ui_modes:
       - query_plan
       - data_source_priority
       - api_budget
+      - download_budget
+      - storage_profile
 filters:
   subject:
     label: "Предметная область"
@@ -70,8 +70,7 @@ filters:
     type: "checkbox_group"
     visible: true
     values_source: "work_type_presets"
-  data_limit:
-    label: "Ограничение выборки"
+  download_budget:
+    label: "Технический предохранитель загрузки"
     type: "select"
-    visible: true
-
+    visible: false

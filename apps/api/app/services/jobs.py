@@ -49,6 +49,15 @@ def get_run(run_id: str) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def update_progress(run_id: str, percent: int, stage: str, extra: dict[str, Any] | None = None) -> None:
+    doc = get_run(run_id)
+    doc["progress_percent"] = max(0, min(100, int(percent)))
+    doc["progress_stage"] = stage
+    if extra:
+        doc.setdefault("progress", {}).update(extra)
+    _save(doc)
+
+
 def list_runs(limit: int = 20) -> dict[str, Any]:
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     docs: list[dict[str, Any]] = []
@@ -90,24 +99,25 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
     try:
         doc.update({"progress_percent": _progress_before_dispatch(action), "progress_stage": _stage_for_action(action)})
         _save(doc)
-        result = _dispatch(action, payload)
+        result = _dispatch(run_id, action, payload)
         doc.update({"status": "completed", "progress_percent": 100, "progress_stage": "completed", "finished_at": _now(), "result": result, "artifacts": _artifact_links()})
     except Exception as exc:  # pragma: no cover - defensive job boundary
         doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
     _save(doc)
 
 
-def _dispatch(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
     if action == "plan":
         return query_planner.plan_slice(payload)
     if action == "fetch_slice_dump":
-        return pipeline.fetch_slice_dump(payload)
+        return pipeline.fetch_slice_dump(payload, progress_callback=lambda progress: _download_progress(run_id, progress))
     if action == "build_from_openalex":
-        fetched = pipeline.fetch_slice_dump(payload)
+        fetched = pipeline.fetch_slice_dump(payload, progress_callback=lambda progress: _download_progress(run_id, progress))
         dump = fetched.get("dump") or {}
         raw_jsonl = str(dump.get("raw_jsonl") or "").strip()
         if not raw_jsonl or dump.get("no_data"):
             return {"fetch": fetched, "build": None, "no_data": True}
+        update_progress(run_id, 96, "normalizing local file", {"source_path": raw_jsonl})
         built = pipeline.import_local_file({**payload, "source_path": raw_jsonl, "api_key": None})
         return {"fetch": fetched, "build": built, "no_data": False}
     if action == "import_file":
@@ -169,6 +179,19 @@ def _stage_for_action(action: str) -> str:
         "recalculate": "computing indices",
         "author_preview": "enriching author preview",
     }.get(action, "running")
+
+
+def _download_progress(run_id: str, progress: dict[str, Any]) -> None:
+    percent = int(progress.get("percent") or 0)
+    # Keep a little room for normalization and report-building in build_from_openalex.
+    bounded = min(95, max(25, percent))
+    fetched = int(progress.get("fetched") or 0)
+    total = progress.get("total_available")
+    if total:
+        stage = f"downloading works: {fetched}/{total}"
+    else:
+        stage = f"downloading works: {fetched}"
+    update_progress(run_id, bounded, stage, progress)
 
 
 def _artifact_links() -> dict[str, str]:

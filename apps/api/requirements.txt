@@ -5,3 +5,6 @@ duckdb>=1.2
 polars>=1.20
 python-multipart>=0.0.20
 PyYAML>=6.0
+# Optional: official OpenAlex downloader for the "OpenAlex CLI" source strategy.
+# Install locally when needed; package files are not committed to the repository.
+# openalex-official

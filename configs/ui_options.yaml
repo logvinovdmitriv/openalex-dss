@@ -1,0 +1,47 @@
+version: "1.0"
+download_record_budgets:
+  - value: 1000
+    label: "до 1 000 записей"
+    description: "Проверочный preview."
+  - value: 10000
+    label: "до 10 000 записей"
+    description: "Небольшой локальный пакет."
+  - value: 50000
+    label: "до 50 000 записей"
+    description: "Стандартный технический бюджет MVP."
+    default: true
+  - value: 100000
+    label: "до 100 000 записей"
+    description: "Крупный API-срез после оценки."
+  - value: 300000
+    label: "до 300 000 записей"
+    description: "Верхний локальный предел для ноутбука."
+raw_size_budgets:
+  - value: 104857600
+    label: "100 МБ"
+    description: "Проверочная загрузка."
+  - value: 314572800
+    label: "300 МБ"
+    description: "Экономный локальный пакет."
+  - value: 524288000
+    label: "500 МБ"
+    description: "Стандартный бюджет MVP."
+    default: true
+  - value: 1073741824
+    label: "1 ГБ"
+    description: "Расширенный локальный срез."
+  - value: 2147483648
+    label: "2 ГБ"
+    description: "Крупная загрузка после оценки."
+top_n:
+  - value: 25
+    label: "Top-25 авторов"
+  - value: 50
+    label: "Top-50 авторов"
+  - value: 100
+    label: "Top-100 авторов"
+    default: true
+  - value: 250
+    label: "Top-250 авторов"
+  - value: 500
+    label: "Top-500 авторов"

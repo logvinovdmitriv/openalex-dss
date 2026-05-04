@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from .io_utils import read_jsonl, write_csv_dicts, write_json
+from .io_utils import read_jsonl, write_csv_dicts, write_json, write_parquet_dicts
 
 NULL_AUTHOR_ID = "https://openalex.org/A9999999999"
 DELETED_AUTHOR_ID = "https://openalex.org/A5317838346"
@@ -61,6 +61,17 @@ AUTHORSHIP_FIELDS = [
     "qf_missing_required_fields",
 ]
 
+WORK_TOPIC_FIELDS = [
+    "work_id",
+    "topic_id",
+    "topic_display_name",
+    "score",
+    "subfield_id",
+    "field_id",
+    "domain_id",
+    "is_primary",
+]
+
 AUTHOR_PROFILE_FIELDS = [
     "author_id",
     "author_display_name",
@@ -95,10 +106,12 @@ def normalize_raw(
     works_out: str | Path = "data/normalized/works_flat.csv",
     authorships_out: str | Path = "data/normalized/authorships_flat.csv",
     quality_out: str | Path = "data/passports/quality_report.json",
+    work_topics_out: str | Path = "data/normalized/work_topics_flat.csv",
 ) -> dict[str, Any]:
     works = read_jsonl(raw_path)
     works_rows: list[dict[str, Any]] = []
     authorship_rows: list[dict[str, Any]] = []
+    work_topic_rows: list[dict[str, Any]] = []
     work_ids_seen: set[str] = set()
 
     quality = Counter()
@@ -176,6 +189,18 @@ def normalize_raw(
         qf_missing_topic = not primary_topic.get("id")
         if qf_missing_topic:
             quality["works_missing_primary_topic"] += 1
+        topics = work.get("topics") or []
+        topic_ids_written: set[str] = set()
+        for topic in topics:
+            topic_row = _work_topic_row(work_id, topic, primary_topic)
+            if topic_row["topic_id"]:
+                topic_ids_written.add(str(topic_row["topic_id"]))
+                work_topic_rows.append(topic_row)
+        primary_topic_id = str(primary_topic.get("id") or "")
+        if primary_topic_id and primary_topic_id not in topic_ids_written:
+            work_topic_rows.append(_work_topic_row(work_id, primary_topic, primary_topic))
+        if not topics and not primary_topic_id:
+            quality["works_without_topics"] += 1
 
         for seq, authorship in enumerate(authorships, start=1):
             author = authorship.get("author") or {}
@@ -231,14 +256,20 @@ def normalize_raw(
 
     works_rows.sort(key=lambda row: row["work_id"])
     authorship_rows.sort(key=lambda row: (row["work_id"], int(row["author_seq"])))
+    work_topic_rows.sort(key=lambda row: (row["work_id"], str(row.get("topic_id") or "")))
 
     write_csv_dicts(works_out, works_rows, WORK_FIELDS)
     write_csv_dicts(authorships_out, authorship_rows, AUTHORSHIP_FIELDS)
+    write_csv_dicts(work_topics_out, work_topic_rows, WORK_TOPIC_FIELDS)
+    write_parquet_dicts(_parquet_peer(works_out), works_rows, WORK_FIELDS)
+    write_parquet_dicts(_parquet_peer(authorships_out), authorship_rows, AUTHORSHIP_FIELDS)
+    write_parquet_dicts(_parquet_peer(work_topics_out), work_topic_rows, WORK_TOPIC_FIELDS)
 
     report = {
         "raw_works": len(works),
         "works_rows": len(works_rows),
         "authorship_rows": len(authorship_rows),
+        "work_topic_rows": len(work_topic_rows),
         "quality_counts": dict(sorted(quality.items())),
         "notes": [
             "authors_count is not returned by the current OpenAlex list select API; strict mode uses observed authorships_count_raw.",
@@ -315,6 +346,7 @@ def normalize_authors_raw(
 
     rows.sort(key=lambda row: str(row["author_id"]))
     write_csv_dicts(authors_out, rows, AUTHOR_PROFILE_FIELDS)
+    write_parquet_dicts(_parquet_peer(authors_out), rows, AUTHOR_PROFILE_FIELDS)
     report = {
         "source_entity": "authors",
         "raw_authors": len(authors),
@@ -332,6 +364,35 @@ def normalize_authors_raw(
 def _author_id(authorship: dict[str, Any]) -> str | None:
     author = authorship.get("author") or {}
     return author.get("id")
+
+
+def _parquet_peer(path: str | Path) -> Path:
+    p = Path(path)
+    try:
+        parts = list(p.parts)
+        if "normalized" in parts:
+            parts[parts.index("normalized")] = "parquet"
+            return Path(*parts).with_suffix(".parquet")
+    except ValueError:
+        pass
+    return p.with_suffix(".parquet")
+
+
+def _work_topic_row(work_id: str, topic: dict[str, Any], primary_topic: dict[str, Any]) -> dict[str, Any]:
+    subfield = topic.get("subfield") or {}
+    field = topic.get("field") or {}
+    domain = topic.get("domain") or {}
+    topic_id = topic.get("id")
+    return {
+        "work_id": work_id,
+        "topic_id": topic_id,
+        "topic_display_name": topic.get("display_name"),
+        "score": topic.get("score"),
+        "subfield_id": subfield.get("id"),
+        "field_id": field.get("id"),
+        "domain_id": domain.get("id"),
+        "is_primary": bool(topic_id and topic_id == primary_topic.get("id")),
+    }
 
 
 def _short_id(openalex_id: object) -> str | None:

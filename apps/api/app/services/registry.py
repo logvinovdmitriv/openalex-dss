@@ -18,6 +18,9 @@ def registry() -> dict[str, Any]:
     metrics = _read_yaml("metric_registry.yaml")
     ranking_profiles = _read_yaml("ranking_profiles.yaml")
     execution_limits = _read_yaml("execution_limits.yaml")
+    storage_profiles = _read_yaml("storage_profiles.yaml")
+    ui_options = _read_yaml("ui_options.yaml")
+    data_sources = _read_yaml("data_sources.yaml")
     return {
         "version": "1.0",
         "config_root": str(CONFIGS),
@@ -29,6 +32,9 @@ def registry() -> dict[str, Any]:
         "native_metric_registry": metrics.get("native_metrics", []),
         "ranking_profiles": ranking_profiles.get("profiles", []),
         "execution_limits": execution_limits.get("execution_limits", {}),
+        "storage_profiles": [_storage_profile(item) for item in storage_profiles.get("profiles", [])],
+        "ui_options": ui_options,
+        "data_sources": data_sources.get("sources", []),
         "openalex_filter_registry": _read_yaml("openalex_filter_registry.yaml"),
     }
 
@@ -75,6 +81,19 @@ def _organization_preset(item: dict[str, Any]) -> dict[str, Any]:
         "ror": str(mapping.get("ror") or ""),
         "confidence": str(mapping.get("confidence") or ""),
         "validation_required": bool(mapping.get("validation_required", False)),
+    }
+
+
+def _storage_profile(item: dict[str, Any]) -> dict[str, Any]:
+    profile_id = str(item.get("id") or item.get("profile_id") or "").strip()
+    return {
+        "profile_id": profile_id,
+        "value": profile_id,
+        "label": str(item.get("label") or profile_id),
+        "description": str(item.get("description") or ""),
+        "format": str(item.get("format") or "jsonl.gz + parquet"),
+        "selected_fields": [str(value) for value in item.get("selected_fields", [])],
+        "default": bool(item.get("default", False)),
     }
 
 

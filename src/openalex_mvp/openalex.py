@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import gzip
 import os
 import hashlib
 from datetime import datetime, timezone
@@ -8,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import SliceConfig
 from .io_utils import ensure_dir, ensure_parent, sha256_file, write_json
@@ -38,7 +39,9 @@ AUTHOR_SELECT_FIELDS = (
 
 def build_filter(cfg: SliceConfig) -> str:
     filters = []
-    if cfg.filter_mode == "primary_topic":
+    if cfg.filter_mode == "all":
+        pass
+    elif cfg.filter_mode == "primary_topic":
         if cfg.entity_level == "subfield":
             filters.append(f"primary_topic.subfield.id:{cfg.entity_id_short}")
         elif cfg.entity_level == "field":
@@ -206,8 +209,11 @@ def fetch_works_slice_dump(
     *,
     max_records: int | None = None,
     max_bytes: int = 500 * 1024 * 1024,
-    raw_filename: str = "works.jsonl",
+    raw_filename: str = "works.jsonl.gz",
     passport_filename: str = "slice_passport.json",
+    complete_slice_required: bool = True,
+    allow_incomplete_preview: bool = False,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Download a compact reproducible OpenAlex Works slice.
 
@@ -235,7 +241,8 @@ def fetch_works_slice_dump(
     first_meta: dict[str, Any] | None = None
     cursors: list[dict[str, Any]] = []
 
-    with raw_path.open("w", encoding="utf-8", newline="\n") as handle:
+    opener = gzip.open if raw_path.name.endswith(".gz") else open
+    with opener(raw_path, "wt", encoding="utf-8", newline="\n") as handle:
         cursor = "*"
         while fetched < limit:
             params["cursor"] = cursor
@@ -277,6 +284,20 @@ def fetch_works_slice_dump(
                     "cursor_out": next_cursor,
                 }
             )
+            if progress_callback:
+                target = min(int(total_available or limit or fetched or 1), int(limit or total_available or fetched or 1))
+                percent = min(95, int((fetched / max(1, target)) * 100))
+                progress_callback(
+                    {
+                        "fetched": fetched,
+                        "bytes_written": bytes_written,
+                        "page_count": page_count,
+                        "total_available": total_available,
+                        "target_records": target,
+                        "percent": percent,
+                        "stage": f"downloaded {fetched} works",
+                    }
+                )
             if stop_reason in {"max_records", "max_bytes"}:
                 break
             if not next_cursor or next_cursor == cursor:
@@ -285,6 +306,9 @@ def fetch_works_slice_dump(
 
     checksum = sha256_file(raw_path)
     public_params = {key: value for key, value in params.items() if key != "api_key"}
+    incomplete_by_limit = stop_reason in {"max_records", "max_bytes"}
+    scientific_completeness = "incomplete" if incomplete_by_limit else "complete"
+    allowed_for_final_analysis = not incomplete_by_limit
     passport = {
         "slice_id": cfg.slice_name,
         "source_mode": "api_dump_first",
@@ -308,6 +332,10 @@ def fetch_works_slice_dump(
         "no_data": fetched == 0,
         "bytes_written": raw_path.stat().st_size,
         "stop_reason": stop_reason,
+        "scientific_completeness": scientific_completeness,
+        "allowed_for_final_analysis": allowed_for_final_analysis,
+        "complete_slice_required": complete_slice_required,
+        "allow_incomplete_preview": allow_incomplete_preview,
         "execution_plan": {
             "strategy": "api_mini_slice",
             "estimate_count": total_available,
@@ -342,46 +370,77 @@ def fetch_works_slice_dump(
             "downstream_rule": "All scientometric indices must be recalculated locally from this fixed raw JSONL slice.",
         },
     }
+    if incomplete_by_limit:
+        passport["incomplete_warning"] = (
+            "This is an incomplete technical preview and must not be used for final scientometric conclusions."
+            if allow_incomplete_preview and not complete_slice_required
+            else "Download stopped by a technical limit before the full slice was materialized."
+        )
     write_json(passport_path, passport)
     return passport
 
 
-def estimate_works(cfg: SliceConfig, *, max_dump_bytes: int | None = None) -> dict[str, Any]:
-    per_page = 1
-    params = _works_params(cfg, per_page)
-    params["cursor"] = "*"
+def estimate_works(
+    cfg: SliceConfig,
+    *,
+    max_dump_bytes: int | None = None,
+    sample_size: int = 100,
+    record_budget: int | None = None,
+) -> dict[str, Any]:
+    sample_page_size = max(1, min(sample_size, 100))
+    count_params = _works_params(cfg, 1)
+    count_params["cursor"] = "*"
+    sample_params = _works_params(cfg, sample_page_size)
+    sample_params.pop("cursor", None)
+    sample_params["sample"] = str(sample_page_size)
+    sample_params["seed"] = str(cfg.random_seed)
     api_key = os.environ.get(cfg.api_key_env)
     if api_key:
-        params["api_key"] = api_key
+        count_params["api_key"] = api_key
+        sample_params["api_key"] = api_key
 
     before = cache_stats()
-    payload = _get_json(API_BASE, params)
+    count_payload = _get_json(API_BASE, count_params)
+    sample_payload = _get_json(API_BASE, sample_params)
     after = cache_stats()
-    meta = payload.get("meta") or {}
-    results = payload.get("results") or []
+    meta = count_payload.get("meta") or {}
+    results = sample_payload.get("results") or count_payload.get("results") or []
     count = int(meta.get("count") or 0)
-    sample_bytes = 0
-    if results:
-        sample_bytes = len((json.dumps(results[0], ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
-    estimated_record_bytes = max(sample_bytes, 2048)
-    planned_records = min(count, cfg.max_works)
-    estimated_raw_bytes = planned_records * estimated_record_bytes
+    record_sizes = [
+        len((json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
+        for row in results
+    ]
+    sample_bytes = record_sizes[0] if record_sizes else 0
+    estimated_record_bytes = max(_mean(record_sizes), 2048)
+    p90_record_bytes = max(_quantile(record_sizes, 0.9), estimated_record_bytes)
+    planned_records = min(count, int(record_budget)) if record_budget else count
+    estimated_raw_bytes = count * estimated_record_bytes
+    estimated_raw_bytes_p90 = count * p90_record_bytes
+    estimated_raw_bytes_for_budget = planned_records * estimated_record_bytes
     max_bytes = max_dump_bytes or 500 * 1024 * 1024
     planned_pages = (planned_records + max(1, cfg.per_page) - 1) // max(1, cfg.per_page)
-    public_params = {key: value for key, value in params.items() if key != "api_key"}
+    public_params = {key: value for key, value in count_params.items() if key != "api_key"}
+    public_sample_params = {key: value for key, value in sample_params.items() if key != "api_key"}
     return {
         "api_base": API_BASE,
         "estimate_count": count,
         "sample_record_bytes": sample_bytes,
+        "sample_size": len(record_sizes),
         "estimated_record_bytes": estimated_record_bytes,
+        "estimated_record_bytes_p90": p90_record_bytes,
         "planned_records": planned_records,
         "estimated_raw_bytes": estimated_raw_bytes,
         "estimated_raw_mb": round(estimated_raw_bytes / (1024 * 1024), 3),
+        "estimated_raw_bytes_p90": estimated_raw_bytes_p90,
+        "estimated_raw_mb_p90": round(estimated_raw_bytes_p90 / (1024 * 1024), 3),
+        "estimated_raw_bytes_for_download_budget": estimated_raw_bytes_for_budget,
+        "estimated_raw_mb_for_download_budget": round(estimated_raw_bytes_for_budget / (1024 * 1024), 3),
         "max_dump_bytes": max_bytes,
         "max_dump_mb": round(max_bytes / (1024 * 1024), 3),
         "api_requests_planned": planned_pages,
         "per_page": cfg.per_page,
         "openalex_request": public_params,
+        "sample_request": public_sample_params,
         "cache": {
             "hits_delta": after["hits"] - before["hits"],
             "misses_delta": after["misses"] - before["misses"],
@@ -538,6 +597,20 @@ def _get_json(url: str, params: dict[str, str]) -> dict[str, Any]:
 
 def cache_stats() -> dict[str, int]:
     return dict(_CACHE_STATS)
+
+
+def _mean(values: list[int]) -> int:
+    if not values:
+        return 0
+    return int(sum(values) / len(values))
+
+
+def _quantile(values: list[int], q: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    index = int(round((len(ordered) - 1) * max(0.0, min(1.0, q))))
+    return ordered[index]
 
 
 def _api_cache_path(url: str, params: dict[str, str]) -> Path:

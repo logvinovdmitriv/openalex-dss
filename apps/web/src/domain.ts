@@ -1,6 +1,6 @@
 export const METRICS = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "lrdi", "f5", "fm5", "iupv", "islv"] as const;
 export const FRACTION_MODES = ["strict_authors_count", "renorm_valid_authors", "integer"] as const;
-export const TABLES = ["authors_local_metrics", "authors_preview", "indices", "ratings", "works", "authorships", "author_work", "top1_sensitivity", "fraction_sensitivity"] as const;
+export const TABLES = ["authors_local_metrics", "authors_preview", "indices", "ratings", "works", "authorships", "work_topics", "author_work", "top1_sensitivity", "fraction_sensitivity"] as const;
 
 export type Metric = (typeof METRICS)[number];
 export type FractionMode = (typeof FRACTION_MODES)[number];
@@ -73,11 +73,13 @@ export type WorkflowStage = {
   ready: boolean;
 };
 
+const CURRENT_YEAR = new Date().getFullYear();
+
 export const DEFAULT_FILTERS: ActiveFilters = {
   subject_level: "",
   subject_id: "",
   subject_name: "",
-  filter_mode: "primary_topic",
+  filter_mode: "all",
   keyword_id: "",
   keyword_name: "",
   text_search_query: "",
@@ -97,9 +99,9 @@ export const DEFAULT_FILTERS: ActiveFilters = {
   doi: "",
   affiliation_mode: "historical",
   country_code: "",
-  from_publication_date: "2020-01-01",
-  to_publication_date: "2024-12-31",
-  work_type: "article",
+  from_publication_date: `${CURRENT_YEAR - 5}-01-01`,
+  to_publication_date: `${CURRENT_YEAR}-12-31`,
+  work_type: "",
 };
 
 const metricLabels: Record<string, string> = {
@@ -159,6 +161,7 @@ const tableLabels: Record<string, string> = {
   ratings: "Рейтинговые позиции",
   works: "Работы OpenAlex",
   authorships: "Авторства",
+  work_topics: "Темы работ",
   author_work: "Плоская связь автор-работа",
   top1_sensitivity: "Чувствительность top-1",
   fraction_sensitivity: "Чувствительность фракционирования",
@@ -171,6 +174,7 @@ const tableDescriptions: Record<string, string> = {
   ratings: "Ранги по метрикам и режимам учёта.",
   works: "Плоская таблица работ, полученных из OpenAlex.",
   authorships: "Авторства и организации из OpenAlex.",
+  work_topics: "Развернутый список OpenAlex topics для локального topics_any.",
   author_work: "Работа, автор, вклад и качество связи.",
   top1_sensitivity: "Проверка устойчивости лидера рейтинга.",
   fraction_sensitivity: "Сравнение режимов фракционирования.",
@@ -218,22 +222,6 @@ const columnLabels: Record<string, string> = {
   spearman_vs_base: "Spearman к базе",
   top20_retention: "Сохранение top-20",
 };
-
-export const LOAD_LIMIT_OPTIONS: SelectOption[] = [
-  { value: "100", label: "100 работ", description: "Быстрая проверка фильтров.", example: "для первого запуска" },
-  { value: "500", label: "500 работ", description: "Небольшой аналитический срез.", example: "для черновой оценки" },
-  { value: "1000", label: "1 000 работ", description: "Стандартный стартовый объём.", example: "рекомендуется" },
-  { value: "2500", label: "2 500 работ", description: "Более устойчивый рейтинг.", example: "для сравнения авторов" },
-  { value: "5000", label: "5 000 работ", description: "Рекомендуемый baseline из методологии.", example: "для финального цикла" },
-  { value: "10000", label: "10 000 работ", description: "Крупный срез через API.", example: "дольше загружается" },
-];
-
-export const DUMP_SIZE_OPTIONS: SelectOption[] = [
-  { value: "104857600", label: "100 МБ", description: "Безопасный smoke-дамп для проверки фильтра.", example: "первый запуск" },
-  { value: "524288000", label: "500 МБ", description: "Рекомендуемый MVP-лимит для ноутбука.", example: "стандартный срез" },
-  { value: "1073741824", label: "1 ГБ", description: "Расширенный локальный срез.", example: "если хватает места" },
-  { value: "2147483648", label: "2 ГБ", description: "Крупный API-срез; лучше запускать осознанно.", example: "долгая загрузка" },
-];
 
 export const METRIC_OPTIONS: SelectOption[] = METRICS.map((value) => ({
   value,

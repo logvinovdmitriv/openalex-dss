@@ -24,12 +24,21 @@ TABLE_FILES = {
     "author_profiles": DATA / "normalized" / "author_profiles_flat.csv",
     "works": DATA / "normalized" / "works_flat.csv",
     "authorships": DATA / "normalized" / "authorships_flat.csv",
+    "work_topics": DATA / "normalized" / "work_topics_flat.csv",
     "author_work": DATA / "marts" / "author_work_metrics.csv",
     "authors_local_metrics": DATA / "results" / "author_indices.csv",
     "indices": DATA / "results" / "author_indices.csv",
     "ratings": DATA / "results" / "rating_positions.csv",
     "top1_sensitivity": DATA / "results" / "theory_top1_sensitivity.csv",
     "fraction_sensitivity": DATA / "results" / "theory_fraction_mode_sensitivity.csv",
+}
+
+PARQUET_TABLE_FILES = {
+    "authors_preview": DATA / "parquet" / "author_profiles_flat.parquet",
+    "author_profiles": DATA / "parquet" / "author_profiles_flat.parquet",
+    "works": DATA / "parquet" / "works_flat.parquet",
+    "authorships": DATA / "parquet" / "authorships_flat.parquet",
+    "work_topics": DATA / "parquet" / "work_topics_flat.parquet",
 }
 
 JSON_FILES = {

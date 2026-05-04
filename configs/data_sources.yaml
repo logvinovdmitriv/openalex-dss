@@ -1,0 +1,58 @@
+version: "1.0"
+sources:
+  - id: openalex_api
+    label: "OpenAlex API"
+    role: "Поиск сущностей, оценка среза, компактная загрузка Works, точечное обогащение ORCID/ROR/DOI."
+    status: "implemented"
+    default: true
+    supports:
+      - resolve_ids
+      - search
+      - group_by_estimate
+      - sample_estimate
+      - cursor_fetch
+      - select_fields
+  - id: openalex_cli
+    label: "OpenAlex CLI"
+    role: "Официальная CLI-загрузка фильтрованных Works metadata с checkpointing, parallel downloads и adaptive rate limiting."
+    status: "optional"
+    install: "pip install openalex-official"
+    supports:
+      - filtered_work_metadata
+      - doi_resolution
+      - checkpointing
+      - adaptive_rate_limiting
+      - parallel_downloads
+  - id: openalex_changefiles
+    label: "OpenAlex changefiles"
+    role: "Инкрементальные обновления локального хранилища за последние доступные даты."
+    status: "planned"
+    supports:
+      - jsonl_gz
+      - parquet
+      - upsert_by_id
+  - id: openalex_snapshot_jsonl
+    label: "OpenAlex public snapshot JSONL"
+    role: "Полная квартальная копия OpenAlex через S3/AWS CLI без авторизации; не используется как основной режим ноутбука."
+    status: "prepared"
+    supports:
+      - aws_s3_sync
+      - manifest
+      - jsonl_gz
+  - id: openalex_snapshot_parquet
+    label: "OpenAlex snapshot Parquet"
+    role: "Parquet snapshot для серверного/enterprise режима; публичный квартальный Parquet ожидается в документации с июня 2026."
+    status: "prepared"
+    supports:
+      - parquet
+      - duckdb
+      - s3
+  - id: local_filesystem
+    label: "Локальная папка данных"
+    role: "Raw JSONL.GZ, Parquet-витрины, паспорта, отчеты и API-кэш вне репозитория."
+    status: "implemented"
+    supports:
+      - raw_jsonl_gz
+      - parquet
+      - passports
+      - reports

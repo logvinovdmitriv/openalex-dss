@@ -8,64 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from app.core.paths import DATA
-from app.services import author_slice, jobs, metadata_store, query_planner, warehouse
+from app.services import author_slice, jobs, metadata_store, query_planner, registry, warehouse
 
 
 SLICES_DIR = DATA / "slices"
 MATERIALIZATIONS_DIR = DATA / "materialization_plans"
-
-MATERIALIZATION_PROFILES: dict[str, dict[str, Any]] = {
-    "minimal_analytics": {
-        "profile_id": "minimal_analytics",
-        "label": "Минимальный для рейтингов",
-        "description": "Работы, авторства, темы, источники и цитирования для локальных индексов.",
-        "format": "jsonl + parquet",
-        "selected_fields": [
-            "id",
-            "doi",
-            "display_name",
-            "publication_year",
-            "publication_date",
-            "type",
-            "cited_by_count",
-            "authorships",
-            "primary_topic",
-            "topics",
-            "primary_location",
-            "is_retracted",
-            "is_paratext",
-            "is_xpac",
-            "is_authors_truncated",
-        ],
-    },
-    "evidence_package": {
-        "profile_id": "evidence_package",
-        "label": "Расширенный для отчета",
-        "description": "Минимальный профиль плюс дополнительные OpenAlex IDs и даты обновления.",
-        "format": "jsonl + parquet + report assets",
-        "selected_fields": [
-            "id",
-            "doi",
-            "display_name",
-            "publication_year",
-            "publication_date",
-            "type",
-            "cited_by_count",
-            "authorships",
-            "primary_topic",
-            "topics",
-            "primary_location",
-            "ids",
-            "created_date",
-            "updated_date",
-            "is_retracted",
-            "is_paratext",
-            "is_xpac",
-            "is_authors_truncated",
-        ],
-    },
-}
-
 
 def list_slices(limit: int = 50) -> dict[str, Any]:
     _ensure_dirs()
@@ -106,11 +53,8 @@ def create_slice(payload: dict[str, Any]) -> dict[str, Any]:
                 "exclude_paratext": cfg.exclude_paratext,
                 "include_xpac": cfg.include_xpac,
             },
-            "limits": {
-                "max_works": cfg.max_works,
-                "max_dump_bytes": int(payload.get("max_dump_bytes") or 500 * 1024 * 1024),
-            },
         },
+        "download_policy_default": _download_policy(payload),
         "technical_payload": _public_payload(technical_payload),
         "lifecycle": _lifecycle("draft"),
         "latest_estimate": None,
@@ -145,7 +89,11 @@ def resolve_slice(slice_id: str) -> dict[str, Any]:
 
 def estimate_slice(slice_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     doc = get_slice(slice_id)
-    merged_payload = {**doc["technical_payload"], **_technical_payload(payload or {})}
+    merged_payload = {
+        **doc["technical_payload"],
+        "download_policy": _download_policy(payload or {}, fallback=doc.get("download_policy_default")),
+        **_technical_payload(payload or {}),
+    }
     plan = query_planner.plan_slice(merged_payload)
     estimate = {
         "slice_id": slice_id,
@@ -154,7 +102,8 @@ def estimate_slice(slice_id: str, payload: dict[str, Any] | None = None) -> dict
         "estimate": plan["estimate"],
         "openalex_filter": plan["openalex_filter"],
         "filter_classes": plan["filter_classes"],
-        "limits": plan["limits"],
+        "download_policy": plan["download_policy"],
+        "execution_limits": plan["limits"],
     }
     doc["technical_payload"] = _public_payload(merged_payload)
     doc["state"] = _advance_state(str(doc.get("state") or "draft"), "estimated")
@@ -168,27 +117,33 @@ def estimate_slice(slice_id: str, payload: dict[str, Any] | None = None) -> dict
 def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     doc = get_slice(slice_id)
     payload = payload or {}
-    profile_id = str(payload.get("profile_id") or payload.get("materialization_profile") or "minimal_analytics")
-    profile = MATERIALIZATION_PROFILES.get(profile_id) or MATERIALIZATION_PROFILES["minimal_analytics"]
-    max_dump_bytes = int(payload.get("max_dump_bytes") or doc["slice_definition"]["limits"].get("max_dump_bytes") or 500 * 1024 * 1024)
+    profile_id = str(payload.get("storage_profile_id") or payload.get("profile_id") or payload.get("materialization_profile") or "minimal_analytics")
+    profiles = _storage_profiles()
+    profile = profiles.get(profile_id) or next(iter(profiles.values()))
+    source_strategy = str(payload.get("source_strategy") or payload.get("data_source_id") or "openalex_api")
+    download_policy = _download_policy(payload, fallback=doc.get("download_policy_default"))
     plan_id = _safe_id(f"mat_{slice_id}_{profile['profile_id']}_{uuid.uuid4().hex[:8]}")
-    estimate = doc.get("latest_estimate") or estimate_slice(slice_id)
+    estimate = doc.get("latest_estimate") or estimate_slice(slice_id, {"download_policy": download_policy})
     materialization = {
         "materialization_id": plan_id,
         "slice_id": slice_id,
         "state": "planned",
         "created_at_utc": _now(),
+        "storage_profile": profile,
         "profile": profile,
-        "source_strategy": "api_then_cache",
-        "max_dump_bytes": max_dump_bytes,
+        "source_strategy": source_strategy,
+        "download_policy": download_policy,
+        "max_dump_bytes": int(download_policy["max_raw_bytes"]),
         "estimated": estimate,
         "technical_payload": {
             **doc["technical_payload"],
-            "max_dump_bytes": max_dump_bytes,
-            "max_works": int((doc["technical_payload"].get("max_works") or 1000)),
+            "source_strategy": source_strategy,
+            "download_policy": download_policy,
+            "max_records_to_download": int(download_policy["max_records_to_download"]),
+            "max_raw_bytes": int(download_policy["max_raw_bytes"]),
         },
         "outputs": [
-            "raw/openalex_slices/{slice_id}/works.jsonl",
+            "raw/openalex_slices/{slice_id}/works.jsonl.gz",
             "normalized/works_flat.csv",
             "normalized/authorships_flat.csv",
             "results/author_indices.csv",
@@ -235,7 +190,7 @@ def list_materialization_plans(limit: int = 50) -> dict[str, Any]:
     _ensure_dirs()
     docs = [_read_json(path) for path in sorted(MATERIALIZATIONS_DIR.glob("*.json"), reverse=True)]
     docs = [doc for doc in docs if doc]
-    return {"materializations": docs[: max(1, min(limit, 250))], "profiles": list(MATERIALIZATION_PROFILES.values())}
+    return {"materializations": docs[: max(1, min(limit, 250))], "profiles": list(_storage_profiles().values())}
 
 
 def list_dumps(limit: int = 50) -> dict[str, Any]:
@@ -261,7 +216,7 @@ SLICE_STATES = [
     {"id": "draft", "label": "Draft", "description": "Логический срез задан пользователем."},
     {"id": "resolved", "label": "Resolved", "description": "Срез сопоставлен с OpenAlex-проекцией."},
     {"id": "estimated", "label": "Estimated", "description": "Оценены объем и API-бюджет."},
-    {"id": "planned", "label": "Planned", "description": "Выбран профиль материализации."},
+    {"id": "planned", "label": "Planned", "description": "Выбран режим хранения и технический бюджет загрузки."},
     {"id": "materializing", "label": "Materializing", "description": "Идет загрузка или сборка локального набора."},
     {"id": "ready", "label": "Ready", "description": "Мини-дамп и локальные таблицы готовы."},
     {"id": "analyzed", "label": "Analyzed", "description": "Индексы и рейтинги рассчитаны."},
@@ -271,11 +226,47 @@ SLICE_STATES = [
 
 def _technical_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw = payload.get("technical_payload") if isinstance(payload.get("technical_payload"), dict) else payload
-    return {key: value for key, value in raw.items() if key not in {"api_key"}}
+    return {key: value for key, value in raw.items() if key not in {"api_key", "download_policy", "storage_profile_id", "profile_id", "materialization_profile"}}
 
 
 def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key != "api_key"}
+
+
+def _download_policy(payload: dict[str, Any], fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw = payload.get("download_policy") if isinstance(payload.get("download_policy"), dict) else {}
+    default = fallback or {
+        "max_records_to_download": 50_000,
+        "max_raw_bytes": 500 * 1024 * 1024,
+        "complete_slice_required": True,
+        "allow_incomplete_preview": False,
+    }
+
+
+def _storage_profiles() -> dict[str, dict[str, Any]]:
+    profiles = registry.registry().get("storage_profiles") or []
+    out: dict[str, dict[str, Any]] = {}
+    for item in profiles:
+        profile_id = str(item.get("profile_id") or item.get("value") or "").strip()
+        if profile_id:
+            out[profile_id] = {**item, "profile_id": profile_id}
+    if not out:
+        out["minimal_analytics"] = {
+            "profile_id": "minimal_analytics",
+            "label": "Минимальный состав данных",
+            "description": "Базовый профиль хранения из конфигурации не найден.",
+            "format": "jsonl.gz + parquet",
+            "selected_fields": [],
+        }
+    return out
+    max_records = raw.get("max_records_to_download", payload.get("max_records_to_download", payload.get("max_works", default.get("max_records_to_download", 50_000))))
+    max_raw_bytes = raw.get("max_raw_bytes", payload.get("max_raw_bytes", payload.get("max_dump_bytes", default.get("max_raw_bytes", 500 * 1024 * 1024))))
+    return {
+        "max_records_to_download": int(max_records or default.get("max_records_to_download", 50_000)),
+        "max_raw_bytes": int(max_raw_bytes or default.get("max_raw_bytes", 500 * 1024 * 1024)),
+        "complete_slice_required": bool(raw.get("complete_slice_required", payload.get("complete_slice_required", default.get("complete_slice_required", True)))),
+        "allow_incomplete_preview": bool(raw.get("allow_incomplete_preview", payload.get("allow_incomplete_preview", default.get("allow_incomplete_preview", False)))),
+    }
 
 
 def _slice_title(cfg: Any) -> str:

@@ -10,7 +10,7 @@ from typing import Any
 
 import duckdb
 
-from app.core.paths import JSON_FILES, SRC, TABLE_FILES, WAREHOUSE
+from app.core.paths import JSON_FILES, PARQUET_TABLE_FILES, SRC, TABLE_FILES, WAREHOUSE
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -56,24 +56,38 @@ def connect() -> duckdb.DuckDBPyConnection:
 
 def register_views(conn: duckdb.DuckDBPyConnection) -> None:
     for name, path in TABLE_FILES.items():
-        if path.exists():
-            csv_path = str(path).replace("'", "''")
+        table_path = _preferred_table_path(name, path)
+        if table_path.exists():
+            escaped_path = str(table_path).replace("'", "''")
+            reader = "read_parquet" if table_path.suffix.lower() == ".parquet" else "read_csv_auto"
+            args = "" if reader == "read_parquet" else ", header=true, ignore_errors=true"
             conn.execute(
                 f"""
                 CREATE OR REPLACE VIEW {name} AS
-                SELECT * FROM read_csv_auto('{csv_path}', header=true, ignore_errors=true)
+                SELECT * FROM {reader}('{escaped_path}'{args})
                 """
             )
 
 
 def list_tables() -> dict[str, Any]:
-    return {name: {"path": str(path), "exists": path.exists(), "rows": count_rows(name)} for name, path in TABLE_FILES.items()}
+    return {
+        name: {
+            "path": str(_preferred_table_path(name, path)),
+            "csv_path": str(path),
+            "parquet_path": str(PARQUET_TABLE_FILES.get(name, "")),
+            "exists": _preferred_table_path(name, path).exists(),
+            "rows": count_rows(name),
+        }
+        for name, path in TABLE_FILES.items()
+    }
 
 
 def count_rows(table: str) -> int:
-    if table not in TABLE_FILES or not TABLE_FILES[table].exists():
+    if table not in TABLE_FILES:
         return 0
-    path = TABLE_FILES[table]
+    path = _preferred_table_path(table, TABLE_FILES[table])
+    if not path.exists():
+        return 0
     if path.suffix.lower() == ".csv":
         return _count_csv_rows(path)
     with connect() as conn:
@@ -88,7 +102,7 @@ def _count_csv_rows(path: Path) -> int:
 
 
 def table_schema(table: str) -> list[str]:
-    if table not in TABLE_FILES or not TABLE_FILES[table].exists():
+    if table not in TABLE_FILES or not _preferred_table_path(table, TABLE_FILES[table]).exists():
         return []
     with connect() as conn:
         return [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
@@ -302,7 +316,18 @@ def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None 
     subject_id = filters.get("subject_id")
     subject_level = filters.get("subject_level")
     if subject_id:
-        if subject_level == "field":
+        filter_mode = filters.get("filter_mode")
+        use_topics_any = filter_mode == "topics_any" and TABLE_FILES.get("work_topics") and TABLE_FILES["work_topics"].exists()
+        if use_topics_any and subject_level == "field":
+            where.append("EXISTS (SELECT 1 FROM work_topics wt WHERE wt.work_id = w.work_id AND wt.field_id ILIKE ?)")
+            args.append(f"%/{subject_id}")
+        elif use_topics_any and subject_level == "topic":
+            where.append("EXISTS (SELECT 1 FROM work_topics wt WHERE wt.work_id = w.work_id AND (wt.topic_id ILIKE ? OR wt.topic_display_name ILIKE ?))")
+            args.extend([f"%/{subject_id}", f"%{subject_id}%"])
+        elif use_topics_any:
+            where.append("EXISTS (SELECT 1 FROM work_topics wt WHERE wt.work_id = w.work_id AND wt.subfield_id ILIKE ?)")
+            args.append(f"%/{subject_id}")
+        elif subject_level == "field":
             where.append("w.primary_field_id ILIKE ?")
             args.append(f"%/{subject_id}")
         elif subject_level == "topic":
@@ -593,6 +618,7 @@ def _clean_filters(filters: FilterSet) -> FilterSet:
         "to_publication_date",
         "work_type",
         "country_code",
+        "filter_mode",
         "subject_level",
         "subject_id",
         "author_id",
@@ -740,3 +766,10 @@ def _first_nonempty(values: Any) -> str | None:
         if value:
             return str(value)
     return None
+
+
+def _preferred_table_path(name: str, csv_path: Path) -> Path:
+    parquet_path = PARQUET_TABLE_FILES.get(name)
+    if parquet_path and parquet_path.exists():
+        return parquet_path
+    return csv_path

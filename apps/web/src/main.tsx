@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient
 import {
   BarChart3,
   BookOpenCheck,
-  Boxes,
   CheckCircle2,
   Database,
   Download,
@@ -17,18 +16,13 @@ import {
   Settings2,
   Sigma,
   Sparkles,
-  Table2,
   UploadCloud,
   X,
 } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from "recharts";
 import { API_BASE, getJson, postJson, type TableResponse } from "./api";
 import {
   DEFAULT_FILTERS,
-  DUMP_SIZE_OPTIONS,
-  FRACTION_MODES,
-  LOAD_LIMIT_OPTIONS,
-  PRIMARY_METRIC_OPTIONS,
   countryLabel,
   fmt,
   resolveCountryInput,
@@ -40,10 +34,9 @@ import {
 } from "./domain";
 import { DataGrid, DetailDrawer, EmptyState } from "./components/ui";
 import {
-  MATERIALIZATION_PROFILES,
-  TOP_N_OPTIONS,
   analyticsUrl,
-  buildPayload,
+  buildDownloadPolicy,
+  buildSlicePayload,
   bytesToMb,
   humanSliceTitle,
   mutationError,
@@ -70,11 +63,11 @@ const queryClient = new QueryClient({
 });
 
 const NAV: Array<{ id: View; label: string; icon: ReactNode }> = [
-  { id: "slices", label: "Срезы", icon: <Layers3 size={17} /> },
-  { id: "estimate", label: "Оценка и загрузка", icon: <Gauge size={17} /> },
+  { id: "slices", label: "Срез и загрузка", icon: <Layers3 size={17} /> },
   { id: "data", label: "Локальные данные", icon: <Database size={17} /> },
-  { id: "enrichment", label: "Обогащение", icon: <Sparkles size={17} /> },
+  { id: "enrichment", label: "Точечное обогащение", icon: <Sparkles size={17} /> },
   { id: "rankings", label: "Индексы", icon: <Sigma size={17} /> },
+  { id: "cohorts", label: "Когорты", icon: <GitCompareArrows size={17} /> },
   { id: "statistics", label: "Статистика", icon: <BarChart3 size={17} /> },
   { id: "reports", label: "Отчеты", icon: <Download size={17} /> },
   { id: "passports", label: "Паспорта", icon: <FileJson size={17} /> },
@@ -92,12 +85,14 @@ function Workbench() {
   const qc = useQueryClient();
   const [view, setView] = useState<View>(() => viewFromHash(window.location.hash));
   const [filters, setFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
-  const [metric, setMetric] = useState("islv");
+  const [metric, setMetric] = useState("h");
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
-  const [maxWorks, setMaxWorks] = useState(1000);
-  const [maxDumpBytes, setMaxDumpBytes] = useState(524288000);
-  const [topN, setTopN] = useState(100);
-  const [profileId, setProfileId] = useState("minimal_analytics");
+  const [technicalRecordCap, setTechnicalRecordCap] = useState(0);
+  const [maxRawBytes, setMaxRawBytes] = useState(0);
+  const [allowIncompletePreview, setAllowIncompletePreview] = useState(false);
+  const [topN, setTopN] = useState(0);
+  const [storageProfileId, setStorageProfileId] = useState("");
+  const [sourceStrategy, setSourceStrategy] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [sliceDoc, setSliceDoc] = useState<any>(null);
   const [estimate, setEstimate] = useState<any>(null);
@@ -107,6 +102,10 @@ function Workbench() {
   const [selected, setSelected] = useState<{ kind: "author" | "work"; id: string } | null>(null);
   const [tableName, setTableName] = useState("authors_local_metrics");
   const [tableQ, setTableQ] = useState("");
+  const [selectedCohortId, setSelectedCohortId] = useState("");
+  const [cohortName, setCohortName] = useState("Top авторов текущего среза");
+  const [minPublications, setMinPublications] = useState(0);
+  const [minH, setMinH] = useState(0);
   const navRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
@@ -144,11 +143,17 @@ function Workbench() {
   const state = useQuery({ queryKey: ["state"], queryFn: () => getJson<any>("/state") });
   const workbench = useQuery({ queryKey: ["workbench"], queryFn: () => getJson<any>("/workbench") });
   const dumps = useQuery({ queryKey: ["dumps"], queryFn: () => getJson<any>("/dumps?limit=50") });
+  const cohorts = useQuery({ queryKey: ["cohorts"], queryFn: () => getJson<any>("/cohorts?limit=50") });
   const countries = useQuery({ queryKey: ["countries"], queryFn: () => getJson<any>("/openalex/countries?limit=50") });
   const workTypes = useQuery({ queryKey: ["work-types"], queryFn: () => getJson<any>("/openalex/work-types?limit=50") });
+  const cohortStats = useQuery({
+    queryKey: ["cohort-stats", selectedCohortId],
+    queryFn: () => postJson<any>(`/cohorts/${encodeURIComponent(selectedCohortId)}/statistics`, {}),
+    enabled: Boolean(selectedCohortId),
+  });
   const table = useQuery({
     queryKey: ["table", tableName, tableQ, metric, fractionMode, topN],
-    queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&limit=${topN}`),
+    queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&limit=${Math.max(1, topN || 1)}`),
   });
   const analytics = useQuery({
     queryKey: ["analytics", metric, fractionMode],
@@ -170,11 +175,56 @@ function Workbench() {
     enabled: Boolean(selected),
   });
 
-  const payload = useMemo(() => buildPayload(filters, fractionMode, maxWorks, maxDumpBytes, apiKey), [filters, fractionMode, maxWorks, maxDumpBytes, apiKey]);
   const domainPresets = (registry.data?.domain_presets ?? []) as ResearchAreaPreset[];
   const organizationPresets = (registry.data?.organization_presets ?? []) as OrganizationPreset[];
   const countryOptions = catalogOptions(countries.data?.results ?? []);
   const workTypeOptions = catalogOptions(workTypes.data?.results ?? []);
+  const storageProfileOptions = configuredOptions(catalog.data?.storage_profiles ?? []);
+  const uiOptions = catalog.data?.ui_options ?? {};
+  const recordBudgetOptions = configuredOptions(uiOptions.download_record_budgets ?? []);
+  const rawBudgetOptions = configuredOptions(uiOptions.raw_size_budgets ?? []);
+  const topNOptions = configuredOptions(uiOptions.top_n ?? []);
+  const primaryMetricOptions = configuredOptions(catalog.data?.metrics ?? []);
+  const fractionModeOptions = configuredOptions(catalog.data?.fraction_modes ?? []);
+  const tableOptions = Object.keys(state.data?.tables ?? {}).map((value) => ({ value, label: value }));
+  const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
+    .filter((item) => ["openalex_api", "openalex_cli"].includes(item.value));
+  const defaultStorageProfileId = String(defaultOption(storageProfileOptions)?.value ?? "");
+  const defaultSourceStrategy = String(defaultOption(sourceStrategyOptions)?.value ?? "");
+  const defaultRecordBudget = Number(defaultOption(recordBudgetOptions)?.value ?? 0);
+  const defaultRawBudget = Number(defaultOption(rawBudgetOptions)?.value ?? 0);
+  const defaultTopN = Number(defaultOption(topNOptions)?.value ?? 0);
+  const activeStorageProfileId = storageProfileId || defaultStorageProfileId;
+  const activeSourceStrategy = sourceStrategy || defaultSourceStrategy;
+  const activeRecordBudget = technicalRecordCap || defaultRecordBudget;
+  const activeRawBudget = maxRawBytes || defaultRawBudget;
+  const activeTopN = topN || defaultTopN;
+  const payload = useMemo(() => buildSlicePayload(filters, fractionMode, apiKey, fractionModeOptions.map((item) => item.value)), [filters, fractionMode, apiKey, fractionModeOptions]);
+  const downloadConfigReady = Boolean(activeStorageProfileId && activeRecordBudget && activeRawBudget);
+  const downloadPolicy = useMemo(
+    () => buildDownloadPolicy(Math.max(1, activeRecordBudget || 1), Math.max(1024, activeRawBudget || 1024), allowIncompletePreview),
+    [activeRecordBudget, activeRawBudget, allowIncompletePreview],
+  );
+
+  useEffect(() => {
+    if (!storageProfileId && defaultStorageProfileId) setStorageProfileId(defaultStorageProfileId);
+  }, [storageProfileId, defaultStorageProfileId]);
+
+  useEffect(() => {
+    if (!sourceStrategy && defaultSourceStrategy) setSourceStrategy(defaultSourceStrategy);
+  }, [sourceStrategy, defaultSourceStrategy]);
+
+  useEffect(() => {
+    if (!technicalRecordCap && defaultRecordBudget) setTechnicalRecordCap(defaultRecordBudget);
+  }, [technicalRecordCap, defaultRecordBudget]);
+
+  useEffect(() => {
+    if (!maxRawBytes && defaultRawBudget) setMaxRawBytes(defaultRawBudget);
+  }, [maxRawBytes, defaultRawBudget]);
+
+  useEffect(() => {
+    if (!topN && defaultTopN) setTopN(defaultTopN);
+  }, [topN, defaultTopN]);
 
   const createSlice = useMutation({
     mutationFn: (body: any) => postJson<any>("/slices", body),
@@ -187,21 +237,21 @@ function Workbench() {
     mutationFn: async () => {
       const doc = await postJson<any>("/slices", { ...payload, title: humanSliceTitle(filters) });
       setSliceDoc(doc);
-      const result = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { max_dump_bytes: maxDumpBytes });
+      const result = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { download_policy: downloadPolicy });
       return { doc, result };
     },
     onSuccess: ({ doc, result }) => {
       setSliceDoc({ ...doc, latest_estimate: result, state: "estimated" });
       setEstimate(result);
       qc.invalidateQueries({ queryKey: ["workbench"] });
-      navigate("estimate");
+      navigate("slices");
     },
   });
   const createMaterialization = useMutation({
     mutationFn: async () => {
       const doc = sliceDoc ?? (await postJson<any>("/slices", { ...payload, title: humanSliceTitle(filters) }));
       setSliceDoc(doc);
-      return postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/materialization-plans`, { profile_id: profileId, max_dump_bytes: maxDumpBytes });
+      return postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy });
     },
     onSuccess: (plan) => {
       setMaterialization(plan);
@@ -211,6 +261,29 @@ function Workbench() {
   const runMaterialization = useMutation({
     mutationFn: async () => {
       const plan = materialization ?? (await createMaterialization.mutateAsync());
+      return postJson<any>(`/materializations/${encodeURIComponent(plan.materialization_id)}/run`, apiKey.trim() ? { api_key: apiKey.trim() } : {});
+    },
+    onSuccess: (result) => {
+      setApiKey("");
+      setRunId(result?.run?.run_id ?? "");
+      qc.invalidateQueries({ queryKey: ["workbench"] });
+      navigate("data");
+    },
+  });
+  const downloadSlice = useMutation({
+    mutationFn: async () => {
+      const doc = await postJson<any>("/slices", { ...payload, title: humanSliceTitle(filters) });
+      setSliceDoc(doc);
+      const estimateResult = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { download_policy: downloadPolicy });
+      setEstimate(estimateResult);
+      setSliceDoc({ ...doc, latest_estimate: estimateResult, state: "estimated" });
+      const decision = estimateResult?.decision ?? {};
+      if (decision.can_execute === false) {
+        const reason = [...(decision.reasons ?? []), ...(decision.warnings ?? [])].filter(Boolean).join(" ");
+        throw new Error(reason || "Срез превышает технический бюджет загрузки. Уточните фильтры или настройте скачивание.");
+      }
+      const plan = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy });
+      setMaterialization(plan);
       return postJson<any>(`/materializations/${encodeURIComponent(plan.materialization_id)}/run`, apiKey.trim() ? { api_key: apiKey.trim() } : {});
     },
     onSuccess: (result) => {
@@ -235,9 +308,37 @@ function Workbench() {
     },
   });
   const buildReport = useMutation({
-    mutationFn: () => postJson<any>(`/reports/build?metric=${encodeURIComponent(metric)}&fraction_mode=${encodeURIComponent(fractionMode)}&limit=100`, {}),
+    mutationFn: () => postJson<any>(`/reports/build?metric=${encodeURIComponent(metric)}&fraction_mode=${encodeURIComponent(fractionMode)}&limit=${Math.max(1, activeTopN || 1)}`, {}),
     onSuccess: () => qc.invalidateQueries(),
   });
+  const createCohort = useMutation({
+    mutationFn: () => postJson<any>("/cohorts", {
+      slice_id: sliceDoc?.slice_id ?? "current",
+      name: cohortName,
+      source: "top_n",
+      metric,
+      fraction_mode: fractionMode,
+      top_n: activeTopN,
+      min_publications: minPublications || undefined,
+      min_h: minH || undefined,
+      country_code: filters.country_code || undefined,
+      institution_id: filters.institution_id || undefined,
+      subject_level: filters.subject_level || undefined,
+      subject_id: filters.subject_id || undefined,
+      filter_mode: filters.filter_mode || undefined,
+    }),
+    onSuccess: (cohort) => {
+      setSelectedCohortId(cohort.cohort_id ?? "");
+      qc.invalidateQueries({ queryKey: ["cohorts"] });
+      qc.invalidateQueries({ queryKey: ["cohort-stats"] });
+      navigate("cohorts");
+    },
+  });
+
+  useEffect(() => {
+    const first = cohorts.data?.cohorts?.[0]?.cohort_id;
+    if (!selectedCohortId && first) setSelectedCohortId(first);
+  }, [cohorts.data, selectedCohortId]);
 
   const running = run.data?.status === "queued" || run.data?.status === "running";
   const tables = state.data?.tables ?? {};
@@ -249,8 +350,10 @@ function Workbench() {
     mutationError(estimateSlice.error),
     mutationError(createMaterialization.error),
     mutationError(runMaterialization.error),
+    mutationError(downloadSlice.error),
     mutationError(recalculate.error),
     mutationError(buildAuthorPreview.error),
+    mutationError(createCohort.error),
   ].filter(Boolean);
 
   return (
@@ -288,6 +391,7 @@ function Workbench() {
           </div>
           <StatusRail state={state.data} run={run.data} running={running} />
         </header>
+        <WorkflowStepper view={view} estimate={estimate ?? sliceDoc?.latest_estimate} materialization={materialization ?? sliceDoc?.latest_materialization_plan} run={run.data} hasIndices={Boolean(tables?.indices?.rows)} hasCohort={Boolean(selectedCohortId)} />
 
         {errors.length > 0 && <div className="notice error">{errors[0]}</div>}
 
@@ -302,30 +406,31 @@ function Workbench() {
             onOpenResolver={() => setResolverOpen(true)}
             onSave={() => createSlice.mutate({ ...payload, title: humanSliceTitle(filters) })}
             onEstimate={() => estimateSlice.mutate()}
-            saving={createSlice.isPending}
-            estimating={estimateSlice.isPending}
-            sliceDoc={sliceDoc}
-          />
-        )}
-
-        {view === "estimate" && (
-          <EstimatePage
-            filters={filters}
             estimate={estimate ?? sliceDoc?.latest_estimate}
             materialization={materialization ?? sliceDoc?.latest_materialization_plan}
-            profileId={profileId}
-            setProfileId={setProfileId}
-            maxWorks={maxWorks}
-            setMaxWorks={setMaxWorks}
-            maxDumpBytes={maxDumpBytes}
-            setMaxDumpBytes={setMaxDumpBytes}
-            onEstimate={() => estimateSlice.mutate()}
-            onPlan={() => createMaterialization.mutate()}
-            onRun={() => runMaterialization.mutate()}
+            storageProfileId={activeStorageProfileId}
+            setStorageProfileId={setStorageProfileId}
+            storageProfileOptions={storageProfileOptions}
+            sourceStrategy={activeSourceStrategy}
+            setSourceStrategy={setSourceStrategy}
+            sourceStrategyOptions={sourceStrategyOptions}
+            technicalRecordCap={activeRecordBudget}
+            setTechnicalRecordCap={setTechnicalRecordCap}
+            recordBudgetOptions={recordBudgetOptions}
+            maxRawBytes={activeRawBudget}
+            setMaxRawBytes={setMaxRawBytes}
+            rawBudgetOptions={rawBudgetOptions}
+            allowIncompletePreview={allowIncompletePreview}
+            setAllowIncompletePreview={setAllowIncompletePreview}
+            apiKey={apiKey}
+            setApiKey={setApiKey}
+            onRun={() => downloadSlice.mutate()}
+            saving={createSlice.isPending}
             estimating={estimateSlice.isPending}
-            planning={createMaterialization.isPending}
-            materializing={runMaterialization.isPending || running}
+            materializing={downloadSlice.isPending || runMaterialization.isPending || running}
+            downloadConfigReady={downloadConfigReady}
             run={run.data}
+            sliceDoc={sliceDoc}
           />
         )}
 
@@ -354,14 +459,18 @@ function Workbench() {
           <RankingsPage
             metric={metric}
             setMetric={setMetric}
+            metricOptions={primaryMetricOptions}
             fractionMode={fractionMode}
             setFractionMode={setFractionMode}
+            fractionModeOptions={fractionModeOptions}
             tableName={tableName}
             setTableName={setTableName}
+            tableOptions={tableOptions}
             tableQ={tableQ}
             setTableQ={setTableQ}
-            topN={topN}
+            topN={activeTopN}
             setTopN={setTopN}
+            topNOptions={topNOptions}
             table={table.data}
             chartRows={chartRows}
             onSelect={(next) => setSelected(next)}
@@ -370,12 +479,48 @@ function Workbench() {
           />
         )}
 
+        {view === "cohorts" && (
+          <CohortsPage
+            cohorts={cohorts.data}
+            selectedCohortId={selectedCohortId}
+            setSelectedCohortId={setSelectedCohortId}
+            cohortStats={cohortStats.data}
+            metric={metric}
+            setMetric={setMetric}
+            metricOptions={primaryMetricOptions}
+            fractionMode={fractionMode}
+            setFractionMode={setFractionMode}
+            fractionModeOptions={fractionModeOptions}
+            topN={activeTopN}
+            setTopN={setTopN}
+            topNOptions={topNOptions}
+            cohortName={cohortName}
+            setCohortName={setCohortName}
+            minPublications={minPublications}
+            setMinPublications={setMinPublications}
+            minH={minH}
+            setMinH={setMinH}
+            onCreate={() => createCohort.mutate()}
+            creating={createCohort.isPending}
+            loadingStats={cohortStats.isFetching}
+          />
+        )}
+
         {view === "statistics" && (
-          <StatisticsPage analytics={analytics.data} table={table.data} metric={metric} chartRows={chartRows} topN={topN} />
+          <StatisticsPage
+            analytics={analytics.data}
+            table={table.data}
+            metric={metric}
+            chartRows={chartRows}
+            topN={activeTopN}
+            cohortStats={cohortStats.data}
+            selectedCohortId={selectedCohortId}
+            onOpenCohorts={() => navigate("cohorts")}
+          />
         )}
 
         {view === "reports" && (
-          <ReportsPage metric={metric} fractionMode={fractionMode} topN={topN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
+          <ReportsPage metric={metric} fractionMode={fractionMode} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
         )}
 
         {view === "passports" && (
@@ -406,8 +551,30 @@ function SlicesPage({
   onOpenResolver,
   onSave,
   onEstimate,
+  estimate,
+  materialization,
+  storageProfileId,
+  setStorageProfileId,
+  storageProfileOptions,
+  sourceStrategy,
+  setSourceStrategy,
+  sourceStrategyOptions,
+  technicalRecordCap,
+  setTechnicalRecordCap,
+  recordBudgetOptions,
+  maxRawBytes,
+  setMaxRawBytes,
+  rawBudgetOptions,
+  allowIncompletePreview,
+  setAllowIncompletePreview,
+  apiKey,
+  setApiKey,
+  onRun,
   saving,
   estimating,
+  materializing,
+  downloadConfigReady,
+  run,
   sliceDoc,
 }: {
   filters: ActiveFilters;
@@ -419,176 +586,139 @@ function SlicesPage({
   onOpenResolver: () => void;
   onSave: () => void;
   onEstimate: () => void;
+  estimate: any;
+  materialization: any;
+  storageProfileId: string;
+  setStorageProfileId: (value: string) => void;
+  storageProfileOptions: SelectOption[];
+  sourceStrategy: string;
+  setSourceStrategy: (value: string) => void;
+  sourceStrategyOptions: SelectOption[];
+  technicalRecordCap: number;
+  setTechnicalRecordCap: (value: number) => void;
+  recordBudgetOptions: SelectOption[];
+  maxRawBytes: number;
+  setMaxRawBytes: (value: number) => void;
+  rawBudgetOptions: SelectOption[];
+  allowIncompletePreview: boolean;
+  setAllowIncompletePreview: (value: boolean) => void;
+  apiKey: string;
+  setApiKey: (value: string) => void;
+  onRun: () => void;
   saving: boolean;
   estimating: boolean;
+  materializing: boolean;
+  downloadConfigReady: boolean;
+  run: any;
   sliceDoc: any;
 }) {
   const dateInvalid = Boolean(filters.from_publication_date && filters.to_publication_date && filters.from_publication_date > filters.to_publication_date);
-  const subjectMissing = !filters.subject_id && !filters.keyword_id && !filters.text_search_query;
-  const selectedDomain = domainPresets.find((item) => (
-    item.subject_level === filters.subject_level
-    && item.subject_id === filters.subject_id
-    && item.filter_mode === filters.filter_mode
-  ))?.value ?? "";
-  const selectedOrg = organizationPresets.find((item) => item.institution_id === filters.institution_id)?.value ?? (filters.institution_id ? "custom" : "all");
-  const visibleOrgPresets = organizationPresets.length ? organizationPresets : [{
-    value: "all",
-    label: "Любая организация",
-    description: "Без ограничения по организации.",
-    institution_id: "",
-    institution_name: "",
-  }];
-  const visibleWorkTypeOptions = ensureOption(
-    workTypeOptions.length ? workTypeOptions : [],
-    filters.work_type,
-    filters.work_type || "Тип не выбран",
-  );
-
-  return (
-    <div className="slice-layout">
-      <section className="panel">
-        <div className="panel-head">
-          <span className="step-badge">1. SliceDefinition</span>
-          <h2>Логическое описание среза</h2>
-          <p>Пользователь задает предметный смысл. OpenAlex-фильтр, дамп и Parquet появятся только после оценки и материализации.</p>
-        </div>
-        <div className="form-grid">
-          <Field label="Направление">
-            <select value={selectedDomain} onChange={(event) => {
-              const preset = domainPresets.find((item) => item.value === event.target.value);
-              if (!preset) return;
-              setFilters({
-                ...filters,
-                subject_level: preset.subject_level,
-                subject_id: preset.subject_id,
-                subject_name: preset.subject_name,
-                filter_mode: preset.filter_mode,
-              });
-            }}>
-              <option value="">Выберите направление</option>
-              {domainPresets.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Страна">
-            <CountryInput value={filters.country_code} options={countryOptions} onChange={(countryCode) => setFilters({ ...filters, country_code: countryCode })} />
-          </Field>
-          <Field label="Организация">
-            <select value={selectedOrg} onChange={(event) => {
-              const preset = visibleOrgPresets.find((item) => item.value === event.target.value);
-              if (!preset || preset.value === "custom") {
-                onOpenResolver();
-                return;
-              }
-              setFilters({
-                ...filters,
-                institution_id: preset.institution_id,
-                institution_name: preset.institution_name,
-                institution_ror: preset.ror ?? "",
-                country_code: preset.country_code || filters.country_code,
-              });
-            }}>
-              {visibleOrgPresets.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              <option value="custom">Найти другую организацию</option>
-            </select>
-          </Field>
-          <Field label="С даты">
-            <input type="date" value={filters.from_publication_date} onChange={(event) => setFilters({ ...filters, from_publication_date: event.target.value })} />
-          </Field>
-          <Field label="По дату">
-            <input type="date" value={filters.to_publication_date} onChange={(event) => setFilters({ ...filters, to_publication_date: event.target.value })} />
-          </Field>
-          <Field label="Типы публикаций">
-            <select value={filters.work_type} onChange={(event) => setFilters({ ...filters, work_type: event.target.value })}>
-              {visibleWorkTypeOptions.map((item: SelectOption) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-          </Field>
-        </div>
-        <div className="quality-row">
-          <CheckPill active label="Исключать отозванные" />
-          <CheckPill active label="Исключать служебные тексты" />
-          <CheckPill active label="XPAC выключен" />
-        </div>
-        {subjectMissing && <div className="notice"><b>Выберите направление</b><span>Используйте список пресетов или поиск OpenAlex в тонкой настройке. Без предметного среза загрузка не запускается.</span></div>}
-        {dateInvalid && <div className="notice error"><b>Проверьте период</b><span>Дата начала не должна быть позже даты окончания.</span></div>}
-        <div className="action-row">
-          <button onClick={onOpenResolver}><Settings2 size={16} /> Тонкая настройка</button>
-          <button onClick={onSave} disabled={saving || dateInvalid || subjectMissing}>{saving ? <Loader2 size={16} className="spin" /> : <BookOpenCheck size={16} />} Сохранить срез</button>
-          <button className="primary" onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} Оценить</button>
-        </div>
-      </section>
-
-      <aside className="panel context-panel">
-        <span className="step-badge">Текущий срез</span>
-        <h2>{humanSliceTitle(filters)}</h2>
-        <KeyValue label="Направление" value={filters.subject_name || "не выбрано"} />
-        <KeyValue label="Территория" value={filters.country_code ? countryDisplay(filters.country_code, countryOptions) : "Все страны"} />
-        <KeyValue label="Организация" value={filters.institution_name || "Любая организация"} />
-        <KeyValue label="Период" value={`${filters.from_publication_date} — ${filters.to_publication_date}`} />
-        <KeyValue label="Публикации" value={filters.work_type || "Все поддерживаемые типы"} />
-        <KeyValue label="Состояние" value={sliceDoc?.state ?? "draft"} />
-      </aside>
-    </div>
-  );
-}
-
-function EstimatePage({
-  filters,
-  estimate,
-  materialization,
-  profileId,
-  setProfileId,
-  maxWorks,
-  setMaxWorks,
-  maxDumpBytes,
-  setMaxDumpBytes,
-  onEstimate,
-  onPlan,
-  onRun,
-  estimating,
-  planning,
-  materializing,
-  run,
-}: {
-  filters: ActiveFilters;
-  estimate: any;
-  materialization: any;
-  profileId: string;
-  setProfileId: (value: string) => void;
-  maxWorks: number;
-  setMaxWorks: (value: number) => void;
-  maxDumpBytes: number;
-  setMaxDumpBytes: (value: number) => void;
-  onEstimate: () => void;
-  onPlan: () => void;
-  onRun: () => void;
-  estimating: boolean;
-  planning: boolean;
-  materializing: boolean;
-  run: any;
-}) {
+  const subjectMissing = false;
+  const selectedWorkTypes = splitValues(filters.work_type);
+  const visibleWorkTypeOptions = ensureWorkTypeOptions(workTypeOptions.length ? workTypeOptions : [], selectedWorkTypes);
   const decision = estimate?.decision ?? {};
   const rawEstimate = estimate?.estimate ?? {};
   const hasEstimate = Boolean(estimate);
   const canRun = hasEstimate && decision.can_execute !== false;
+
   return (
     <div className="stack">
+      <div className="slice-layout">
+        <section className="panel">
+          <div className="panel-head">
+            <span className="step-badge">1. SliceDefinition</span>
+            <h2>Логическое описание среза</h2>
+            <p>Пользователь задает предметный смысл. Оценка и скачивание настраиваются здесь же, без перехода на отдельный экран.</p>
+          </div>
+          <div className="form-grid">
+            <Field label="Направление">
+              <SubjectInput
+              value={filters.subject_name}
+              presets={domainPresets}
+                onSelect={(item) => setFilters({
+                  ...filters,
+                  subject_level: item.level,
+                  subject_id: item.id,
+                  subject_name: item.name,
+                  filter_mode: item.filterMode,
+                })}
+              onClear={() => setFilters({ ...filters, subject_level: "", subject_id: "", subject_name: "", filter_mode: "all" })}
+              />
+            </Field>
+            <Field label="Страна">
+              <CountryInput value={filters.country_code} options={countryOptions} onChange={(countryCode) => setFilters({ ...filters, country_code: countryCode })} />
+            </Field>
+            <Field label="Организация">
+              <OrganizationInput
+                value={filters.institution_name}
+                presets={organizationPresets}
+                onSelect={(item) => setFilters({
+                  ...filters,
+                  institution_id: item.id,
+                  institution_name: item.name,
+                  institution_ror: item.ror ?? "",
+                  country_code: item.countryCode || filters.country_code,
+                })}
+                onClear={() => setFilters({ ...filters, institution_id: "", institution_name: "", institution_ror: "" })}
+              />
+            </Field>
+            <Field label="С даты">
+              <input type="date" value={filters.from_publication_date} onChange={(event) => setFilters({ ...filters, from_publication_date: event.target.value })} />
+            </Field>
+            <Field label="По дату">
+              <input type="date" value={filters.to_publication_date} onChange={(event) => setFilters({ ...filters, to_publication_date: event.target.value })} />
+            </Field>
+            <Field label="Типы публикаций">
+              <WorkTypePicker
+                options={visibleWorkTypeOptions}
+                selected={selectedWorkTypes}
+                onChange={(selectedTypes) => setFilters({ ...filters, work_type: selectedTypes.join("|") })}
+              />
+            </Field>
+          </div>
+          <div className="quality-row">
+            <CheckPill active label="Исключать отозванные" />
+            <CheckPill active label="Исключать служебные тексты" />
+            <CheckPill active label="XPAC выключен" />
+          </div>
+          {!filters.subject_id && !filters.keyword_id && !filters.text_search_query && <div className="notice"><b>Все направления</b><span>Тематический фильтр не применяется. Перед скачиванием система оценит объем и при необходимости заблокирует слишком большой срез.</span></div>}
+          {dateInvalid && <div className="notice error"><b>Проверьте период</b><span>Дата начала не должна быть позже даты окончания.</span></div>}
+          <div className="action-row">
+            <button onClick={onOpenResolver}><Settings2 size={16} /> Тонкая настройка</button>
+            <button onClick={onSave} disabled={saving || dateInvalid || subjectMissing}>{saving ? <Loader2 size={16} className="spin" /> : <BookOpenCheck size={16} />} Сохранить срез</button>
+            <button className="primary" onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} Оценить объем</button>
+          </div>
+        </section>
+
+        <aside className="panel context-panel">
+          <span className="step-badge">Текущий срез</span>
+          <h2>{humanSliceTitle(filters)}</h2>
+          <KeyValue label="Направление" value={filters.subject_name || "не выбрано"} />
+          <KeyValue label="Территория" value={filters.country_code ? countryDisplay(filters.country_code, countryOptions) : "Все страны"} />
+          <KeyValue label="Организация" value={filters.institution_name || "Любая организация"} />
+          <KeyValue label="Период" value={`${filters.from_publication_date} — ${filters.to_publication_date}`} />
+          <KeyValue label="Публикации" value={filters.work_type || "Все поддерживаемые типы"} />
+          <KeyValue label="Состояние" value={sliceDoc?.state ?? "draft"} />
+        </aside>
+      </div>
+
       <section className="panel">
         <div className="panel-head split">
           <div>
-            <span className="step-badge">2. SliceEstimate</span>
-            <h2>Оценка до скачивания</h2>
-            <p>Сначала легкий запрос OpenAlex получает `meta.count`, прогнозирует размер и проверяет лимиты.</p>
+            <span className="step-badge">2. Оценка и скачивание</span>
+            <h2>Настройка локального пакета</h2>
+            <p>Технические ограничения не являются фильтрами исследования. Они только защищают ноутбук от слишком большой загрузки.</p>
           </div>
-          <button onClick={onEstimate} disabled={estimating}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} Обновить оценку</button>
+          <button onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} Обновить оценку</button>
         </div>
         <div className="metric-grid">
           <MetricCard label="Работ найдено" value={fmt(rawEstimate.estimate_count ?? 0)} />
-          <MetricCard label="К загрузке" value={fmt(decision.records_to_fetch ?? rawEstimate.planned_records ?? 0)} />
+          <MetricCard label="Полный срез / к загрузке" value={`${fmt(rawEstimate.estimate_count ?? 0)} / ${fmt(decision.records_to_fetch ?? rawEstimate.planned_records ?? 0)}`} />
           <MetricCard label="API-запросов" value={fmt(decision.api_requests_planned ?? rawEstimate.api_requests_planned ?? 0)} />
-          <MetricCard label="Прогноз raw" value={`${fmt(decision.estimated_raw_mb ?? rawEstimate.estimated_raw_mb ?? 0)} МБ`} />
+          <MetricCard label="Прогноз raw" value={`${fmt(decision.estimated_raw_mb ?? rawEstimate.estimated_raw_mb ?? 0)}–${fmt(rawEstimate.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ`} />
         </div>
         <div className={canRun ? "notice success" : hasEstimate ? "notice error" : "notice"}>
-          <b>{canRun ? "Материализация допустима" : hasEstimate ? "Нужно уточнить срез" : "Оценка еще не выполнена"}</b>
+          <b>{canRun ? "Полная загрузка допустима" : hasEstimate ? "Нужно уточнить срез" : "Сначала оцените объем"}</b>
           <span>{decision.strategy ?? "Оценка еще не выполнена"} · {decision.status ?? "нет статуса"}</span>
         </div>
         {[...(decision.reasons ?? []), ...(decision.warnings ?? [])].length > 0 && (
@@ -596,14 +726,46 @@ function EstimatePage({
             {[...(decision.reasons ?? []), ...(decision.warnings ?? [])].map((item: string) => <li key={item}>{item}</li>)}
           </ul>
         )}
-      </section>
-
-      <section className="panel">
-        <div className="panel-head">
-          <span className="step-badge">3. Download confirmation</span>
-          <h2>Подтверждение загрузки среза</h2>
-          <p>Пользователь подтверждает исследовательский срез. Storage plan и ограничения работают только как технические предохранители.</p>
-        </div>
+        <details className="technical-details">
+          <summary>Настроить скачивание</summary>
+          <div className="form-grid tight">
+            <Field label="Состав сохраняемых данных">
+              <SingleChoicePicker
+                options={storageProfileOptions}
+                selected={storageProfileId}
+                onChange={setStorageProfileId}
+              />
+            </Field>
+            <Field label="Способ загрузки">
+              <SingleChoicePicker
+                options={sourceStrategyOptions}
+                selected={sourceStrategy}
+                onChange={setSourceStrategy}
+              />
+            </Field>
+            <Field label="Защитный порог raw">
+              <SingleChoicePicker
+                options={rawBudgetOptions}
+                selected={String(maxRawBytes)}
+                onChange={(value) => setMaxRawBytes(Number(value))}
+              />
+            </Field>
+            <Field label="Технический предохранитель записей">
+              <SingleChoicePicker
+                options={recordBudgetOptions}
+                selected={String(technicalRecordCap)}
+                onChange={(value) => setTechnicalRecordCap(Number(value))}
+              />
+            </Field>
+            <label className="field checkbox-field">
+              <input type="checkbox" checked={allowIncompletePreview} onChange={(event) => setAllowIncompletePreview(event.target.checked)} />
+              <span>Разрешить неполный черновой preview</span>
+            </label>
+            <Field label="OpenAlex API key">
+              <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Нужен для OpenAlex CLI и повышенных лимитов API" />
+            </Field>
+          </div>
+        </details>
         {materialization && (
           <div className="materialization-card">
             <b>{materialization.profile?.label}</b>
@@ -611,31 +773,8 @@ function EstimatePage({
             <small>{materialization.profile?.description}</small>
           </div>
         )}
-        <details className="technical-details">
-          <summary>Технический бюджет и storage plan</summary>
-          <div className="form-grid tight">
-            <Field label="Внутренний режим хранения">
-              <select value={profileId} onChange={(event) => setProfileId(event.target.value)}>
-                {MATERIALIZATION_PROFILES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </Field>
-            <Field label="Защитный порог raw">
-              <select value={String(maxDumpBytes)} onChange={(event) => setMaxDumpBytes(Number(event.target.value))}>
-                {DUMP_SIZE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </Field>
-            <Field label="Предохранитель записей">
-              <select value={String(maxWorks)} onChange={(event) => setMaxWorks(Number(event.target.value))}>
-                {LOAD_LIMIT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </Field>
-          </div>
-          <div className="action-row">
-            <button onClick={onPlan} disabled={planning || !estimate}>{planning ? <Loader2 size={16} className="spin" /> : <Boxes size={16} />} Подготовить storage plan</button>
-          </div>
-        </details>
         <div className="action-row">
-          <button className="primary" onClick={onRun} disabled={materializing || !canRun}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} Скачать срез</button>
+          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !downloadConfigReady}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} {hasEstimate ? "Скачать срез" : "Оценить и скачать"}</button>
         </div>
       </section>
 
@@ -652,14 +791,14 @@ function LocalDataPage({ workbench, dumps, tables, run, running, onRefresh }: { 
         <div className="panel-head split">
           <div>
             <span className="step-badge">DumpManifest</span>
-            <h2>Физические материализации</h2>
-            <p>Здесь видны только сохраненные локальные артефакты. Они не являются срезом, а только его материализацией.</p>
+            <h2>Локальные пакеты данных</h2>
+            <p>Здесь видны только сохраненные локальные артефакты. Они не являются срезом, а только его физической загрузкой.</p>
           </div>
           <button onClick={onRefresh}><Loader2 size={16} className={running ? "spin" : ""} /> Обновить</button>
         </div>
         {run && <RunCard run={run} />}
         <div className="dump-list">
-          {dumpRows.length === 0 && <EmptyState title="Мини-дампов пока нет" detail="Сначала оцените срез и создайте материализацию." />}
+          {dumpRows.length === 0 && <EmptyState title="Мини-дампов пока нет" detail="Сначала оцените срез и скачайте локальный пакет данных." />}
           {dumpRows.map((dump: any) => (
             <div className="dump-card" key={`${dump.slice_id}-${dump.raw_jsonl}`}>
               <b>{dump.slice_id}</b>
@@ -712,14 +851,18 @@ function EnrichmentPage({ qualityCounts, tables, onPreview, previewing, run }: {
 function RankingsPage({
   metric,
   setMetric,
+  metricOptions,
   fractionMode,
   setFractionMode,
+  fractionModeOptions,
   tableName,
   setTableName,
+  tableOptions,
   tableQ,
   setTableQ,
   topN,
   setTopN,
+  topNOptions,
   table,
   chartRows,
   onSelect,
@@ -728,14 +871,18 @@ function RankingsPage({
 }: {
   metric: string;
   setMetric: (value: string) => void;
+  metricOptions: SelectOption[];
   fractionMode: string;
   setFractionMode: (value: string) => void;
+  fractionModeOptions: SelectOption[];
   tableName: string;
   setTableName: (value: string) => void;
+  tableOptions: SelectOption[];
   tableQ: string;
   setTableQ: (value: string) => void;
   topN: number;
   setTopN: (value: number) => void;
+  topNOptions: SelectOption[];
   table?: TableResponse;
   chartRows: any[];
   onSelect: (value: { kind: "author" | "work"; id: string }) => void;
@@ -755,20 +902,16 @@ function RankingsPage({
         </div>
         <div className="toolbar">
           <select value={metric} onChange={(event) => setMetric(event.target.value)}>
-            {PRIMARY_METRIC_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            {ensureCurrentOption(metricOptions, metric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <select value={fractionMode} onChange={(event) => setFractionMode(event.target.value)}>
-            {FRACTION_MODES.map((item) => <option key={item} value={item}>{item}</option>)}
+            {ensureCurrentOption(fractionModeOptions, fractionMode).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <select value={tableName} onChange={(event) => setTableName(event.target.value)}>
-            <option value="authors_local_metrics">Локальные авторские метрики</option>
-            <option value="indices">Индексы</option>
-            <option value="ratings">Рейтинговые позиции</option>
-            <option value="works">Работы</option>
-            <option value="authorships">Авторства</option>
+            {ensureCurrentOption(tableOptions, tableName).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <select value={String(topN)} onChange={(event) => setTopN(Number(event.target.value))}>
-            {TOP_N_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            {topNOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <input value={tableQ} onChange={(event) => setTableQ(event.target.value)} placeholder="Поиск по таблице" />
         </div>
@@ -796,23 +939,180 @@ function RankingsPage({
   );
 }
 
-function StatisticsPage({ analytics, table, metric, chartRows, topN }: { analytics: any; table?: TableResponse; metric: string; chartRows: any[]; topN: number }) {
+function CohortsPage({
+  cohorts,
+  selectedCohortId,
+  setSelectedCohortId,
+  cohortStats,
+  metric,
+  setMetric,
+  metricOptions,
+  fractionMode,
+  setFractionMode,
+  fractionModeOptions,
+  topN,
+  setTopN,
+  topNOptions,
+  cohortName,
+  setCohortName,
+  minPublications,
+  setMinPublications,
+  minH,
+  setMinH,
+  onCreate,
+  creating,
+  loadingStats,
+}: {
+  cohorts: any;
+  selectedCohortId: string;
+  setSelectedCohortId: (value: string) => void;
+  cohortStats: any;
+  metric: string;
+  setMetric: (value: string) => void;
+  metricOptions: SelectOption[];
+  fractionMode: string;
+  setFractionMode: (value: string) => void;
+  fractionModeOptions: SelectOption[];
+  topN: number;
+  setTopN: (value: number) => void;
+  topNOptions: SelectOption[];
+  cohortName: string;
+  setCohortName: (value: string) => void;
+  minPublications: number;
+  setMinPublications: (value: number) => void;
+  minH: number;
+  setMinH: (value: number) => void;
+  onCreate: () => void;
+  creating: boolean;
+  loadingStats: boolean;
+}) {
+  const rows = cohorts?.cohorts ?? [];
+  const selected = rows.find((row: any) => row.cohort_id === selectedCohortId);
+  const describe = cohortStats?.descriptive?.[metric] ?? {};
+  const box = cohortStats?.boxplots?.[metric] ?? {};
+  return (
+    <div className="stack">
+      <section className="panel">
+        <div className="panel-head split">
+          <div>
+            <span className="step-badge">AuthorCohort</span>
+            <h2>Фиксация аналитической выборки</h2>
+            <p>Когорта сохраняет список author_id, метрику сортировки, Top-N и пороги. Именно по ней считаются графики и статистика.</p>
+          </div>
+          <button className="primary" onClick={onCreate} disabled={creating}>{creating ? <Loader2 size={16} className="spin" /> : <GitCompareArrows size={16} />} Создать когорту</button>
+        </div>
+        <div className="form-grid tight">
+          <Field label="Название когорты">
+            <input value={cohortName} onChange={(event) => setCohortName(event.target.value)} />
+          </Field>
+          <Field label="Метрика сортировки">
+            <select value={metric} onChange={(event) => setMetric(event.target.value)}>
+              {ensureCurrentOption(metricOptions, metric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Режим фракционирования">
+            <select value={fractionMode} onChange={(event) => setFractionMode(event.target.value)}>
+              {ensureCurrentOption(fractionModeOptions, fractionMode).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Размер Top-N">
+            <select value={String(topN)} onChange={(event) => setTopN(Number(event.target.value))}>
+              {topNOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Минимум публикаций">
+            <input type="number" min={0} value={minPublications} onChange={(event) => setMinPublications(Number(event.target.value || 0))} />
+          </Field>
+          <Field label="Минимум h-index">
+            <input type="number" min={0} value={minH} onChange={(event) => setMinH(Number(event.target.value || 0))} />
+          </Field>
+        </div>
+      </section>
+
+      <section className="chart-table-grid">
+        <div className="panel">
+          <div className="panel-head">
+            <span className="step-badge">Сохраненные когорты</span>
+            <h2>Выберите выборку для статистики</h2>
+          </div>
+          <div className="cohort-list">
+            {rows.length === 0 && <EmptyState title="Когорты еще не созданы" detail="Сначала рассчитайте индексы и создайте Top-N когорту." />}
+            {rows.map((row: any) => (
+              <button key={row.cohort_id} className={row.cohort_id === selectedCohortId ? "cohort-card active" : "cohort-card"} onClick={() => setSelectedCohortId(row.cohort_id)}>
+                <b>{row.name}</b>
+                <span>{fmt(row.n_authors ?? 0)} авторов · {metricLabel(row.metric)} · {row.fraction_mode}</span>
+                <small>{row.cohort_id}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="panel">
+          <div className="panel-head">
+            <span className="step-badge">{loadingStats ? "Расчет" : "Статистика"}</span>
+            <h2>{selected?.name ?? "Когорта не выбрана"}</h2>
+          </div>
+          {!selected && <EmptyState title="Нет активной когорты" detail="Создайте или выберите когорту, чтобы перейти к статистике." />}
+          {selected && (
+            <div className="metric-grid">
+              <MetricCard label="Авторов" value={fmt(selected.n_authors ?? 0)} />
+              <MetricCard label="Среднее" value={fmt(describe.mean ?? 0)} />
+              <MetricCard label="Медиана" value={fmt(describe.median ?? 0)} />
+              <MetricCard label="IQR" value={fmt(describe.iqr ?? 0)} />
+              <MetricCard label="Q1" value={fmt(box.q1 ?? 0)} />
+              <MetricCard label="Q3" value={fmt(box.q3 ?? 0)} />
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function StatisticsPage({
+  analytics,
+  table,
+  metric,
+  chartRows,
+  topN,
+  cohortStats,
+  selectedCohortId,
+  onOpenCohorts,
+}: {
+  analytics: any;
+  table?: TableResponse;
+  metric: string;
+  chartRows: any[];
+  topN: number;
+  cohortStats: any;
+  selectedCohortId: string;
+  onOpenCohorts: () => void;
+}) {
   const scatter = (table?.rows ?? []).slice(0, 120).map((row: any) => ({
     x: Number(row.h ?? row.h_raw ?? 0),
     y: Number(row.c_frac ?? row.c_frac_raw ?? row.score ?? 0),
     name: row.author_display_name,
   }));
+  const describe = cohortStats?.descriptive?.[metric] ?? {};
+  const box = cohortStats?.boxplots?.[metric] ?? {};
+  const activeN = cohortStats?.cohort?.n_authors ?? (table?.total ? Math.min(Number(table.total), topN) : 0);
   return (
     <div className="stack">
+      {!selectedCohortId && (
+        <section className="notice">
+          <b>Сначала зафиксируйте когорту авторов</b>
+          <span>Статистика должна иметь паспорт выборки: metric, Top-N, фильтры и checksum author_id.</span>
+          <div className="action-row"><button onClick={onOpenCohorts}><GitCompareArrows size={16} /> Перейти к когортам</button></div>
+        </section>
+      )}
       <section className="metric-grid">
-        <MetricCard label={`Когорта Top-${topN}`} value={fmt(table?.total ? Math.min(Number(table.total), topN) : 0)} />
-        <MetricCard label="Авторов в распределении" value={fmt(analytics?.distribution?.n ?? 0)} />
-        <MetricCard label="Среднее" value={fmt(analytics?.distribution?.mean ?? 0)} />
-        <MetricCard label="Медиана" value={fmt(analytics?.distribution?.median ?? 0)} />
+        <MetricCard label={cohortStats?.cohort?.name ?? `Когорта Top-${topN}`} value={fmt(activeN)} />
+        <MetricCard label="Авторов в распределении" value={fmt(describe.n ?? analytics?.distribution?.n ?? 0)} />
+        <MetricCard label="Среднее" value={fmt(describe.mean ?? analytics?.distribution?.mean ?? 0)} />
+        <MetricCard label="Медиана" value={fmt(describe.median ?? analytics?.distribution?.median ?? 0)} />
       </section>
       <section className="chart-table-grid">
         <div className="panel">
-          <h2>Box/Bar распределение индекса</h2>
+          <h2>Распределение индекса</h2>
           <div className="chart-box">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartRows}>
@@ -824,6 +1124,11 @@ function StatisticsPage({ analytics, table, metric, chartRows, topN }: { analyti
               </BarChart>
             </ResponsiveContainer>
           </div>
+          {box.n > 0 && (
+            <div className="box-summary">
+              <KeyValue label="Boxplot" value={`min ${fmt(box.min)} · Q1 ${fmt(box.q1)} · median ${fmt(box.median)} · Q3 ${fmt(box.q3)} · max ${fmt(box.max)}`} />
+            </div>
+          )}
         </div>
         <div className="panel">
           <h2>Scatter h vs C_frac</h2>
@@ -880,7 +1185,7 @@ function PassportsPage({ state, sliceDoc, estimate, materialization }: { state: 
     <div className="passport-grid">
       <JsonPanel title="Паспорт среза" value={sliceDoc ?? state?.workflow?.current_slice ?? {}} />
       <JsonPanel title="Паспорт оценки" value={estimate ?? sliceDoc?.latest_estimate ?? {}} />
-      <JsonPanel title="Паспорт материализации" value={materialization ?? sliceDoc?.latest_materialization_plan ?? {}} />
+      <JsonPanel title="Паспорт загрузки и хранения" value={materialization ?? sliceDoc?.latest_materialization_plan ?? {}} />
       <JsonPanel title="Quality report" value={state?.quality ?? {}} />
     </div>
   );
@@ -977,6 +1282,92 @@ function ResolverDialog({ filters, setFilters, onClose }: { filters: ActiveFilte
   );
 }
 
+function WorkflowStepper({
+  view,
+  estimate,
+  materialization,
+  run,
+  hasIndices,
+  hasCohort,
+}: {
+  view: View;
+  estimate: any;
+  materialization: any;
+  run: any;
+  hasIndices: boolean;
+  hasCohort: boolean;
+}) {
+  const steps: Array<{ id: View; label: string; ready: boolean }> = [
+    { id: "slices", label: "Срез и загрузка", ready: true },
+    { id: "data", label: "Локальные данные", ready: run?.status === "completed" || Boolean(materialization) },
+    { id: "rankings", label: "Индексы", ready: hasIndices },
+    { id: "cohorts", label: "Когорты", ready: hasCohort },
+    { id: "statistics", label: "Статистика", ready: Boolean(hasCohort) },
+    { id: "reports", label: "Отчет", ready: false },
+  ];
+  return (
+    <div className="workflow-stepper" aria-label="Логика работы системы">
+      {steps.map((step, index) => (
+        <span key={step.id} className={[view === step.id ? "active" : "", step.ready ? "ready" : ""].filter(Boolean).join(" ")}>
+          <b>{index + 1}</b>
+          {step.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function WorkTypePicker({ options, selected, onChange }: { options: SelectOption[]; selected: string[]; onChange: (value: string[]) => void }) {
+  const selectedSet = new Set(selected);
+  const toggle = (value: string) => {
+    if (!value) {
+      onChange([]);
+      return;
+    }
+    const next = selectedSet.has(value) ? selected.filter((item) => item !== value) : [...selected, value];
+    onChange(next);
+  };
+  return (
+    <div className="choice-stack">
+      <div className="choice-grid" role="group" aria-label="Типы публикаций OpenAlex">
+        <button type="button" className={selected.length === 0 ? "choice-pill active" : "choice-pill"} onClick={() => toggle("")}>
+          Все
+        </button>
+        {options.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            className={selectedSet.has(item.value) ? "choice-pill active" : "choice-pill"}
+            onClick={() => toggle(item.value)}
+          >
+            {item.label}
+          </button>
+        ))}
+        {options.length === 0 && <span className="muted">Справочник типов пока не загружен.</span>}
+      </div>
+      <small className="field-hint">Выберите один или несколько типов. «Все» снимает ограничение по типу.</small>
+    </div>
+  );
+}
+
+function SingleChoicePicker({ options, selected, onChange }: { options: SelectOption[]; selected: string; onChange: (value: string) => void }) {
+  return (
+    <div className="choice-grid compact" role="group">
+      {options.map((item) => (
+        <button
+          key={item.value}
+          type="button"
+          className={String(selected) === String(item.value) ? "choice-pill active" : "choice-pill"}
+          onClick={() => onChange(String(item.value))}
+          title={item.description}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ProgressPanel({ filters, estimate, materialization, run }: { filters: ActiveFilters; estimate: any; materialization: any; run: any }) {
   const steps = [
     { id: "draft", label: "Срез", ready: true },
@@ -1048,7 +1439,202 @@ function JsonPanel({ title, value }: { title: string; value: unknown }) {
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="field"><span>{label}</span>{children}</label>;
+  return <div className="field"><span>{label}</span>{children}</div>;
+}
+
+type SubjectSelection = {
+  id: string;
+  name: string;
+  level: string;
+  levelLabel?: string;
+  filterMode: string;
+  worksCount?: number;
+};
+
+type OrganizationSelection = {
+  id: string;
+  name: string;
+  ror?: string;
+  countryCode?: string;
+  worksCount?: number;
+};
+
+function SubjectInput({
+  value,
+  presets,
+  onSelect,
+  onClear,
+}: {
+  value: string;
+  presets: ResearchAreaPreset[];
+  onSelect: (value: SubjectSelection) => void;
+  onClear: () => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [error, setError] = useState("");
+  const queryText = draft.trim();
+  const suggestions = useQuery({
+    queryKey: ["subject-input", queryText],
+    queryFn: () => getJson<any>(`/openalex/subjects?q=${encodeURIComponent(queryText)}&limit=12`),
+    enabled: queryText.length >= 2,
+  });
+  const localOptions = useMemo(() => subjectPresetOptions(presets), [presets]);
+  const remoteOptions = useMemo(() => subjectSuggestionOptions(suggestions.data?.results ?? []), [suggestions.data]);
+  const visibleOptions = mergeSubjects([
+    ...localOptions.filter((item) => optionMatches(item, queryText)),
+    ...remoteOptions,
+  ]).slice(0, 18);
+
+  useEffect(() => {
+    setDraft(value);
+    setError("");
+  }, [value]);
+
+  const commit = async () => {
+    const text = draft.trim();
+    if (!text) {
+      setError("");
+      onClear();
+      return;
+    }
+    if (isAllInput(text)) {
+      setError("");
+      setDraft("Все направления");
+      onClear();
+      return;
+    }
+    let options = mergeSubjects([...localOptions, ...remoteOptions]);
+    let selected = findSubjectOption(options, text);
+    if (!selected && text.length >= 2) {
+      const result = await suggestions.refetch();
+      options = mergeSubjects([...localOptions, ...subjectSuggestionOptions(result.data?.results ?? [])]);
+      selected = findSubjectOption(options, text) ?? options.find((item) => optionMatches(item, text));
+    }
+    if (!selected) {
+      setError("Такое направление не найдено в локальных пресетах и OpenAlex.");
+      return;
+    }
+    setError("");
+    setDraft(subjectInputValue(selected));
+    onSelect(selected);
+  };
+
+  return (
+    <div className="validated-input">
+      <input
+        value={draft}
+        list="subject-options"
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? "subject-error" : undefined}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commit();
+          }
+        }}
+        placeholder="Программная инженерия, AI, ergonomics"
+      />
+      <datalist id="subject-options">
+        <option value="Все направления" />
+        {visibleOptions.map((item) => (
+          <option key={`${item.level}:${item.id}`} value={subjectInputValue(item)} />
+        ))}
+      </datalist>
+      {error && <small id="subject-error" className="field-error">{error}</small>}
+      {!error && <small className="field-hint">Подсказки: локальные пресеты + OpenAlex Topics/Fields/Subfields.</small>}
+    </div>
+  );
+}
+
+function OrganizationInput({
+  value,
+  presets,
+  onSelect,
+  onClear,
+}: {
+  value: string;
+  presets: OrganizationPreset[];
+  onSelect: (value: OrganizationSelection) => void;
+  onClear: () => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [error, setError] = useState("");
+  const queryText = draft.trim();
+  const suggestions = useQuery({
+    queryKey: ["organization-input", queryText],
+    queryFn: () => getJson<any>(`/openalex/institutions?q=${encodeURIComponent(queryText)}&limit=12`),
+    enabled: queryText.length >= 2,
+  });
+  const localOptions = useMemo(() => organizationPresetOptions(presets), [presets]);
+  const remoteOptions = useMemo(() => organizationSuggestionOptions(suggestions.data?.results ?? []), [suggestions.data]);
+  const visibleOptions = mergeOrganizations([
+    ...localOptions.filter((item) => optionMatches(item, queryText)),
+    ...remoteOptions,
+  ]).slice(0, 18);
+
+  useEffect(() => {
+    setDraft(value);
+    setError("");
+  }, [value]);
+
+  const commit = async () => {
+    const text = draft.trim();
+    if (!text) {
+      setError("");
+      onClear();
+      return;
+    }
+    if (isAllInput(text)) {
+      setError("");
+      setDraft("Все организации");
+      onClear();
+      return;
+    }
+    let options = mergeOrganizations([...localOptions, ...remoteOptions]);
+    let selected = findOrganizationOption(options, text);
+    if (!selected && text.length >= 2) {
+      const result = await suggestions.refetch();
+      options = mergeOrganizations([...localOptions, ...organizationSuggestionOptions(result.data?.results ?? [])]);
+      selected = findOrganizationOption(options, text) ?? options.find((item) => optionMatches(item, text));
+    }
+    if (!selected) {
+      setError("Такая организация не найдена в локальном справочнике и OpenAlex.");
+      return;
+    }
+    setError("");
+    setDraft(organizationInputValue(selected));
+    onSelect(selected);
+  };
+
+  return (
+    <div className="validated-input">
+      <input
+        value={draft}
+        list="organization-options"
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? "organization-error" : undefined}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commit();
+          }
+        }}
+        placeholder="БГТУ, ROR, OpenAlex Institution ID"
+      />
+      <datalist id="organization-options">
+        <option value="Все организации" />
+        {visibleOptions.map((item) => (
+          <option key={item.id} value={organizationInputValue(item)} />
+        ))}
+      </datalist>
+      {error && <small id="organization-error" className="field-error">{error}</small>}
+      {!error && <small className="field-hint">Пустое поле означает: без ограничения по организации.</small>}
+    </div>
+  );
 }
 
 function CountryInput({ value, options, onChange }: { value: string; options: SelectOption[]; onChange: (value: string) => void }) {
@@ -1065,6 +1651,12 @@ function CountryInput({ value, options, onChange }: { value: string; options: Se
     if (!draft.trim()) {
       setError("");
       onChange("");
+      return;
+    }
+    if (isAllInput(draft)) {
+      setError("");
+      onChange("");
+      setDraft("Все страны");
       return;
     }
     if (!next) {
@@ -1094,11 +1686,13 @@ function CountryInput({ value, options, onChange }: { value: string; options: Se
         placeholder="Россия, RU или United States"
       />
       <datalist id="country-options">
+        <option value="Все страны" />
         {options.filter((item) => item.value).map((item) => (
           <option key={item.value} value={`${item.label} (${item.value})`} />
         ))}
       </datalist>
       {error && <small id="country-error" className="field-error">{error}</small>}
+      {!error && <small className="field-hint">Выберите страну из подсказок. «Все страны» снимает ограничение.</small>}
     </div>
   );
 }
@@ -1119,9 +1713,151 @@ function catalogOptions(rows: Array<Record<string, unknown>>): SelectOption[] {
   return out;
 }
 
-function ensureOption(options: SelectOption[], value: string, label: string) {
+function configuredOptions(rows: Array<Record<string, unknown>>): SelectOption[] {
+  return rows
+    .map((row) => {
+      const value = String(row.value ?? row.id ?? row.profile_id ?? "").trim();
+      const label = String(row.label ?? row.name ?? value).trim();
+      const description = String(row.description ?? "").trim();
+      const option: SelectOption & { default?: boolean } = { value, label };
+      if (description) option.description = description;
+      if (Boolean(row.default)) option.default = true;
+      return option;
+    })
+    .filter((item) => item.value && item.label);
+}
+
+function defaultOption(options: Array<SelectOption & { default?: boolean }>) {
+  return options.find((item) => item.default) ?? options[0];
+}
+
+function ensureCurrentOption(options: SelectOption[], value: string) {
   if (!value || options.some((item) => item.value === value)) return options;
-  return [{ value, label }, ...options];
+  return [{ value, label: value }, ...options];
+}
+
+function subjectPresetOptions(presets: ResearchAreaPreset[]): SubjectSelection[] {
+  return presets
+    .filter((item) => item.subject_id && item.subject_name)
+    .map((item) => ({
+      id: item.subject_id,
+      name: item.subject_name || item.label,
+      level: item.subject_level || "topic",
+      levelLabel: item.description,
+      filterMode: item.filter_mode || "primary_topic",
+    }));
+}
+
+function subjectSuggestionOptions(rows: Array<Record<string, unknown>>): SubjectSelection[] {
+  return rows
+    .map((item) => ({
+      id: String(item.openalex_id ?? item.id ?? "").trim(),
+      name: String(item.name ?? item.display_name ?? item.label ?? "").trim(),
+      level: String(item.level ?? "topic").trim() || "topic",
+      levelLabel: String(item.level_label ?? item.level ?? "").trim(),
+      filterMode: "primary_topic",
+      worksCount: Number(item.works_count ?? 0),
+    }))
+    .filter((item) => item.id && item.name);
+}
+
+function organizationPresetOptions(presets: OrganizationPreset[]): OrganizationSelection[] {
+  return presets
+    .filter((item) => item.institution_id && item.institution_name)
+    .map((item) => ({
+      id: item.institution_id,
+      name: item.institution_name || item.label,
+      ror: item.ror,
+      countryCode: item.country_code,
+    }));
+}
+
+function organizationSuggestionOptions(rows: Array<Record<string, unknown>>): OrganizationSelection[] {
+  return rows
+    .map((item) => ({
+      id: String(item.openalex_id ?? item.id ?? "").trim(),
+      name: String(item.name ?? item.display_name ?? item.label ?? "").trim(),
+      ror: String(item.ror ?? "").trim() || undefined,
+      countryCode: String(item.country_code ?? "").trim() || undefined,
+      worksCount: Number(item.works_count ?? 0),
+    }))
+    .filter((item) => item.id && item.name);
+}
+
+function subjectInputValue(item: SubjectSelection) {
+  return [item.name, item.levelLabel || item.level].filter(Boolean).join(" · ");
+}
+
+function organizationInputValue(item: OrganizationSelection) {
+  return [item.name, item.countryCode].filter(Boolean).join(" · ");
+}
+
+function findSubjectOption(options: SubjectSelection[], text: string) {
+  const normalized = normalizeInput(text);
+  return options.find((item) => (
+    normalizeInput(subjectInputValue(item)) === normalized
+    || normalizeInput(item.name) === normalized
+    || normalizeInput(item.id) === normalized
+  ));
+}
+
+function findOrganizationOption(options: OrganizationSelection[], text: string) {
+  const normalized = normalizeInput(text);
+  return options.find((item) => (
+    normalizeInput(organizationInputValue(item)) === normalized
+    || normalizeInput(item.name) === normalized
+    || normalizeInput(item.id) === normalized
+    || (item.ror && normalizeInput(item.ror) === normalized)
+  ));
+}
+
+function mergeSubjects(items: SubjectSelection[]) {
+  const seen = new Set<string>();
+  const out: SubjectSelection[] = [];
+  items.forEach((item) => {
+    const key = `${item.level}:${item.id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(item);
+  });
+  return out;
+}
+
+function mergeOrganizations(items: OrganizationSelection[]) {
+  const seen = new Set<string>();
+  const out: OrganizationSelection[] = [];
+  items.forEach((item) => {
+    if (seen.has(item.id)) return;
+    seen.add(item.id);
+    out.push(item);
+  });
+  return out;
+}
+
+function optionMatches(item: { name: string; id: string }, text: string) {
+  const query = normalizeInput(text);
+  if (!query) return true;
+  return normalizeInput(item.name).includes(query) || normalizeInput(item.id).includes(query);
+}
+
+function isAllInput(value: string) {
+  return ["all", "все", "все направления", "все страны", "все организации"].includes(normalizeInput(value));
+}
+
+function normalizeInput(value: string) {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function ensureWorkTypeOptions(options: SelectOption[], selected: string[]) {
+  const out = [...options];
+  selected.forEach((value) => {
+    if (value && !out.some((item) => item.value === value)) out.unshift({ value, label: value });
+  });
+  return out;
+}
+
+function splitValues(value: string) {
+  return value.split("|").map((item) => item.trim()).filter(Boolean);
 }
 
 function MetricCard({ label, value }: { label: string; value: string | number }) {

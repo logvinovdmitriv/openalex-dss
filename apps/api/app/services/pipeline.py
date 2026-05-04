@@ -5,9 +5,10 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from app.core.paths import DATA, JSON_FILES, ROOT, SRC, TABLE_FILES
+from app.core.paths import DATA, JSON_FILES, PARQUET_TABLE_FILES, ROOT, SRC, TABLE_FILES
+from app.providers import openalex_cli_provider
 from app.services import author_slice
 from app.services.filesystem import file_profile, resolve_safe_path
 from app.services import metadata_store, query_planner, reports
@@ -30,6 +31,7 @@ GENERATED_FILES = [
     DATA / "raw/authors_raw.jsonl",
     DATA / "raw/works_raw.jsonl",
     *TABLE_FILES.values(),
+    *PARQUET_TABLE_FILES.values(),
     *JSON_FILES.values(),
     DATA / "results/stats_summary.json",
     DATA / "results/theory_validation.json",
@@ -40,7 +42,7 @@ GENERATED_FILES = [
 
 def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     cfg = _cfg(payload)
-    write_config(cfg, ROOT / "config/slice.yaml")
+    _write_runtime_config(cfg)
     if cfg.fraction_mode_default == "openalex_native" and (DATA / "normalized/author_profiles_flat.csv").exists():
         _run_compute_author_profiles(cfg)
     else:
@@ -56,7 +58,7 @@ def fetch_and_run(payload: dict[str, Any]) -> dict[str, Any]:
     dump-first and reproducible.
     """
     cfg = _cfg(payload)
-    write_config(cfg, ROOT / "config/slice.yaml")
+    _write_runtime_config(cfg)
     api_key = str(payload.get("api_key") or "").strip()
     old = os.environ.get(cfg.api_key_env)
     try:
@@ -71,17 +73,24 @@ def fetch_and_run(payload: dict[str, Any]) -> dict[str, Any]:
     for stale in (DATA / "raw/authors_raw.jsonl", DATA / "normalized/author_profiles_flat.csv"):
         if stale.exists():
             stale.unlink()
-    normalize_raw(DATA / "raw/works_raw.jsonl", DATA / "normalized/works_flat.csv", DATA / "normalized/authorships_flat.csv", DATA / "passports/quality_report.json")
+    normalize_raw(
+        DATA / "raw/works_raw.jsonl",
+        DATA / "normalized/works_flat.csv",
+        DATA / "normalized/authorships_flat.csv",
+        DATA / "passports/quality_report.json",
+        DATA / "normalized/work_topics_flat.csv",
+    )
     _run_compute(cfg)
     _write_pipeline_summary("fetch_and_run", cfg, payload)
     return {"status": "ok", "mode": "fetch_and_run", "deprecated": True, "preferred_flow": "fetch_slice_dump_then_import_file"}
 
 
-def fetch_slice_dump(payload: dict[str, Any]) -> dict[str, Any]:
+def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     cfg = _cfg({**payload, "workflow_mode": "strict_works"})
-    write_config(cfg, ROOT / "config/slice.yaml")
+    _write_runtime_config(cfg)
     api_key = str(payload.get("api_key") or "").strip()
-    max_dump_bytes = int(payload.get("max_dump_bytes") or 500 * 1024 * 1024)
+    download_policy = _download_policy(payload)
+    max_dump_bytes = int(download_policy["max_raw_bytes"])
     plan = query_planner.plan_slice({**payload, "workflow_mode": "strict_works"})
     decision = plan.get("decision") or {}
     if decision.get("status") == "blocked":
@@ -93,12 +102,23 @@ def fetch_slice_dump(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         if api_key:
             os.environ[cfg.api_key_env] = api_key
-        passport = fetch_works_slice_dump(
-            cfg,
-            DATA / "raw/openalex_slices" / cfg.slice_name,
-            max_records=cfg.max_works,
-            max_bytes=max_dump_bytes,
-        )
+        if str(payload.get("source_strategy") or "") == "openalex_cli":
+            passport = openalex_cli_provider.download_works_metadata(
+                cfg,
+                api_key=api_key,
+                out_dir=DATA / "raw/openalex_cli" / cfg.slice_name,
+                progress_callback=progress_callback,
+            )
+        else:
+            passport = fetch_works_slice_dump(
+                cfg,
+                DATA / "raw/openalex_slices" / cfg.slice_name,
+                max_records=int(download_policy["max_records_to_download"]),
+                max_bytes=max_dump_bytes,
+                complete_slice_required=bool(download_policy["complete_slice_required"]),
+                allow_incomplete_preview=bool(download_policy["allow_incomplete_preview"]),
+                progress_callback=progress_callback,
+            )
         passport["query_plan"] = plan
         raw_jsonl = passport.get("raw_jsonl")
         if raw_jsonl:
@@ -158,7 +178,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Only OpenAlex JSONL or JSONL.GZ dumps are importable in this pipeline")
 
     cfg = _cfg(payload)
-    write_config(cfg, ROOT / "config/slice.yaml")
+    _write_runtime_config(cfg)
     profile = file_profile(source)
     if int(profile.get("bytes") or 0) == 0:
         raise ValueError(
@@ -181,7 +201,13 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         )
         _run_compute_author_profiles(cfg)
     else:
-        quality = normalize_raw(source, DATA / "normalized/works_flat.csv", DATA / "normalized/authorships_flat.csv", DATA / "passports/quality_report.json")
+        quality = normalize_raw(
+            source,
+            DATA / "normalized/works_flat.csv",
+            DATA / "normalized/authorships_flat.csv",
+            DATA / "passports/quality_report.json",
+            DATA / "normalized/work_topics_flat.csv",
+        )
         write_json(
             DATA / "passports/fetch_meta.json",
             {
@@ -346,6 +372,22 @@ def config_to_payload(cfg: Any) -> dict[str, Any]:
         "lrdi_p0": cfg.lrdi_p0,
         "lrdi_lambda": cfg.lrdi_lambda,
         "analysis_year": cfg.analysis_year,
+    }
+
+
+def _write_runtime_config(cfg: Any) -> None:
+    write_config(cfg, DATA / "runtime/slice_config.yaml")
+
+
+def _download_policy(payload: dict[str, Any]) -> dict[str, Any]:
+    raw = payload.get("download_policy") if isinstance(payload.get("download_policy"), dict) else {}
+    max_records = raw.get("max_records_to_download", payload.get("max_records_to_download", payload.get("max_works", 50_000)))
+    max_raw_bytes = raw.get("max_raw_bytes", payload.get("max_raw_bytes", payload.get("max_dump_bytes", 500 * 1024 * 1024)))
+    return {
+        "max_records_to_download": int(max_records or 50_000),
+        "max_raw_bytes": int(max_raw_bytes or 500 * 1024 * 1024),
+        "complete_slice_required": bool(raw.get("complete_slice_required", payload.get("complete_slice_required", True))),
+        "allow_incomplete_preview": bool(raw.get("allow_incomplete_preview", payload.get("allow_incomplete_preview", False))),
     }
 
 

@@ -14,7 +14,7 @@ from openalex_mvp.openalex import build_filter  # noqa: E402
 
 
 SUBJECT_LEVELS = {"field", "subfield", "topic"}
-FILTER_MODES = {"primary_topic", "topics_any", "keyword", "search"}
+FILTER_MODES = {"all", "primary_topic", "topics_any", "keyword", "search"}
 WORKFLOW_MODES = {"strict_works", "author_preview"}
 FRACTION_MODES = {"strict_authors_count", "renorm_valid_authors", "integer"}
 WORK_TYPE_RE = re.compile(r"^[a-z0-9-]+$")
@@ -118,18 +118,23 @@ def _clean_updates(payload: dict[str, Any], *, base: SliceConfig) -> dict[str, A
     level = str(updates.get("entity_level") or base.entity_level).strip()
     subject_id = str(updates.get("entity_id_short") or base.entity_id_short).strip()
     subject_name = str(updates.get("entity_display_name") or base.entity_display_name).strip() or subject_id
-    if level not in SUBJECT_LEVELS:
-        raise ValueError("entity_level must be one of: field, subfield, topic")
-    _validate_subject_id(level, subject_id)
+    filter_mode = str(updates.get("filter_mode") or base.filter_mode or "primary_topic").strip()
+    if filter_mode not in FILTER_MODES:
+        raise ValueError("filter_mode must be one of: all, primary_topic, topics_any, keyword, search")
+    updates["filter_mode"] = filter_mode
+    if filter_mode == "all":
+        level = ""
+        subject_id = ""
+        subject_name = ""
+    else:
+        if level not in SUBJECT_LEVELS:
+            raise ValueError("entity_level must be one of: field, subfield, topic")
+        _validate_subject_id(level, subject_id)
 
     updates["entity_level"] = level
     updates["entity_id_short"] = subject_id
     updates["entity_display_name"] = subject_name
     updates["entity_id_full"] = str(updates.get("entity_id_full") or _openalex_entity_url(level, subject_id)).strip()
-    filter_mode = str(updates.get("filter_mode") or base.filter_mode or "primary_topic").strip()
-    if filter_mode not in FILTER_MODES:
-        raise ValueError("filter_mode must be one of: primary_topic, topics_any, keyword, search")
-    updates["filter_mode"] = filter_mode
     if filter_mode == "keyword" and not str(_update_value(updates, "keyword_id", base.keyword_id)).strip():
         raise ValueError("keyword_id is required for keyword mode")
     if filter_mode == "search" and not str(_update_value(updates, "text_search_query", base.text_search_query)).strip():
@@ -232,6 +237,8 @@ def _validate_subject_id(level: str, subject_id: str) -> None:
 
 
 def _openalex_entity_url(level: str, subject_id: str) -> str:
+    if not level or not subject_id:
+        return ""
     if level == "topic":
         return f"https://openalex.org/{subject_id}"
     return f"https://openalex.org/{level}s/{subject_id}"

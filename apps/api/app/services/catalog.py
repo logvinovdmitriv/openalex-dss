@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.providers import openalex_cli_provider
 from app.services import filesystem, registry, snapshot, warehouse, workflow
 
 
@@ -28,28 +29,6 @@ FRACTION_MODES = [
     {"id": "integer", "label": "Целочисленный счет"},
 ]
 
-DATA_SOURCES = [
-    {
-        "id": "openalex_api",
-        "label": "OpenAlex API",
-        "role": "подсказки/ID, компактный фиксированный срез, точечное обогащение авторов и работ",
-        "status": "implemented",
-    },
-    {
-        "id": "openalex_snapshot",
-        "label": "OpenAlex S3 snapshot",
-        "role": "массовое обогащение, пакетные обновления, работа с полными дампами",
-        "status": "prepared",
-    },
-    {
-        "id": "local_filesystem",
-        "label": "Локальная файловая система",
-        "role": "импорт локальных JSONL/JSONL.GZ дампов, CSV/Parquet артефакты, DuckDB-витрины",
-        "status": "implemented",
-    },
-]
-
-
 def system_catalog() -> dict[str, Any]:
     config_registry = registry.registry()
     metric_registry = config_registry.get("metric_registry") or []
@@ -60,10 +39,13 @@ def system_catalog() -> dict[str, Any]:
         "native_metrics": native_metric_registry,
         "fraction_modes": FRACTION_MODES,
         "tables": warehouse.list_tables(),
-        "data_sources": DATA_SOURCES,
+        "data_sources": config_registry.get("data_sources") or [],
         "ranking_profiles": ranking_profiles,
         "execution_limits": config_registry.get("execution_limits") or {},
+        "storage_profiles": config_registry.get("storage_profiles") or [],
+        "ui_options": config_registry.get("ui_options") or {},
         "openalex_filter_registry": config_registry.get("openalex_filter_registry") or {},
+        "openalex_cli": openalex_cli_provider.cli_status(),
         "domain_presets": config_registry.get("domain_presets") or [],
         "organization_presets": config_registry.get("organization_presets") or [],
         "filter_schema": config_registry.get("filter_schema") or {},

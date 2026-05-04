@@ -52,13 +52,14 @@ class PipelineRequest(BaseModel):
     analysis_year: int | None = Field(default=None, ge=1900, le=2100)
     api_key: str | None = None
     source_path: str | None = None
+    source_strategy: str | None = None
 
     @field_validator("entity_level")
     @classmethod
     def validate_entity_level(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        if value not in {"field", "subfield", "topic"}:
+        if value not in {"", "field", "subfield", "topic"}:
             raise ValueError("entity_level must be one of: field, subfield, topic")
         return value
 
@@ -76,8 +77,8 @@ class PipelineRequest(BaseModel):
     def validate_filter_mode(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        if value not in {"primary_topic", "topics_any", "keyword", "search"}:
-            raise ValueError("filter_mode must be primary_topic, topics_any, keyword, or search")
+        if value not in {"all", "primary_topic", "topics_any", "keyword", "search"}:
+            raise ValueError("filter_mode must be all, primary_topic, topics_any, keyword, or search")
         return value
 
     @field_validator("affiliation_mode")
@@ -118,13 +119,41 @@ class SliceCreateRequest(PipelineRequest):
 
 
 class SliceEstimateRequest(BaseModel):
+    download_policy: "DownloadPolicy" = Field(default_factory=lambda: DownloadPolicy())
     max_dump_bytes: int | None = Field(default=None, ge=1024, le=5 * 1024 * 1024 * 1024)
 
 
+class DownloadPolicy(BaseModel):
+    max_records_to_download: int | None = Field(default=None, ge=1, le=500_000)
+    max_raw_bytes: int | None = Field(default=None, ge=1024, le=5 * 1024 * 1024 * 1024)
+    complete_slice_required: bool = True
+    allow_incomplete_preview: bool = False
+
+
 class MaterializationPlanRequest(BaseModel):
-    profile_id: str = "minimal_analytics"
+    storage_profile_id: str = "minimal_analytics"
+    source_strategy: str = "openalex_api"
+    download_policy: DownloadPolicy = Field(default_factory=DownloadPolicy)
+    profile_id: str | None = None
     max_dump_bytes: int | None = Field(default=None, ge=1024, le=5 * 1024 * 1024 * 1024)
 
 
 class MaterializationRunRequest(BaseModel):
     api_key: str | None = None
+
+
+class AuthorCohortCreateRequest(BaseModel):
+    slice_id: str | None = None
+    name: str = "Авторская когорта"
+    source: Literal["top_n", "manual", "metric_filter"] = "top_n"
+    metric: str = "h"
+    fraction_mode: str = "strict_authors_count"
+    top_n: int | None = Field(default=100, ge=1, le=1000)
+    min_publications: int | None = Field(default=None, ge=0)
+    min_h: int | None = Field(default=None, ge=0)
+    country_code: str | None = None
+    institution_id: str | None = None
+    subject_level: str | None = None
+    subject_id: str | None = None
+    filter_mode: str | None = None
+    author_ids: list[str] = Field(default_factory=list)
