@@ -120,6 +120,107 @@ class SliceWorkbenchTests(unittest.TestCase):
                 self.assertEqual(updated_plan["state"], "ready")
                 self.assertEqual(updated_plan["dump_id"], "dump_done")
 
+    def test_materialization_no_data_marks_slice_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload = {
+                "slice_id": "slice_empty",
+                "entity_level": "subfield",
+                "entity_id_short": "1706",
+                "entity_display_name": "Computer Science Applications",
+            }
+            fake_plan = {
+                "decision": {"status": "no_data", "can_execute": False, "reasons": [], "warnings": []},
+                "estimate": {"estimate_count": 0, "estimate_signature": "estimate-empty", "download_signature": "download-empty"},
+                "openalex_filter": "primary_topic.subfield.id:1706",
+                "filter_classes": {},
+                "download_policy": {"user_controls_download_after_estimate": True},
+                "limits": {},
+            }
+            with (
+                patch.object(slice_workbench, "SLICES_DIR", tmp_path / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan),
+            ):
+                created = slice_workbench.create_slice(payload)
+                materialization = slice_workbench.create_materialization_plan(created["slice_id"])
+                materialization["run_id"] = "run_empty"
+                slice_workbench._write_materialization(materialization)
+
+                slice_workbench.mark_materialization_run_completed("run_empty", {"fetch": {"dump": {"no_data": True}}, "build": None, "no_data": True})
+
+                self.assertEqual(slice_workbench.get_slice(created["slice_id"])["state"], "empty")
+                self.assertEqual(slice_workbench.get_materialization_plan(materialization["materialization_id"])["state"], "empty")
+
+    def test_materialization_failure_marks_slice_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload = {
+                "slice_id": "slice_failed",
+                "entity_level": "subfield",
+                "entity_id_short": "1706",
+                "entity_display_name": "Computer Science Applications",
+            }
+            fake_plan = {
+                "decision": {"status": "can_fetch", "can_execute": True, "reasons": [], "warnings": []},
+                "estimate": {"estimate_count": 10, "estimate_signature": "estimate", "download_signature": "download"},
+                "openalex_filter": "primary_topic.subfield.id:1706",
+                "filter_classes": {},
+                "download_policy": {"user_controls_download_after_estimate": True},
+                "limits": {},
+            }
+            with (
+                patch.object(slice_workbench, "SLICES_DIR", tmp_path / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan),
+            ):
+                created = slice_workbench.create_slice(payload)
+                materialization = slice_workbench.create_materialization_plan(created["slice_id"])
+                materialization["run_id"] = "run_failed"
+                materialization["state"] = "materializing"
+                slice_workbench._write_materialization(materialization)
+
+                slice_workbench.mark_materialization_run_failed("run_failed", "boom")
+
+                updated_slice = slice_workbench.get_slice(created["slice_id"])
+                updated_plan = slice_workbench.get_materialization_plan(materialization["materialization_id"])
+                self.assertEqual(updated_slice["state"], "failed")
+                self.assertEqual(updated_plan["state"], "failed")
+                self.assertEqual(updated_plan["error"], "boom")
+
+    def test_materialization_plan_recomputes_stale_estimate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload = {
+                "slice_id": "slice_stale",
+                "entity_level": "subfield",
+                "entity_id_short": "1706",
+                "entity_display_name": "Computer Science Applications",
+            }
+            old_plan = {
+                "decision": {"status": "can_fetch", "can_execute": True, "reasons": [], "warnings": []},
+                "estimate": {"estimate_count": 10, "estimate_signature": "old-estimate", "download_signature": "old-download"},
+                "openalex_filter": "primary_topic.subfield.id:1706",
+                "filter_classes": {},
+                "download_policy": {"user_controls_download_after_estimate": True},
+                "limits": {},
+            }
+            new_plan = {
+                **old_plan,
+                "estimate": {"estimate_count": 12, "estimate_signature": "new-estimate", "download_signature": "new-download"},
+            }
+            with (
+                patch.object(slice_workbench, "SLICES_DIR", tmp_path / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.query_planner, "plan_slice", side_effect=[old_plan, new_plan]),
+            ):
+                created = slice_workbench.create_slice(payload)
+                slice_workbench.estimate_slice(created["slice_id"])
+                materialization = slice_workbench.create_materialization_plan(created["slice_id"])
+
+                self.assertEqual(materialization["accepted_estimate_signature"], "new-estimate")
+                self.assertEqual(materialization["accepted_download_signature"], "new-download")
+
 
 if __name__ == "__main__":
     unittest.main()

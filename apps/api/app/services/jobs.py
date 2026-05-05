@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -19,11 +20,11 @@ _RUNS: dict[str, dict[str, Any]] = {}
 
 
 def create_run(action: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if action == "build_from_openalex" and not (
+    if action in {"build_from_openalex", "fetch_slice_dump"} and not _allow_unchecked_download() and not (
         str(payload.get("accepted_estimate_signature") or "").strip()
         and str(payload.get("accepted_download_signature") or "").strip()
     ):
-        raise ValueError("build_from_openalex requires accepted estimate and download signatures. Create or refresh a materialization plan first.")
+        raise ValueError(f"{action} requires accepted estimate and download signatures. Create or refresh a materialization plan first.")
     run_id = _new_run_id()
     doc = {
         "run_id": run_id,
@@ -128,6 +129,7 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
         _mark_dependent_state_completed(run_id, action, result)
         doc.update({"status": "completed", "progress_percent": 100, "progress_stage": "completed", "finished_at": _now(), "result": result, "artifacts": _artifact_links()})
     except Exception as exc:  # pragma: no cover - defensive job boundary
+        _mark_dependent_state_failed(run_id, action, str(exc))
         doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
     _save(doc)
 
@@ -136,12 +138,16 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
     if action == "plan":
         return query_planner.plan_slice(payload)
     if action == "fetch_slice_dump":
-        return pipeline.fetch_slice_dump(payload, progress_callback=lambda progress: _download_progress(run_id, progress))
+        return pipeline.fetch_slice_dump(
+            payload,
+            progress_callback=lambda progress: _download_progress(run_id, progress),
+            require_accepted_signatures=not _allow_unchecked_download(),
+        )
     if action == "build_from_openalex":
         fetched = pipeline.fetch_slice_dump(
             payload,
             progress_callback=lambda progress: _download_progress(run_id, progress),
-            require_accepted_signatures=True,
+            require_accepted_signatures=not _allow_unchecked_download(),
         )
         dump = fetched.get("dump") or {}
         raw_jsonl = str(dump.get("raw_jsonl") or "").strip()
@@ -236,6 +242,21 @@ def _mark_dependent_state_completed(run_id: str, action: str, result: dict[str, 
         slice_workbench.mark_materialization_run_completed(run_id, result)
     except Exception:
         return
+
+
+def _mark_dependent_state_failed(run_id: str, action: str, error: str) -> None:
+    if action not in {"build_from_openalex", "fetch_slice_dump"}:
+        return
+    try:
+        from app.services import slice_workbench
+
+        slice_workbench.mark_materialization_run_failed(run_id, error)
+    except Exception:
+        return
+
+
+def _allow_unchecked_download() -> bool:
+    return os.environ.get("OPENALEX_DSS_ALLOW_UNCHECKED_DOWNLOAD") == "1"
 
 
 def _artifact_links() -> dict[str, str]:

@@ -123,7 +123,8 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
     source_strategy = str(payload.get("source_strategy") or payload.get("data_source_id") or "openalex_cli")
     download_policy = _download_policy(payload, fallback=doc.get("download_policy_default"))
     plan_id = _safe_id(f"mat_{slice_id}_{profile['profile_id']}_{uuid.uuid4().hex[:8]}")
-    estimate = doc.get("latest_estimate") or estimate_slice(slice_id, {"download_policy": download_policy})
+    estimate = estimate_slice(slice_id, {"download_policy": download_policy})
+    doc = get_slice(slice_id)
     materialization = {
         "materialization_id": plan_id,
         "slice_id": slice_id,
@@ -206,8 +207,8 @@ def mark_materialization_run_completed(run_id: str, result: dict[str, Any]) -> N
     fetch = result.get("fetch") if isinstance(result.get("fetch"), dict) else {}
     dump = fetch.get("dump") if isinstance(fetch.get("dump"), dict) else {}
     build = result.get("build") if isinstance(result.get("build"), dict) else {}
-    target_slice_state = "ready" if no_data else ("analyzed" if build else "ready")
-    target_materialization_state = "ready" if not no_data else "planned"
+    target_slice_state = "empty" if no_data else ("analyzed" if build else "ready")
+    target_materialization_state = "empty" if no_data else "ready"
 
     for path in MATERIALIZATIONS_DIR.glob("*.json"):
         plan = _read_json(path)
@@ -233,6 +234,29 @@ def mark_materialization_run_completed(run_id: str, result: dict[str, Any]) -> N
         return
 
 
+def mark_materialization_run_failed(run_id: str, error: str) -> None:
+    _ensure_dirs()
+    for path in MATERIALIZATIONS_DIR.glob("*.json"):
+        plan = _read_json(path)
+        if str(plan.get("run_id") or "") != run_id:
+            continue
+        plan["state"] = "failed"
+        plan["updated_at_utc"] = _now()
+        plan["error"] = error
+        _write_materialization(plan)
+        try:
+            doc = get_slice(str(plan["slice_id"]))
+        except KeyError:
+            return
+        doc["state"] = "failed"
+        doc["latest_materialization_plan"] = plan
+        doc["updated_at_utc"] = _now()
+        doc["error"] = error
+        doc["lifecycle"] = _lifecycle(doc["state"])
+        _write_slice(doc)
+        return
+
+
 def workbench_summary() -> dict[str, Any]:
     tables = warehouse.list_tables()
     slices = list_slices(limit=20)
@@ -253,9 +277,11 @@ SLICE_STATES = [
     {"id": "estimated", "label": "Estimated", "description": "Оценены объем и API-бюджет."},
     {"id": "planned", "label": "Planned", "description": "Выбран режим хранения и технический бюджет загрузки."},
     {"id": "materializing", "label": "Materializing", "description": "Идет загрузка или сборка локального набора."},
+    {"id": "empty", "label": "Empty", "description": "OpenAlex вернул пустой корпус для выбранного среза."},
     {"id": "ready", "label": "Ready", "description": "Мини-дамп и локальные таблицы готовы."},
     {"id": "analyzed", "label": "Analyzed", "description": "Индексы и рейтинги рассчитаны."},
     {"id": "reported", "label": "Reported", "description": "Отчет и паспорта подготовлены."},
+    {"id": "failed", "label": "Failed", "description": "Загрузка или расчет завершились ошибкой."},
 ]
 
 

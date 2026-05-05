@@ -55,6 +55,7 @@ def download_works_metadata(
     files_dir = ensure_dir(base_dir / "files")
     raw_path = base_dir / "works.jsonl.gz"
     dump_manifest_path = base_dir / "dump_manifest.json"
+    failed_dump_manifest_path = base_dir / "dump_manifest_failed.json"
     stdout_path = base_dir / "openalex_cli_stdout.log"
     stderr_path = base_dir / "openalex_cli_stderr.log"
     manifest_path = base_dir / "files_manifest.json"
@@ -78,6 +79,9 @@ def download_works_metadata(
     accepted_download_signature = str((estimate or {}).get("accepted_download_signature") or "")
     planned_records = int(((estimate or {}).get("estimate_count") or 0))
     planned_raw_bytes = int(((estimate or {}).get("estimated_cli_metadata_bytes") or (estimate or {}).get("estimated_raw_bytes_p90") or (estimate or {}).get("estimated_raw_bytes") or 0))
+    estimate_signature_verified = estimate_signature == current_corpus_signature
+    accepted_estimate_signature_verified = bool(accepted_estimate_signature and accepted_estimate_signature == current_corpus_signature)
+    download_signature_verified = bool(accepted_download_signature and accepted_download_signature == current_download_signature)
 
     if progress_callback:
         progress_callback({"percent": 30, "stage": "running OpenAlex CLI", "fetched": 0})
@@ -91,12 +95,61 @@ def download_works_metadata(
     if progress_callback:
         progress_callback({"percent": 82, "stage": "packing CLI JSON files", "fetched": 0})
 
-    records, files_manifest = _pack_work_json_files(files_dir, raw_path, progress_callback=progress_callback)
-    write_json(manifest_path, {"files": files_manifest, "records": records})
+    try:
+        records, files_manifest = _pack_work_json_files(files_dir, raw_path, progress_callback=progress_callback, manifest_path=manifest_path)
+    except Exception as exc:
+        finished_at = datetime.now(timezone.utc)
+        failed_manifest = {
+            "slice_id": cfg.slice_name,
+            "dump_id": f"dump_failed_{cfg.slice_name}",
+            "source_mode": "openalex_cli",
+            "source": "OpenAlex CLI works metadata",
+            "created_at_utc": finished_at.isoformat(),
+            "download_started_at_utc": started_at.isoformat(),
+            "download_finished_at_utc": finished_at.isoformat(),
+            "elapsed_seconds": round((finished_at - started_at).total_seconds(), 3),
+            "openalex_request": {"filter": filter_value, "search": "", "command": public_command, "content": "metadata_only"},
+            "openalex_cli": {
+                "executable": status["executable"],
+                "version": cli_version,
+                "stdout_log": str(stdout_path),
+                "stderr_log": str(stderr_path),
+            },
+            "signatures": {
+                "estimate_signature": estimate_signature,
+                "download_signature": current_download_signature,
+                "corpus_signature": current_corpus_signature,
+                "accepted_estimate_signature": accepted_estimate_signature or None,
+                "accepted_download_signature": accepted_download_signature or None,
+                "estimate_signature_verified": estimate_signature_verified,
+                "accepted_estimate_signature_verified": accepted_estimate_signature_verified,
+                "download_signature_verified": download_signature_verified,
+                "download_equivalence": consistency.get("download_equivalence"),
+                "compatible": bool(consistency.get("compatible")),
+            },
+            "records_expected": planned_records or None,
+            "records_downloaded": 0,
+            "no_data": False,
+            "stop_reason": "cli_pack_failed",
+            "scientific_completeness": "failed",
+            "allowed_for_final_analysis": False,
+            "raw_jsonl": str(raw_path),
+            "files_manifest": str(manifest_path),
+            "error": str(exc),
+        }
+        write_json(failed_dump_manifest_path, failed_manifest)
+        raise
     checksum = sha256_file(raw_path)
     dump_id = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
     finished_at = datetime.now(timezone.utc)
     actual_raw_bytes = raw_path.stat().st_size
+    allowed_for_final_analysis = (
+        bool(consistency.get("compatible"))
+        and estimate_signature_verified
+        and accepted_estimate_signature_verified
+        and download_signature_verified
+        and records > 0
+    )
     dump_manifest = {
         "slice_id": cfg.slice_name,
         "dump_id": dump_id,
@@ -124,9 +177,9 @@ def download_works_metadata(
             "corpus_signature": current_corpus_signature,
             "accepted_estimate_signature": accepted_estimate_signature or None,
             "accepted_download_signature": accepted_download_signature or None,
-            "estimate_signature_verified": estimate_signature == current_corpus_signature,
-            "accepted_estimate_signature_verified": bool(accepted_estimate_signature and accepted_estimate_signature == current_corpus_signature),
-            "download_signature_verified": bool(accepted_download_signature and accepted_download_signature == current_download_signature),
+            "estimate_signature_verified": estimate_signature_verified,
+            "accepted_estimate_signature_verified": accepted_estimate_signature_verified,
+            "download_signature_verified": download_signature_verified,
             "download_equivalence": consistency.get("download_equivalence"),
             "compatible": bool(consistency.get("compatible")),
         },
@@ -138,8 +191,8 @@ def download_works_metadata(
         "estimated_raw_bytes": planned_raw_bytes or None,
         "actual_vs_estimate_ratio": round(actual_raw_bytes / planned_raw_bytes, 4) if planned_raw_bytes else None,
         "stop_reason": "cli_completed",
-        "scientific_completeness": "complete",
-        "allowed_for_final_analysis": True,
+        "scientific_completeness": "complete" if records > 0 else "empty",
+        "allowed_for_final_analysis": allowed_for_final_analysis,
         "raw_jsonl": str(raw_path),
         "raw_jsonl_sha256": checksum,
         "files_manifest": str(manifest_path),
@@ -149,9 +202,9 @@ def download_works_metadata(
             "checkpointing": True,
             "adaptive_rate_limiting": True,
             "parallel_downloads": True,
-            "estimate_signature_verified": estimate_signature == current_corpus_signature,
-            "accepted_estimate_signature_verified": bool(accepted_estimate_signature and accepted_estimate_signature == current_corpus_signature),
-            "download_signature_verified": bool(accepted_download_signature and accepted_download_signature == current_download_signature),
+            "estimate_signature_verified": estimate_signature_verified,
+            "accepted_estimate_signature_verified": accepted_estimate_signature_verified,
+            "download_signature_verified": download_signature_verified,
         },
         "storage_plan": {
             "cli_output_dir": str(files_dir),
@@ -175,6 +228,7 @@ def _pack_work_json_files(
     *,
     strict: bool = True,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    manifest_path: Path | None = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     records = 0
     manifest: list[dict[str, Any]] = []
@@ -206,6 +260,8 @@ def _pack_work_json_files(
             manifest.append(item)
             if progress_callback and (index == len(candidates) or records % 500 == 0):
                 progress_callback({"percent": 82, "stage": f"packed {records} works", "fetched": records, "files_seen": index})
+    if manifest_path:
+        write_json(manifest_path, {"files": manifest, "records": records, "errors": errors, "status": "failed" if errors else "ok"})
     if strict and errors:
         raise ValueError("Failed to parse OpenAlex CLI metadata files: " + "; ".join(errors[:5]))
     return records, manifest

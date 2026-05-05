@@ -53,6 +53,8 @@ def fetch_slice_dump(
     *,
     require_accepted_signatures: bool = False,
 ) -> dict[str, Any]:
+    if not require_accepted_signatures and not _allow_unchecked_download():
+        require_accepted_signatures = True
     cfg = _cfg({**payload, "workflow_mode": "strict_works"})
     _write_runtime_config(cfg)
     api_key = str(payload.get("api_key") or "").strip()
@@ -138,16 +140,24 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         DATA / "passports/quality_report.json",
         DATA / "normalized/work_topics_flat.csv",
     )
+    dump_manifest = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
+    source_type = "openalex_cli_dump_import" if dump_manifest else "local_file"
     write_json(
         DATA / "passports/fetch_meta.json",
         {
-            "source_type": "local_file",
+            "source_type": source_type,
             "source_entity": "works",
             "source_file": profile,
+            "dump_id": payload.get("dump_id") or dump_manifest.get("dump_id"),
+            "dump_manifest_path": str(Path(str(dump_manifest.get("raw_jsonl") or source)).with_name("dump_manifest.json")) if dump_manifest else "",
+            "raw_jsonl_sha256": dump_manifest.get("raw_jsonl_sha256") or profile.get("sha256"),
+            "openalex_filter": ((dump_manifest.get("openalex_request") or {}).get("filter") if dump_manifest else "") or "",
+            "accepted_estimate_signature": ((dump_manifest.get("signatures") or {}).get("accepted_estimate_signature") if dump_manifest else None),
+            "accepted_download_signature": ((dump_manifest.get("signatures") or {}).get("accepted_download_signature") if dump_manifest else None),
             "fetched_works": quality.get("raw_works"),
             "total_available": quality.get("raw_works"),
-            "filter": "локальный импорт дампа OpenAlex Works",
-            "used_api_key": False,
+            "filter": "импорт OpenAlex CLI mini-dump" if dump_manifest else "локальный импорт дампа OpenAlex Works",
+            "used_api_key": bool(dump_manifest.get("used_api_key")) if dump_manifest else False,
         },
     )
     _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
@@ -305,6 +315,10 @@ def _dump_id_from_payload(payload: dict[str, Any]) -> str:
     if source.get("sha256"):
         return f"dump_{str(source['sha256'])[:16]}"
     return ""
+
+
+def _allow_unchecked_download() -> bool:
+    return os.environ.get("OPENALEX_DSS_ALLOW_UNCHECKED_DOWNLOAD") == "1"
 
 
 def _safe_id(value: str) -> str:
