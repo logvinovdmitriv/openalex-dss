@@ -82,6 +82,17 @@ def table_for_run(
     offset: int = 0,
 ) -> dict[str, Any]:
     get_run(run_id)
+    archived = _run_table_path(run_id, table_name)
+    if archived:
+        return warehouse.query_table_file(
+            table_name,
+            archived,
+            q=q,
+            fraction_mode=fraction_mode,
+            metric=metric,
+            limit=limit,
+            offset=offset,
+        )
     return warehouse.query_table(
         table_name,
         q=q,
@@ -90,6 +101,15 @@ def table_for_run(
         limit=limit,
         offset=offset,
     )
+
+
+def _run_table_path(run_id: str, table_name: str) -> Path | None:
+    run_dir = RUNS_DIR / run_id / "tables"
+    for suffix in (".parquet", ".csv"):
+        candidate = run_dir / f"{table_name}{suffix}"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:

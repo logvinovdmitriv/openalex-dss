@@ -9,7 +9,7 @@ from openalex_mvp.normalize import normalize_raw
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--raw", default="data/raw/works_raw.jsonl")
+    parser.add_argument("--raw", required=True, help="Path to a fixed OpenAlex Works JSONL/JSONL.GZ dump, for example data/raw/openalex_cli/<slice_id>/works.jsonl.gz")
     parser.add_argument("--works-out", default="data/normalized/works_flat.csv")
     parser.add_argument("--auth-out", default="data/normalized/authorships_flat.csv")
     parser.add_argument("--quality-out", default="data/passports/quality_report.json")

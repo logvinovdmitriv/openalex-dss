@@ -10,7 +10,7 @@ import _path  # noqa: F401
 from openalex_mvp.config import load_config, replace_config
 from openalex_mvp.metrics import build_author_work_metrics, compute_indices
 from openalex_mvp.normalize import normalize_raw
-from openalex_mvp.openalex import build_filter, estimate_works
+from openalex_mvp.openalex import build_filter, download_consistency, estimate_works
 from openalex_mvp.ranking import build_ratings
 from openalex_mvp.stats import top_n_overlap
 
@@ -115,6 +115,16 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertEqual(estimate["facets"]["work_types"]["rows"][0]["key"], "article")
             called_params = [call.args[1] for call in get_json.call_args_list]
             self.assertTrue(all("per-page" not in params for params in called_params))
+
+    def test_search_mode_is_not_cli_download_compatible(self) -> None:
+        cfg = replace_config(
+            load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
+            filter_mode="search",
+            text_search_query="ergonomics",
+        )
+        result = download_consistency(cfg)
+        self.assertFalse(result["compatible"])
+        self.assertIn("search", result["reasons"][0])
 
 
 def _work(work_id: str, author_id: str, citations: int) -> dict:

@@ -83,6 +83,10 @@ It sends lightweight `/works` estimate/sample/group_by requests, reads
 `meta.count`, estimates records, API cost and raw JSONL size, then classifies the run as
 `can_fetch`, `medium_slice`, `large_slice`, `very_large_slice` or `no_data`.
 These statuses are user-facing guidance, not hard download caps.
+The planner also records `estimate_signature` and `download_signature`.
+If the API estimate uses a parameter that the installed OpenAlex CLI cannot
+express, such as `search`, the run is marked `unsupported_cli_filter` instead
+of silently downloading a different corpus.
 The same planner is used by `POST /api/v1/runs` action `plan`.
 
 OpenAlex GET responses are cached under:
@@ -143,7 +147,7 @@ mode and is intentionally separate from the full S3 snapshot.
 The primary DSS workflow is:
 
 1. choose OpenAlex field, subfield or topic by name;
-2. choose filter mode: primary topic, any topic, keyword or fixed text search;
+2. choose filter mode: primary topic, any topic or keyword; fixed text search is estimate-only until an ID-based CLI download mode is added;
 3. optionally restrict by organization and country code;
 4. materialize the Works request as a fixed JSONL.GZ dump through OpenAlex CLI;
 5. import the fixed dump, then flatten works and authorships locally;

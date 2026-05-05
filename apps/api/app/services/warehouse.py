@@ -58,15 +58,19 @@ def register_views(conn: duckdb.DuckDBPyConnection) -> None:
     for name, path in TABLE_FILES.items():
         table_path = _preferred_table_path(name, path)
         if table_path.exists():
-            escaped_path = str(table_path).replace("'", "''")
-            reader = "read_parquet" if table_path.suffix.lower() == ".parquet" else "read_csv_auto"
-            args = "" if reader == "read_parquet" else ", header=true, ignore_errors=true"
-            conn.execute(
-                f"""
-                CREATE OR REPLACE VIEW {name} AS
-                SELECT * FROM {reader}('{escaped_path}'{args})
-                """
-            )
+            _register_file_view(conn, name, table_path)
+
+
+def _register_file_view(conn: duckdb.DuckDBPyConnection, name: str, table_path: Path) -> None:
+    escaped_path = str(table_path).replace("'", "''")
+    reader = "read_parquet" if table_path.suffix.lower() == ".parquet" else "read_csv_auto"
+    args = "" if reader == "read_parquet" else ", header=true, ignore_errors=true"
+    conn.execute(
+        f"""
+        CREATE OR REPLACE VIEW {name} AS
+        SELECT * FROM {reader}('{escaped_path}'{args})
+        """
+    )
 
 
 def table_exists(name: str) -> bool:
@@ -131,6 +135,78 @@ def query_table(
     fields = table_schema(table)
     if not fields:
         return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset}
+    with connect() as conn:
+        return _query_registered_table(
+            conn,
+            table,
+            fields,
+            q=q,
+            fraction_mode=fraction_mode,
+            metric=metric,
+            author_id=author_id,
+            work_id=work_id,
+            sort=sort,
+            direction=direction,
+            limit=limit,
+            offset=offset,
+        )
+
+
+def query_table_file(
+    table: str,
+    path: str | Path,
+    *,
+    q: str = "",
+    fraction_mode: str = "",
+    metric: str = "",
+    author_id: str = "",
+    work_id: str = "",
+    sort: str = "",
+    direction: str = "desc",
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    if table not in TABLE_FILES:
+        raise ValueError(f"Unknown table: {table}")
+    table_path = Path(path)
+    if not table_path.exists():
+        return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset, "source_path": str(table_path)}
+    with duckdb.connect(":memory:") as conn:
+        _register_file_view(conn, table, table_path)
+        fields = [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
+        payload = _query_registered_table(
+            conn,
+            table,
+            fields,
+            q=q,
+            fraction_mode=fraction_mode,
+            metric=metric,
+            author_id=author_id,
+            work_id=work_id,
+            sort=sort,
+            direction=direction,
+            limit=limit,
+            offset=offset,
+        )
+        payload["source_path"] = str(table_path)
+        return payload
+
+
+def _query_registered_table(
+    conn: duckdb.DuckDBPyConnection,
+    table: str,
+    fields: list[str],
+    *,
+    q: str = "",
+    fraction_mode: str = "",
+    metric: str = "",
+    author_id: str = "",
+    work_id: str = "",
+    sort: str = "",
+    direction: str = "desc",
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
 
     where: list[str] = []
     args: list[Any] = []
@@ -158,13 +234,12 @@ def query_table(
     limit = max(1, min(1000, int(limit)))
     offset = max(0, int(offset))
 
-    with connect() as conn:
-        total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
-        rel = conn.execute(
-            f"SELECT * FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
-            [*args, limit, offset],
-        )
-        rows = _records(rel)
+    total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
+    rel = conn.execute(
+        f"SELECT * FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
+        [*args, limit, offset],
+    )
+    rows = _records(rel)
     return {"table": table, "fields": fields, "rows": rows, "total": total, "limit": limit, "offset": offset}
 
 
@@ -291,8 +366,8 @@ def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None 
 
     country_code = filters.get("country_code")
     if country_code:
-        where.append("upper(coalesce(au.country_codes_csv, '')) ILIKE ?")
-        args.append(f"%{country_code}%")
+        where.append("list_contains(string_split(upper(coalesce(au.country_codes_csv, '')), '|'), ?)")
+        args.append(str(country_code).upper())
 
     author_id = filters.get("author_id")
     if author_id:
@@ -328,6 +403,11 @@ def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None 
     if open_access_is_oa in {"true", "false"} and "open_access_is_oa" in work_fields:
         where.append("lower(CAST(coalesce(w.open_access_is_oa, false) AS VARCHAR)) = ?")
         args.append(open_access_is_oa)
+
+    has_abstract = filters.get("has_abstract")
+    if has_abstract in {"true", "false"} and "has_abstract" in work_fields:
+        where.append("lower(CAST(coalesce(w.has_abstract, false) AS VARCHAR)) = ?")
+        args.append(has_abstract)
 
     min_cited_by_count = filters.get("min_cited_by_count")
     if min_cited_by_count:

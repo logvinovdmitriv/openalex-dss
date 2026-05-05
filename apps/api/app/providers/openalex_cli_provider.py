@@ -16,7 +16,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from openalex_mvp.io_utils import ensure_dir, sha256_file, write_json  # noqa: E402
-from openalex_mvp.openalex import build_filter  # noqa: E402
+from openalex_mvp.openalex import build_filter, cli_download_signature, corpus_signature, download_consistency  # noqa: E402
 
 
 def cli_status() -> dict[str, Any]:
@@ -34,6 +34,7 @@ def download_works_metadata(
     *,
     api_key: str,
     out_dir: str | Path | None = None,
+    estimate: dict[str, Any] | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     status = cli_status()
@@ -41,6 +42,10 @@ def download_works_metadata(
         raise RuntimeError("OpenAlex CLI is not installed. Install it locally with: pip install openalex-official")
     if not api_key.strip():
         raise ValueError("OpenAlex CLI mode requires an OpenAlex API key.")
+
+    consistency = download_consistency(cfg)
+    if consistency.get("compatible") is False:
+        raise ValueError("; ".join(consistency.get("reasons") or []) or "This slice cannot be downloaded through the installed OpenAlex CLI.")
 
     filter_value = build_filter(cfg)
     if not filter_value:
@@ -50,6 +55,10 @@ def download_works_metadata(
     files_dir = ensure_dir(base_dir / "files")
     raw_path = base_dir / "works.jsonl.gz"
     passport_path = base_dir / "slice_passport.json"
+    stdout_path = base_dir / "openalex_cli_stdout.log"
+    stderr_path = base_dir / "openalex_cli_stderr.log"
+    manifest_path = base_dir / "files_manifest.json"
+    started_at = datetime.now(timezone.utc)
     command = [
         str(status["executable"]),
         "download",
@@ -61,50 +70,83 @@ def download_works_metadata(
         filter_value,
     ]
     public_command = [part if part != api_key else "***" for part in command]
+    cli_version = _cli_version(str(status["executable"]))
+    estimate_signature = str((estimate or {}).get("estimate_signature") or corpus_signature(cfg))
+    planned_records = int(((estimate or {}).get("estimate_count") or 0))
+    planned_raw_bytes = int(((estimate or {}).get("estimated_raw_bytes") or 0))
 
     if progress_callback:
         progress_callback({"percent": 30, "stage": "running OpenAlex CLI", "fetched": 0})
 
     completed = subprocess.run(command, cwd=str(base_dir), text=True, capture_output=True, check=False)
+    stdout_path.write_text(completed.stdout or "", encoding="utf-8", newline="\n")
+    stderr_path.write_text(completed.stderr or "", encoding="utf-8", newline="\n")
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or completed.stdout or "OpenAlex CLI failed").strip())
 
     if progress_callback:
         progress_callback({"percent": 82, "stage": "packing CLI JSON files", "fetched": 0})
 
-    records = _pack_work_json_files(files_dir, raw_path)
+    records, files_manifest = _pack_work_json_files(files_dir, raw_path, progress_callback=progress_callback)
+    write_json(manifest_path, {"files": files_manifest, "records": records})
     checksum = sha256_file(raw_path)
     dump_id = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
+    finished_at = datetime.now(timezone.utc)
+    actual_raw_bytes = raw_path.stat().st_size
     passport = {
         "slice_id": cfg.slice_name,
         "dump_id": dump_id,
         "source_mode": "openalex_cli",
         "source": "OpenAlex CLI works metadata",
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "created_at_utc": finished_at.isoformat(),
+        "download_started_at_utc": started_at.isoformat(),
+        "download_finished_at_utc": finished_at.isoformat(),
+        "elapsed_seconds": round((finished_at - started_at).total_seconds(), 3),
         "openalex_request": {
             "filter": filter_value,
+            "search": "",
             "command": public_command,
             "content": "metadata_only",
         },
+        "openalex_cli": {
+            "executable": status["executable"],
+            "version": cli_version,
+            "stdout_log": str(stdout_path),
+            "stderr_log": str(stderr_path),
+        },
+        "signatures": {
+            "estimate_signature": estimate_signature,
+            "download_signature": cli_download_signature(cfg),
+            "corpus_signature": corpus_signature(cfg),
+            "compatible": estimate_signature == corpus_signature(cfg),
+        },
+        "records_expected": planned_records or None,
         "records_downloaded": records,
+        "records_delta": (records - planned_records) if planned_records else None,
         "no_data": records == 0,
-        "bytes_written": raw_path.stat().st_size,
+        "bytes_written": actual_raw_bytes,
+        "estimated_raw_bytes": planned_raw_bytes or None,
+        "actual_vs_estimate_ratio": round(actual_raw_bytes / planned_raw_bytes, 4) if planned_raw_bytes else None,
         "stop_reason": "cli_completed",
         "scientific_completeness": "complete",
         "allowed_for_final_analysis": True,
         "raw_jsonl": str(raw_path),
         "raw_jsonl_sha256": checksum,
+        "files_manifest": str(manifest_path),
         "used_api_key": True,
         "execution_plan": {
             "strategy": "openalex_cli_filtered_metadata",
             "checkpointing": True,
             "adaptive_rate_limiting": True,
             "parallel_downloads": True,
+            "download_signature_verified": estimate_signature == corpus_signature(cfg),
         },
         "storage_plan": {
             "cli_output_dir": str(files_dir),
             "raw_jsonl": str(raw_path),
-            "raw_size_mb": round(raw_path.stat().st_size / (1024 * 1024), 3),
+            "raw_size_mb": round(actual_raw_bytes / (1024 * 1024), 3),
+            "cleanup_policy": "keep_cli_files_and_packed_jsonl_gz",
+            "kept_raw_files": True,
         },
     }
     write_json(passport_path, passport)
@@ -115,17 +157,60 @@ def download_works_metadata(
     return passport
 
 
-def _pack_work_json_files(files_dir: Path, raw_path: Path) -> int:
+def _pack_work_json_files(
+    files_dir: Path,
+    raw_path: Path,
+    *,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[int, list[dict[str, Any]]]:
     records = 0
-    json_files = sorted(path for path in files_dir.rglob("*.json") if path.is_file())
+    manifest: list[dict[str, Any]] = []
+    candidates = sorted(path for path in files_dir.rglob("*") if path.is_file() and _supported_metadata_file(path))
     with gzip.open(raw_path, "wt", encoding="utf-8", newline="\n") as handle:
-        for path in json_files:
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if not str(payload.get("id") or "").startswith("https://openalex.org/W"):
-                continue
-            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
-            records += 1
-    return records
+        for index, path in enumerate(candidates, start=1):
+            before = records
+            for payload in _iter_work_payloads(path):
+                if not str(payload.get("id") or "").startswith("https://openalex.org/W"):
+                    continue
+                handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+                records += 1
+            file_records = records - before
+            manifest.append(
+                {
+                    "path": str(path.relative_to(files_dir)),
+                    "bytes": path.stat().st_size,
+                    "records": file_records,
+                    "sha256": sha256_file(path) if file_records else "",
+                }
+            )
+            if progress_callback and (index == len(candidates) or records % 500 == 0):
+                progress_callback({"percent": 82, "stage": f"packed {records} works", "fetched": records, "files_seen": index})
+    return records, manifest
+
+
+def _supported_metadata_file(path: Path) -> bool:
+    name = path.name.lower()
+    return name.endswith(".json") or name.endswith(".jsonl") or name.endswith(".jsonl.gz")
+
+
+def _iter_work_payloads(path: Path) -> list[dict[str, Any]]:
+    try:
+        if path.name.lower().endswith(".jsonl.gz"):
+            with gzip.open(path, "rt", encoding="utf-8", newline="\n") as handle:
+                return [json.loads(line) for line in handle if line.strip()]
+        if path.name.lower().endswith(".jsonl"):
+            with path.open("rt", encoding="utf-8", newline="\n") as handle:
+                return [json.loads(line) for line in handle if line.strip()]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict) and isinstance(payload.get("results"), list):
+        return [item for item in payload["results"] if isinstance(item, dict)]
+    return [payload] if isinstance(payload, dict) else []
+
+
+def _cli_version(executable: str) -> str:
+    completed = subprocess.run([executable, "--version"], text=True, capture_output=True, check=False)
+    return (completed.stdout or completed.stderr or "").strip()

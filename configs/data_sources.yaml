@@ -19,6 +19,7 @@ sources:
     install: "pip install openalex-official"
     supports:
       - filtered_work_metadata
+      - filter_only_download
       - doi_resolution
       - checkpointing
       - adaptive_rate_limiting

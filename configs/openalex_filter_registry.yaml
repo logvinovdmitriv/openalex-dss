@@ -111,6 +111,13 @@ filters:
     derived_field: "p"
 sort:
   default: "publication_date:asc,openalex:asc"
+special_parameters:
+  search:
+    label: "Полнотекстовый поиск OpenAlex API"
+    api_parameter: "search"
+    api_estimate_supported: true
+    cli_supported: false
+    reason: "Installed OpenAlex CLI accepts --filter but not the API search parameter; search slices require a future ID-based download mode."
 facets:
   work_types:
     label: "Типы публикаций"

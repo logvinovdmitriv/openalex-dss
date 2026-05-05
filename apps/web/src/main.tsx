@@ -264,7 +264,7 @@ function Workbench() {
       setEstimate(estimateResult);
       setSliceDoc({ ...doc, latest_estimate: estimateResult, state: "estimated" });
       const decision = estimateResult?.decision ?? {};
-      if (decision.status === "no_data") {
+      if (decision.can_execute === false) {
         const reason = [...(decision.reasons ?? []), ...(decision.warnings ?? [])].filter(Boolean).join(" ");
         throw new Error(reason || "OpenAlex не вернул работ для выбранных фильтров.");
       }
@@ -590,7 +590,7 @@ function SlicesPage({
   const decision = estimate?.decision ?? {};
   const rawEstimate = estimate?.estimate ?? {};
   const hasEstimate = Boolean(estimate);
-  const canRun = hasEstimate && decision.status !== "no_data";
+  const canRun = hasEstimate && decision.can_execute !== false;
 
   return (
     <div className="stack">
@@ -652,7 +652,7 @@ function SlicesPage({
             <CheckPill active label="Исключать служебные тексты" />
             <CheckPill active label="XPAC выключен" />
           </div>
-          {!filters.subject_id && !filters.keyword_id && !filters.text_search_query && <div className="notice"><b>Все направления</b><span>Тематический фильтр не применяется. Перед скачиванием система оценит объем и при необходимости заблокирует слишком большой срез.</span></div>}
+          {!filters.subject_id && !filters.keyword_id && !filters.text_search_query && <div className="notice"><b>Все направления</b><span>Тематический фильтр не применяется. Перед скачиванием система покажет прогноз объема, а решение о загрузке остается за пользователем.</span></div>}
           {dateInvalid && <div className="notice error"><b>Проверьте период</b><span>Дата начала не должна быть позже даты окончания.</span></div>}
           <div className="action-row">
             <button onClick={onOpenResolver}><Settings2 size={16} /> Тонкая настройка</button>
@@ -732,7 +732,7 @@ function SlicesPage({
           </div>
         )}
         <div className="action-row">
-          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !hasEstimate || !downloadConfigReady || decision.status === "no_data"}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} Скачать срез через OpenAlex CLI</button>
+          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !hasEstimate || !downloadConfigReady || decision.can_execute === false}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} Скачать срез через OpenAlex CLI</button>
         </div>
       </section>
 

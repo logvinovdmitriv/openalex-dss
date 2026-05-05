@@ -19,6 +19,7 @@ WORK_FIELDS = [
     "language",
     "cited_by_count",
     "open_access_is_oa",
+    "has_abstract",
     "is_retracted",
     "is_paratext",
     "is_xpac",
@@ -72,7 +73,7 @@ WORK_TOPIC_FIELDS = [
 ]
 
 def normalize_raw(
-    raw_path: str | Path = "data/raw/works_raw.jsonl",
+    raw_path: str | Path = "data/raw/openalex_cli/current/works.jsonl.gz",
     works_out: str | Path = "data/normalized/works_flat.csv",
     authorships_out: str | Path = "data/normalized/authorships_flat.csv",
     quality_out: str | Path = "data/passports/quality_report.json",
@@ -129,6 +130,7 @@ def normalize_raw(
                 "language": work.get("language"),
                 "cited_by_count": int(work.get("cited_by_count") or 0),
                 "open_access_is_oa": open_access.get("is_oa"),
+                "has_abstract": bool(work.get("has_abstract") or work.get("abstract_inverted_index")),
                 "is_retracted": bool(work.get("is_retracted", False)),
                 "is_paratext": bool(work.get("is_paratext", False)),
                 "is_xpac": bool(work.get("is_xpac", False)),

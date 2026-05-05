@@ -181,7 +181,15 @@ Backend упаковывает результат CLI в:
 
 - `works.jsonl.gz` - неизменяемый raw-файл работ выбранного среза;
 - `slice_passport.json` - фильтр OpenAlex, способ загрузки, число записей,
-  SHA-256 и заметку, что это compact slice, а не полный snapshot.
+  сигнатуры estimate/download, SHA-256, CLI version, stdout/stderr logs и
+  заметку, что это compact slice, а не полный snapshot.
+
+Важно: установленный OpenAlex CLI поддерживает `--filter`, `--ids`, `--stdin`
+и `--sample`, но не поддерживает API-параметры `search`, `select` и `sort` как
+часть `openalex download --filter`. Поэтому full-text `search` можно оценить
+через API, но нельзя молча скачать тем же CLI-фильтром. В таком случае система
+помечает срез как `unsupported_cli_filter`; корректный будущий режим для него -
+сначала собрать work IDs, затем скачать их через CLI `--ids`/`--stdin`.
 
 Если путь начинается с `data/`, CLI и backend сохраняют файл во внешний
 `OPENALEX_DSS_DATA_DIR`, поэтому тяжелые дампы и таблицы не попадают в

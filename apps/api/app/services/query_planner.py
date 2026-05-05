@@ -43,6 +43,17 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
         estimated_raw_bytes=int(estimate["estimated_raw_bytes"]),
         limits=limits,
     )
+    consistency = estimate.get("download_consistency") or {}
+    if consistency.get("compatible") is False:
+        reasons = [str(item) for item in consistency.get("reasons") or [] if str(item).strip()]
+        decision = {
+            **decision,
+            "status": "unsupported_cli_filter",
+            "strategy": "refine_slice",
+            "can_execute": False,
+            "user_decides_after_estimate": False,
+            "reasons": [*(decision.get("reasons") or []), *reasons],
+        }
     return {
         "status": "ok",
         "planner_version": "mvp_query_planner_v1",

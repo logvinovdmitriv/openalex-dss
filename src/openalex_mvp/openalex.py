@@ -114,6 +114,8 @@ def estimate_works(
     planned_pages = (planned_records + max(1, cfg.per_page) - 1) // max(1, cfg.per_page)
     public_params = {key: value for key, value in count_params.items() if key != "api_key"}
     public_sample_params = {key: value for key, value in sample_params.items() if key != "api_key"}
+    corpus = corpus_request(cfg)
+    consistency = download_consistency(cfg)
     return {
         "api_base": API_BASE,
         "estimate_count": count,
@@ -132,6 +134,10 @@ def estimate_works(
         "per_page": cfg.per_page,
         "estimated_memory_mb": round((planned_records * 260) / (1024 * 1024), 3),
         "estimated_parquet_mb": round((planned_records * max(512, estimated_record_bytes * 0.32)) / (1024 * 1024), 3),
+        "corpus_request": corpus,
+        "estimate_signature": corpus_signature(cfg),
+        "download_signature": cli_download_signature(cfg),
+        "download_consistency": consistency,
         "openalex_request": public_params,
         "sample_request": public_sample_params,
         "facets": facet_payloads,
@@ -143,6 +149,37 @@ def estimate_works(
             "hits_total": after["hits"],
             "misses_total": after["misses"],
         },
+    }
+
+
+def corpus_request(cfg: SliceConfig) -> dict[str, str]:
+    request = {"filter": build_filter(cfg)}
+    if cfg.filter_mode == "search" and cfg.text_search_query.strip():
+        request["search"] = cfg.text_search_query.strip()
+    return request
+
+
+def corpus_signature(cfg: SliceConfig) -> str:
+    canonical = json.dumps(corpus_request(cfg), ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def cli_download_signature(cfg: SliceConfig) -> str:
+    canonical = json.dumps({"filter": build_filter(cfg), "tool": "openalex_cli"}, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def download_consistency(cfg: SliceConfig) -> dict[str, Any]:
+    reasons: list[str] = []
+    if cfg.filter_mode == "search" and cfg.text_search_query.strip():
+        reasons.append("Installed OpenAlex CLI supports --filter but not the API search parameter; use OpenAlex entity filters or a future ID-based search download mode.")
+    compatible = not reasons
+    return {
+        "compatible": compatible,
+        "estimate_signature": corpus_signature(cfg),
+        "download_signature": cli_download_signature(cfg),
+        "tool": "openalex_cli",
+        "reasons": reasons,
     }
 
 
@@ -193,7 +230,7 @@ def _works_params(cfg: SliceConfig, per_page: int) -> dict[str, str]:
 
 
 def _works_select_fields(cfg: SliceConfig) -> tuple[str, ...]:
-    required = ("language", "open_access")
+    required = ("language", "open_access", "has_abstract")
     return tuple(dict.fromkeys([*cfg.select_fields, *required]))
 
 

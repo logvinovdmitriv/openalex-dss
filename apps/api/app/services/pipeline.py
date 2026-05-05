@@ -53,9 +53,15 @@ def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[
     api_key = str(payload.get("api_key") or "").strip()
     plan = query_planner.plan_slice({**payload, "workflow_mode": "strict_works"})
     decision = plan.get("decision") or {}
+    accepted_signature = str(payload.get("accepted_estimate_signature") or "").strip()
+    current_signature = str(((plan.get("estimate") or {}).get("estimate_signature") or "")).strip()
+    if accepted_signature and current_signature and accepted_signature != current_signature:
+        raise ValueError("Параметры среза изменились после оценки. Обновите оценку и подтвердите скачивание заново.")
     if decision.get("status") == "no_data":
         _write_pipeline_summary("fetch_slice_dump", cfg, {**payload, "query_plan": plan, "dump": {"no_data": True}})
         return {"status": "ok", "mode": "fetch_slice_dump", "query_plan": plan, "dump": {"no_data": True, "records_downloaded": 0}}
+    if decision.get("can_execute") is False:
+        raise ValueError("; ".join(decision.get("reasons") or []) or "Срез нельзя скачать через текущий OpenAlex CLI plan.")
     old = os.environ.get(cfg.api_key_env)
     try:
         if api_key:
@@ -66,6 +72,7 @@ def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[
             cfg,
             api_key=api_key,
             out_dir=DATA / "raw/openalex_cli" / cfg.slice_name,
+            estimate=plan.get("estimate") or {},
             progress_callback=progress_callback,
         )
         passport["query_plan"] = plan

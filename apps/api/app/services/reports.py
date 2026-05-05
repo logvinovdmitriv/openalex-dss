@@ -25,7 +25,7 @@ def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_autho
         "bundle_version": "report_bundle_v1",
         "interpretation_policy": {
             "strict_mode": "Математические выводы строятся только по локально пересчитанным works-based индексам.",
-            "api_usage": "OpenAlex API используется для подсказок, ID, компактного Works-дампа и точечного обогащения; расчеты выполняются от локального фиксированного файла.",
+            "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения; корпус Works скачивается через OpenAlex CLI.",
             "decision_boundary": "Метрики формируют пул кандидатов и объяснение, но не заменяют экспертное решение.",
         },
         "slice_passport": slice_passport,
@@ -51,7 +51,7 @@ def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_autho
             "sha256_manifest": checksums.get("sha256_manifest"),
         },
         "mvp_protocol": {
-            "source_mode": "api_dump_first",
+            "source_mode": "openalex_cli_filtered_metadata",
             "storage_rule": "raw immutable dump -> thin curated slice -> transient marts",
             "topic_mapping_rule": "ВАК-код не является OpenAlex-фильтром; mapping фиксируется отдельно как resolved entities / mapping file.",
             "iupv_formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",

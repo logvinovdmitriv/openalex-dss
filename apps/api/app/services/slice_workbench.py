@@ -134,10 +134,14 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         "source_strategy": source_strategy,
         "download_policy": download_policy,
         "estimated": estimate,
+        "accepted_estimate_signature": (estimate.get("estimate") or {}).get("estimate_signature"),
+        "accepted_download_signature": (estimate.get("estimate") or {}).get("download_signature"),
         "technical_payload": {
             **doc["technical_payload"],
             "source_strategy": source_strategy,
             "download_policy": download_policy,
+            "accepted_estimate_signature": (estimate.get("estimate") or {}).get("estimate_signature"),
+            "accepted_download_signature": (estimate.get("estimate") or {}).get("download_signature"),
         },
         "outputs": [
             "raw/openalex_cli/{slice_id}/works.jsonl.gz",

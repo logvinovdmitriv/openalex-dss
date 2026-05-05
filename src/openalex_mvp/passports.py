@@ -13,7 +13,6 @@ PRIMARY_ARTIFACTS = [
     "config/slice.yaml",
     "requirements.lock",
     "docs/methodology.md",
-    "data/raw/works_raw.jsonl",
     "data/normalized/works_flat.csv",
     "data/normalized/authorships_flat.csv",
     "data/marts/author_work_metrics.csv",
@@ -47,8 +46,8 @@ def build_passports(
     slice_passport = {
         "slice_id": cfg.slice_name,
         "slice_name": cfg.slice_name,
-        "data_source": "OpenAlex API",
-        "source_mode": "api_dump_first",
+        "data_source": "OpenAlex CLI works metadata; OpenAlex API only for resolving, estimates and enrichment",
+        "source_mode": "openalex_cli_filtered_metadata",
         "api_base": "https://api.openalex.org",
         "vak_mapping_status": "не указано",
         "resolved_entities_file": "data/passports/resolved_entity.json",
@@ -106,13 +105,13 @@ def build_passports(
         "select_fields": list(cfg.select_fields),
         "storage_strategy": {
             "principle": "raw immutable dump -> thin curated slice -> transient marts -> reports/passports",
-            "raw_layer": f"data/raw/{cfg.slice_name}/",
+            "raw_layer": f"data/raw/openalex_cli/{cfg.slice_name}/",
             "curated_layer": f"data/curated/{cfg.slice_name}/",
             "mart_layer": f"data/marts/{cfg.slice_name}/",
             "reports_layer": f"data/reports/{cfg.slice_name}/",
             "checksums_layer": f"data/checksums/{cfg.slice_name}/",
             "latest_view_paths": {
-                "raw": "data/raw/works_raw.jsonl",
+                "raw": f"data/raw/openalex_cli/{cfg.slice_name}/works.jsonl.gz",
                 "works_flat": "data/normalized/works_flat.csv",
                 "authorships_flat": "data/normalized/authorships_flat.csv",
                 "author_work_metrics": "data/marts/author_work_metrics.csv",
@@ -125,7 +124,8 @@ def build_passports(
             "api_cache": "data/cache/openalex_api",
             "limits_config": "configs/execution_limits.yaml",
             "filter_registry": "configs/openalex_filter_registry.yaml",
-            "api_usage": "ID resolution, dropdown suggestions, compact works dump and point enrichment only",
+            "api_usage": "ID resolution, dropdown suggestions, field/filter catalogs, estimate/group_by/sample, rate-limit visibility and point enrichment only",
+            "download_usage": "Works corpus is downloaded through the installed OpenAlex CLI, not through the application API client.",
         },
     }
     indices = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"]
@@ -205,9 +205,10 @@ def build_passports(
         "algorithm": "SHA-256",
         "slice_id": cfg.slice_name,
         "primary_artifacts": checksums,
-            "sha256_manifest": _display_path(root_path, data_root, manifest_path),
+        "sha256_manifest": _display_path(root_path, data_root, manifest_path),
         "notes": [
             "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
+            "CLI raw dumps live under data/raw/openalex_cli/{slice_id}/ outside the repository.",
             "CSV files are latest-view exports; Parquet files are written alongside them for local analytical reads.",
         ],
     }
