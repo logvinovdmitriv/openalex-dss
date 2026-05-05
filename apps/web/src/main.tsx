@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   BarChart3,
   BookOpenCheck,
@@ -63,12 +64,12 @@ const queryClient = new QueryClient({
 });
 
 const NAV: Array<{ id: View; label: string; icon: ReactNode }> = [
-  { id: "slices", label: "Срез и загрузка", icon: <Layers3 size={17} /> },
-  { id: "data", label: "Локальные данные", icon: <Database size={17} /> },
-  { id: "enrichment", label: "Точечное обогащение", icon: <Sparkles size={17} /> },
+  { id: "slices", label: "Срез", icon: <Layers3 size={17} /> },
+  { id: "data", label: "Данные", icon: <Database size={17} /> },
+  { id: "enrichment", label: "Профили", icon: <Sparkles size={17} /> },
   { id: "rankings", label: "Индексы", icon: <Sigma size={17} /> },
   { id: "cohorts", label: "Когорты", icon: <GitCompareArrows size={17} /> },
-  { id: "statistics", label: "Статистика", icon: <BarChart3 size={17} /> },
+  { id: "statistics", label: "Графики", icon: <BarChart3 size={17} /> },
   { id: "reports", label: "Отчеты", icon: <Download size={17} /> },
   { id: "passports", label: "Паспорта", icon: <FileJson size={17} /> },
 ];
@@ -357,13 +358,16 @@ function Workbench() {
   ].filter(Boolean);
 
   return (
-    <main className="app-shell">
-      <aside className="side-nav" aria-label="Основные разделы">
+    <motion.main className="app-shell" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: "easeOut" }}>
+      <header className="top-bar" aria-label="Основные разделы">
         <div className="brand">
           <span>OA</span>
-          <b>СППР-срезы OpenAlex</b>
+          <div>
+            <b>OpenAlex DSS</b>
+            <small>Срезы · индексы · отчеты</small>
+          </div>
         </div>
-        <div role="tablist" aria-orientation="vertical" className="nav-list" onKeyDown={onNavKeyDown}>
+        <div role="tablist" aria-orientation="horizontal" className="nav-list" onKeyDown={onNavKeyDown}>
           {NAV.map((item, index) => (
             <button
               key={item.id}
@@ -380,16 +384,27 @@ function Workbench() {
             </button>
           ))}
         </div>
-      </aside>
+        <StatusRail state={state.data} run={run.data} running={running} />
+      </header>
 
-      <section className="workbench" id={`panel-${view}`} role="tabpanel" aria-labelledby={`tab-${view}`}>
+      <AnimatePresence mode="wait">
+        <motion.section
+          key={view}
+          className="workbench"
+          id={`panel-${view}`}
+          role="tabpanel"
+          aria-labelledby={`tab-${view}`}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.16, ease: "easeOut" }}
+        >
         <header className="page-header">
           <div>
-            <span className="eyebrow">Slice-Centric Analytical Workbench</span>
+            <span className="eyebrow">Slice-centric pipeline</span>
             <h1>{pageTitle(view)}</h1>
             <p>{pageLead(view)}</p>
           </div>
-          <StatusRail state={state.data} run={run.data} running={running} />
         </header>
         <WorkflowStepper view={view} estimate={estimate ?? sliceDoc?.latest_estimate} materialization={materialization ?? sliceDoc?.latest_materialization_plan} run={run.data} hasIndices={Boolean(tables?.indices?.rows)} hasCohort={Boolean(selectedCohortId)} />
 
@@ -527,7 +542,8 @@ function Workbench() {
         {view === "passports" && (
           <PassportsPage state={state.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
         )}
-      </section>
+        </motion.section>
+      </AnimatePresence>
 
       {resolverOpen && (
         <ResolverDialog
@@ -538,7 +554,7 @@ function Workbench() {
       )}
 
       {selected && <DetailDrawer selected={selected} onClose={() => setSelected(null)} detail={detail.data} />}
-    </main>
+    </motion.main>
   );
 }
 
@@ -634,8 +650,8 @@ function SlicesPage({
           <div className="form-grid">
             <Field label="Направление">
               <SubjectInput
-              value={filters.subject_name}
-              presets={domainPresets}
+                value={filters.subject_name}
+                presets={domainPresets}
                 onSelect={(item) => setFilters({
                   ...filters,
                   subject_level: item.level,
@@ -643,7 +659,7 @@ function SlicesPage({
                   subject_name: item.name,
                   filter_mode: item.filterMode,
                 })}
-              onClear={() => setFilters({ ...filters, subject_level: "", subject_id: "", subject_name: "", filter_mode: "all" })}
+                onClear={() => setFilters({ ...filters, subject_level: "", subject_id: "", subject_name: "", filter_mode: "all" })}
               />
             </Field>
             <Field label="Страна">
@@ -1030,7 +1046,7 @@ function RankingsPage({
                 <XAxis dataKey="label" />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="score" fill="#2563eb" name={metricLabel(metric)} />
+                <Bar dataKey="score" fill="#155e75" name={metricLabel(metric)} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1233,7 +1249,7 @@ function StatisticsPage({
                 <XAxis dataKey="label" />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="score" fill="#0f766e" name={histogramRows.length ? "Авторов в bin" : metricLabel(metric)} />
+                <Bar dataKey="score" fill="#167343" name={histogramRows.length ? "Авторов в bin" : metricLabel(metric)} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1252,7 +1268,7 @@ function StatisticsPage({
                 <XAxis dataKey="x" name="h" />
                 <YAxis dataKey="y" name="C_frac" />
                 <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-                <Scatter data={scatter} fill="#7c3aed" />
+                <Scatter data={scatter} fill="#155e75" />
               </ScatterChart>
             </ResponsiveContainer>
           </div>
@@ -1714,7 +1730,7 @@ function SubjectInput({
               commit();
             }
           }}
-          placeholder="Программная инженерия, AI, ergonomics"
+          placeholder="Начните ввод"
         />
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraft("Все направления"); onClear(); }}>Все</button>
       </div>
@@ -1806,7 +1822,7 @@ function OrganizationInput({
               commit();
             }
           }}
-          placeholder="БГТУ, ROR, OpenAlex Institution ID"
+          placeholder="Начните ввод"
         />
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraft("Все организации"); onClear(); }}>Все</button>
       </div>
@@ -1869,7 +1885,7 @@ function CountryInput({ value, options, onChange }: { value: string; options: Se
               commit();
             }
           }}
-          placeholder="Россия, RU или United States"
+          placeholder="Начните ввод"
         />
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraft("Все страны"); onChange(""); }}>Все</button>
       </div>
