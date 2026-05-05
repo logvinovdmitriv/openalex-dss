@@ -183,7 +183,7 @@ def _entity_row(entity_type: str, item: dict[str, Any], source: str, now: str) -
     short_id = str(item.get("id") or "").strip() or _short_openalex_id(openalex_id)
     level = str(item.get("level") or entity_type)
     key = f"{entity_type}:{level}:{short_id or openalex_id}"
-    external_id = str(item.get("ror") or item.get("orcid") or item.get("external_id") or "")
+    external_id = str(item.get("ror") or item.get("orcid") or item.get("doi") or item.get("external_id") or "")
     return {
         "entity_key": key,
         "entity_type": entity_type,

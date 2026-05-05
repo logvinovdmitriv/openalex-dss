@@ -71,7 +71,7 @@ python3 scripts/run_dss.py
 
 - `Срез и загрузка` - единый плоский сценарий: SliceDefinition, оценка объема, фасеты, бюджет и запуск скачивания.
 - `Локальные данные` - DumpManifest и готовность таблиц.
-- `Точечное обогащение` - поиск и дозагрузка отдельных сущностей без смешения с локальными индексами.
+- `Точечное обогащение` - единый поиск автора/ORCID, организации/ROR, работы/DOI и источника без смешения с локальными индексами.
 - `Индексы` - локальные P, C, C_frac, CPP, h, i10, g, ISLV/IUPV/LRDI.
 - `Когорты` - фиксация Top-N или ручной выборки авторов перед статистикой.
 - `Статистика` - распределения, histogram/log1p данные, boxplot-сводка, scatter и сравнение рейтингов.
@@ -88,6 +88,18 @@ POST /api/v1/slices/{slice_id}/materialization-plans
 POST /api/v1/materializations/{materialization_id}/run
 GET  /api/v1/dumps
 GET  /api/v1/workbench
+```
+
+Справочники для UI берутся из OpenAlex и локального metadata-кэша:
+
+```text
+GET /api/v1/openalex/subjects
+GET /api/v1/openalex/countries
+GET /api/v1/openalex/work-types
+GET /api/v1/openalex/institutions
+GET /api/v1/openalex/authors
+GET /api/v1/openalex/works
+GET /api/v1/openalex/sources
 ```
 
 Старый подход "скачать данные по фильтру" заменен slice-centric моделью:

@@ -45,6 +45,11 @@ def search_authors(q: str = Query("", min_length=0), limit: int = Query(8, ge=1,
     return openalex_catalog.search_authors(q, limit=limit)
 
 
+@router.get("/openalex/works")
+def search_works(q: str = Query("", min_length=0), limit: int = Query(8, ge=1, le=12)) -> dict[str, Any]:
+    return openalex_catalog.search_works(q, limit=limit)
+
+
 @router.get("/openalex/sources")
 def search_sources(q: str = Query("", min_length=0), limit: int = Query(8, ge=1, le=12)) -> dict[str, Any]:
     return openalex_catalog.search_sources(q, limit=limit)

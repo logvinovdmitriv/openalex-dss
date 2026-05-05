@@ -22,6 +22,7 @@ def catalog_status() -> dict[str, Any]:
         "keywords": _entity_status(status, "keyword"),
         "institutions": _entity_status(status, "institution"),
         "authors": _entity_status(status, "author"),
+        "works": _entity_status(status, "work"),
         "sources": _entity_status(status, "source"),
         "work_types": _entity_status(status, "work_type"),
         "countries": _entity_status(status, "country"),
@@ -142,6 +143,32 @@ def search_authors(q: str, *, limit: int = 8) -> dict[str, Any]:
     return {"results": results[:limit], "errors": errors, "cache": catalog_status()["authors"]}
 
 
+def search_works(q: str, *, limit: int = 8) -> dict[str, Any]:
+    query = q.strip()
+    limit = _limit(limit)
+    if len(query) < 2:
+        return {"results": _generic_results(metadata_store.list_entities("work", limit=limit))}
+
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+    direct = [*_lookup_work_by_doi(query), *_lookup_single_by_openalex_id("works", "W", query, level="work", level_label="Работа")]
+    if direct:
+        metadata_store.upsert_entities("work", direct, source="openalex_lookup")
+        _add_unique(results, direct, limit)
+    _add_unique(results, _generic_results(metadata_store.search_entities("work", query, limit=limit)), limit)
+
+    if len(results) < limit:
+        try:
+            payload = _get_cached("works", query, limit)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+        else:
+            api_items = [_work_result(item) for item in payload.get("results", [])]
+            metadata_store.upsert_entities("work", api_items, source="openalex_search")
+            _add_unique(results, api_items, limit)
+    return {"results": results[:limit], "errors": errors, "cache": catalog_status()["works"]}
+
+
 def search_sources(q: str, *, limit: int = 8) -> dict[str, Any]:
     query = q.strip()
     limit = _limit(limit)
@@ -169,13 +196,20 @@ def search_sources(q: str, *, limit: int = 8) -> dict[str, Any]:
 
 
 def search_countries(q: str = "", *, limit: int = 12) -> dict[str, Any]:
-    _ensure_group_catalog("country", "authorships.institutions.country_code")
+    _ensure_country_catalog()
     payload = _search_group_catalog("country", q, limit=limit)
-    alias = _country_alias_results(q)
-    if alias:
-        results = alias
-        _add_unique(results, payload.get("results", []), _limit(limit))
+    query = q.strip()
+    if len(query) >= 2 and len(payload.get("results", [])) < _limit(limit):
+        try:
+            api_payload = _get("countries", {"search": query, "per_page": str(_limit(limit)), "select": "id,display_name,country_code,works_count"})
+        except RuntimeError:
+            return payload
+        api_items = [_country_result(item) for item in api_payload.get("results", [])]
+        metadata_store.upsert_entities("country", api_items, source="openalex_search")
+        results = payload.get("results", [])
+        _add_unique(results, api_items, _limit(limit))
         payload["results"] = results[:_limit(limit)]
+        payload["cache"] = catalog_status()["countries"]
     return payload
 
 
@@ -197,7 +231,7 @@ def source_types(*, limit: int = 30) -> dict[str, Any]:
 def sync_group_catalogs() -> dict[str, Any]:
     return {
         "status": "ok",
-        "countries": _sync_group_catalog("country", "authorships.institutions.country_code"),
+        "countries": _sync_country_catalog(),
         "work_types": _sync_group_catalog("work_type", "type"),
         "languages": _sync_group_catalog("language", "language"),
         "source_types": _sync_group_catalog("source_type", "primary_location.source.type"),
@@ -235,6 +269,36 @@ def _ensure_group_catalog(entity_type: str, group_by: str) -> None:
         _sync_group_catalog(entity_type, group_by)
 
 
+def _ensure_country_catalog() -> None:
+    if not metadata_store.list_entities("country", limit=1):
+        _sync_country_catalog()
+
+
+def _sync_country_catalog() -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    page = 1
+    try:
+        while True:
+            payload = _get(
+                "countries",
+                {
+                    "page": str(page),
+                    "per_page": "100",
+                    "select": "id,display_name,country_code,works_count",
+                    "sort": "works_count:desc",
+                },
+            )
+            batch = payload.get("results", []) or []
+            items.extend(_country_result(item) for item in batch)
+            if len(batch) < 100 or page >= 10:
+                break
+            page += 1
+    except RuntimeError:
+        return _sync_group_catalog("country", "authorships.institutions.country_code")
+    inserted = metadata_store.upsert_entities("country", items, source="openalex_countries")
+    return {"inserted": inserted, "items": len(items)}
+
+
 def _sync_group_catalog(entity_type: str, group_by: str) -> dict[str, Any]:
     payload = _get("works", {"group_by": group_by, "per_page": "200"})
     items = [_group_item(row, entity_type) for row in payload.get("group_by", [])]
@@ -261,56 +325,7 @@ def _group_item(row: dict[str, Any], entity_type: str) -> dict[str, Any]:
 
 
 def _group_label(entity_type: str, short_id: str, name: str) -> str:
-    labels = {
-        "work_type": {
-            "article": "Статья",
-            "review": "Обзор",
-            "conference-paper": "Материал конференции",
-            "book-chapter": "Глава книги",
-            "book": "Книга",
-            "preprint": "Препринт",
-            "dissertation": "Диссертация",
-            "dataset": "Набор данных",
-            "report": "Отчет",
-        },
-        "language": {"en": "Английский", "ru": "Русский", "de": "Немецкий", "fr": "Французский", "es": "Испанский", "zh": "Китайский", "ja": "Японский"},
-    }
-    label = labels.get(entity_type, {}).get(short_id)
-    if label:
-        return f"{label} ({short_id})"
     return name if name != short_id else short_id
-
-
-def _country_alias_results(query: str) -> list[dict[str, Any]]:
-    aliases = {
-        "россия": ("RU", "Россия"),
-        "рф": ("RU", "Россия"),
-        "сша": ("US", "США"),
-        "великобритания": ("GB", "Великобритания"),
-        "германия": ("DE", "Германия"),
-        "китай": ("CN", "Китай"),
-        "франция": ("FR", "Франция"),
-        "индия": ("IN", "Индия"),
-        "япония": ("JP", "Япония"),
-    }
-    text = query.casefold().strip()
-    if not text:
-        return []
-    match = aliases.get(text)
-    if not match:
-        return []
-    code, name = match
-    return [
-        {
-            "id": code,
-            "openalex_id": f"https://openalex.org/countries/{code}",
-            "name": f"{name} ({code})",
-            "level": "country",
-            "level_label": "Страна",
-            "description": "Русское название сопоставлено с OpenAlex country_code.",
-            "source": "alias",
-        }
-    ]
 
 
 def _subject_alias_result(item: dict[str, Any]) -> dict[str, Any]:
@@ -413,6 +428,42 @@ def _source_result(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _work_result(item: dict[str, Any]) -> dict[str, Any]:
+    full_id = _full_openalex_url(str(item.get("openalex_id") or item.get("id") or ""), "W")
+    work_type = item.get("type") or item.get("work_type") or ""
+    year = item.get("publication_year") or ""
+    cited_by = item.get("cited_by_count") or 0
+    doi = item.get("doi") or ""
+    return {
+        "id": _short_openalex_id(full_id),
+        "openalex_id": full_id,
+        "name": item.get("display_name") or item.get("title") or item.get("name") or _short_openalex_id(full_id),
+        "level": "work",
+        "level_label": "Работа",
+        "description": " · ".join(str(part) for part in [year, work_type, f"{cited_by} цитирований"] if part != ""),
+        "doi": doi,
+        "work_type": work_type,
+        "publication_year": year,
+        "cited_by_count": cited_by,
+    }
+
+
+def _country_result(item: dict[str, Any]) -> dict[str, Any]:
+    code = str(item.get("country_code") or _short_openalex_id(str(item.get("id") or ""))).upper()
+    full_id = str(item.get("openalex_id") or item.get("id") or f"https://openalex.org/countries/{code}")
+    name = item.get("display_name") or item.get("name") or code
+    return {
+        "id": code,
+        "openalex_id": full_id,
+        "name": f"{name} ({code})" if code and code not in str(name) else str(name),
+        "level": "country",
+        "level_label": "Страна",
+        "description": full_id,
+        "country_code": code,
+        "works_count": item.get("works_count") or 0,
+    }
+
+
 def _simple_entity_result(item: dict[str, Any], level: str, level_label: str) -> dict[str, Any]:
     full_id = str(item.get("openalex_id") or item.get("id") or "")
     return {
@@ -436,6 +487,10 @@ def _generic_results(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             out.append(_author_result(item))
         elif level == "source":
             out.append(_source_result(item))
+        elif level == "work":
+            out.append(_work_result(item))
+        elif level == "country":
+            out.append(_country_result(item))
         else:
             out.append(
                 {
@@ -471,6 +526,8 @@ def _get_cached(entity: str, query: str, limit: int) -> dict[str, Any]:
         select = "id,display_name,orcid,last_known_institutions,works_count,cited_by_count"
     elif entity == "sources":
         select = "id,display_name,type,works_count"
+    elif entity == "works":
+        select = "id,doi,display_name,publication_year,type,cited_by_count"
     else:
         select = "id,display_name,works_count"
     return _get(entity, {"search": query, "per_page": str(limit), "select": select})
@@ -515,6 +572,20 @@ def _lookup_author_by_orcid(query: str) -> list[dict[str, Any]]:
     return [_author_result(item)]
 
 
+def _lookup_work_by_doi(query: str) -> list[dict[str, Any]]:
+    doi = _doi_id(query)
+    if not doi:
+        return []
+    try:
+        item = _get_single(
+            f"works/{urllib.parse.quote(f'doi:{doi}', safe=':')}",
+            {"select": "id,doi,display_name,publication_year,type,cited_by_count"},
+        )
+    except RuntimeError:
+        return []
+    return [_work_result(item)]
+
+
 def _lookup_single_by_openalex_id(entity: str, prefix: str, query: str, *, level: str, level_label: str) -> list[dict[str, Any]]:
     short = _prefixed_openalex_id(query, prefix)
     if not short:
@@ -523,6 +594,7 @@ def _lookup_single_by_openalex_id(entity: str, prefix: str, query: str, *, level
         "institutions": "id,display_name,country_code,ror,geo,works_count",
         "authors": "id,display_name,orcid,last_known_institutions,works_count,cited_by_count",
         "sources": "id,display_name,type,works_count",
+        "works": "id,doi,display_name,publication_year,type,cited_by_count",
     }.get(entity, "id,display_name,works_count")
     try:
         item = _get_single(f"{entity}/{short}", {"select": select})
@@ -534,6 +606,8 @@ def _lookup_single_by_openalex_id(entity: str, prefix: str, query: str, *, level
         return [_author_result(item)]
     if level == "source":
         return [_source_result(item)]
+    if level == "work":
+        return [_work_result(item)]
     return [_simple_entity_result(item, level, level_label)]
 
 
@@ -685,3 +759,10 @@ def _orcid_id(value: str) -> str:
     text = value.strip()
     text = text.replace("https://orcid.org/", "").replace("http://orcid.org/", "").replace("orcid:", "")
     return text if re.match(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$", text, re.IGNORECASE) else ""
+
+
+def _doi_id(value: str) -> str:
+    text = value.strip()
+    text = re.sub(r"^https?://(dx\.)?doi\.org/", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^doi:", "", text, flags=re.IGNORECASE)
+    return text if re.match(r"^10\.\S+/\S+$", text, re.IGNORECASE) else ""

@@ -497,6 +497,10 @@ input[aria-invalid="true"] {
   max-height: 106px;
 }
 
+.lookup-tabs {
+  margin: 12px 0;
+}
+
 .choice-pill {
   width: auto;
   min-height: 32px;
@@ -1015,15 +1019,33 @@ input[aria-invalid="true"] {
   padding: 8px 10px;
 }
 
+.resolver-search.flat-search {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  margin-top: 10px;
+}
+
 .resolver-search input {
   border: 0;
   padding: 4px 0;
+}
+
+.resolver-search.flat-search button {
+  min-height: 34px;
 }
 
 .resolver-results {
   display: grid;
   gap: 8px;
   margin-top: 12px;
+}
+
+.resolver-results.embedded {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--surface-soft);
 }
 
 .resolver-results button {

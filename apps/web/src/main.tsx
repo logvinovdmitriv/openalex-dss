@@ -452,6 +452,7 @@ function Workbench() {
             onPreview={() => buildAuthorPreview.mutate()}
             previewing={buildAuthorPreview.isPending || running}
             run={run.data}
+            onSelect={setSelected}
           />
         )}
 
@@ -839,18 +840,106 @@ function LocalDataPage({ workbench, dumps, tables, run, running, onRefresh }: { 
   );
 }
 
-function EnrichmentPage({ qualityCounts, tables, onPreview, previewing, run }: { qualityCounts: any; tables: any; onPreview: () => void; previewing: boolean; run: any }) {
+type PointLookupTab = "author" | "institution" | "work" | "source";
+
+function EnrichmentPage({
+  qualityCounts,
+  tables,
+  onPreview,
+  previewing,
+  run,
+  onSelect,
+}: {
+  qualityCounts: any;
+  tables: any;
+  onPreview: () => void;
+  previewing: boolean;
+  run: any;
+  onSelect: (value: { kind: "author" | "work"; id: string }) => void;
+}) {
+  const [tab, setTab] = useState<PointLookupTab>("author");
+  const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState<EntitySuggestion | null>(null);
+  const endpoint = {
+    author: "/openalex/authors",
+    institution: "/openalex/institutions",
+    work: "/openalex/works",
+    source: "/openalex/sources",
+  }[tab];
+  const lookup = useQuery({
+    queryKey: ["point-enrichment", tab, query.trim()],
+    queryFn: () => getJson<any>(`${endpoint}?q=${encodeURIComponent(query.trim())}&limit=10`),
+    enabled: query.trim().length >= 2,
+  });
+  const results = (lookup.data?.results ?? []) as EntitySuggestion[];
+  const selectPoint = (item: EntitySuggestion) => {
+    const id = String(item.openalex_id || item.id || "").trim();
+    setPicked(item);
+    if (!id) return;
+    if (tab === "author") onSelect({ kind: "author", id });
+    if (tab === "work") onSelect({ kind: "work", id });
+  };
+
   return (
     <div className="stack">
       <section className="panel">
-        <div className="panel-head split">
+        <div className="panel-head">
           <div>
-            <span className="step-badge">API enrichment</span>
-            <h2>Точечная дозагрузка недостающих сущностей</h2>
-            <p>API используется для подсказок, ORCID/ROR/ID и профильной дозагрузки, но не как рабочая база для пересчета индексов.</p>
+            <span className="step-badge">Point enrichment</span>
+            <h2>Точечная дозагрузка профилей</h2>
+            <p>Один поиск используется для ORCID, ROR, DOI и OpenAlex ID. Глобальные профили не подменяют локальные индексы среза.</p>
           </div>
-          <button onClick={onPreview} disabled={previewing}>{previewing ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />} Обогатить авторов</button>
         </div>
+        <div className="choice-grid compact lookup-tabs">
+          {[
+            ["author", "Автор / ORCID"],
+            ["institution", "Организация / ROR"],
+            ["work", "Работа / DOI"],
+            ["source", "Источник"],
+          ].map(([id, label]) => (
+            <button key={id} type="button" className={tab === id ? "choice-pill active" : "choice-pill"} onClick={() => setTab(id as PointLookupTab)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="resolver-search flat-search">
+          <Search size={17} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Введите имя, DOI, ORCID, ROR или OpenAlex ID"
+          />
+          <button type="button" onClick={() => lookup.refetch()} disabled={query.trim().length < 2 || lookup.isFetching}>
+            {lookup.isFetching ? <Loader2 size={16} className="spin" /> : <Search size={16} />} Найти
+          </button>
+        </div>
+        <div className="resolver-results embedded">
+          {query.trim().length < 2 && <EmptyState title="Введите запрос" detail="Точечное обогащение запускается только по явному запросу пользователя." />}
+          {query.trim().length >= 2 && results.length === 0 && !lookup.isFetching && <EmptyState title="Ничего не найдено" detail="Попробуйте полный OpenAlex ID, DOI, ORCID или ROR." />}
+          {results.map((item) => (
+            <button key={`${tab}-${item.openalex_id}-${item.id}-${item.name}`} type="button" onClick={() => selectPoint(item)}>
+              <b>{item.name}</b>
+              <span>{item.level_label ?? item.level ?? ""} {item.works_count ? `· ${fmt(item.works_count)} работ` : ""} {item.cited_by_count ? `· ${fmt(item.cited_by_count)} цитирований` : ""}</span>
+              <small>{item.openalex_id ?? item.id} {item.ror ? `· ROR: ${item.ror}` : ""} {item.orcid ? `· ORCID: ${item.orcid}` : ""} {(item as any).doi ? `· DOI: ${(item as any).doi}` : ""}</small>
+            </button>
+          ))}
+        </div>
+        <div className="notice">
+          <b>Не смешивать с локальными метриками</b>
+          <span>Профили OpenAlex нужны для проверки и карточек. Итоговые P, C_frac, h, i10 и g считаются только по сохраненному works-срезу.</span>
+        </div>
+        {picked && (
+          <div className="materialization-card">
+            <b>{picked.name}</b>
+            <span>{picked.level_label ?? picked.level ?? "OpenAlex entity"}</span>
+            <small>{picked.openalex_id ?? picked.id} {picked.ror ? `· ROR: ${picked.ror}` : ""} {picked.orcid ? `· ORCID: ${picked.orcid}` : ""} {(picked as any).doi ? `· DOI: ${(picked as any).doi}` : ""}</small>
+          </div>
+        )}
+        <details className="technical-details">
+          <summary>Черновая витрина авторов OpenAlex</summary>
+          <p>Этот режим обращается к Authors API и показывает глобальные показатели профиля. Используйте его только как предварительный ориентир.</p>
+          <button onClick={onPreview} disabled={previewing}>{previewing ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />} Запустить author preview</button>
+        </details>
         {run && <RunCard run={run} />}
         <div className="metric-grid">
           <MetricCard label="Null author" value={fmt(qualityCounts?.authorships_null_author_id ?? 0)} />
