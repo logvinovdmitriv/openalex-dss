@@ -279,7 +279,14 @@ export function columnLabel(value: string) {
 }
 
 export function countryLabel(value: string) {
-  return value;
+  const code = value.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return value;
+  try {
+    const name = new Intl.DisplayNames(["ru"], { type: "region" }).of(code);
+    return name && name !== code ? `${name} (${code})` : code;
+  } catch {
+    return code;
+  }
 }
 
 export function resolveCountryInput(value: string) {

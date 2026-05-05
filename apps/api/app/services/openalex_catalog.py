@@ -300,7 +300,7 @@ def _sync_country_catalog() -> dict[str, Any]:
 
 
 def _sync_group_catalog(entity_type: str, group_by: str) -> dict[str, Any]:
-    payload = _get("works", {"group_by": group_by, "per_page": "200"})
+    payload = _get("works", {"group_by": group_by, "per_page": "100"})
     items = [_group_item(row, entity_type) for row in payload.get("group_by", [])]
     inserted = metadata_store.upsert_entities(entity_type, items, source=f"openalex_group_by:{group_by}")
     return {"inserted": inserted, "items": len(items)}

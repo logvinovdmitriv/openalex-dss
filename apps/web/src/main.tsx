@@ -1848,7 +1848,7 @@ function CountryInput({ value, options, onChange }: { value: string; options: Se
   }, [value, options]);
 
   const commit = () => {
-    const next = resolveCountryInput(draft);
+    const next = resolveCountryDraft(draft, options);
     if (!draft.trim()) {
       setError("");
       onChange("");
@@ -1892,7 +1892,7 @@ function CountryInput({ value, options, onChange }: { value: string; options: Se
       <datalist id="country-options">
         <option value="Все страны" />
         {options.filter((item) => item.value).map((item) => (
-          <option key={item.value} value={`${item.label} (${item.value})`} />
+          <option key={item.value} value={countryOptionLabel(item)} />
         ))}
       </datalist>
       {error && <small id="country-error" className="field-error">{error}</small>}
@@ -1903,7 +1903,24 @@ function CountryInput({ value, options, onChange }: { value: string; options: Se
 
 function countryDisplay(value: string, options: SelectOption[]) {
   const option = options.find((item) => item.value.toUpperCase() === value.toUpperCase());
-  return option ? `${option.label} (${option.value})` : countryLabel(value);
+  return option ? countryOptionLabel(option) : countryLabel(value);
+}
+
+function countryOptionLabel(option: SelectOption) {
+  const code = option.value.trim().toUpperCase();
+  const label = option.label.trim();
+  return label.includes(`(${code})`) ? label : `${label} (${code})`;
+}
+
+function resolveCountryDraft(value: string, options: SelectOption[]) {
+  const direct = resolveCountryInput(value);
+  if (direct) return direct;
+  const text = normalizeInput(value);
+  const matched = options.find((item) => {
+    const code = item.value.trim().toUpperCase();
+    return text === normalizeInput(item.label) || text === normalizeInput(countryOptionLabel(item)) || text === normalizeInput(code);
+  });
+  return matched?.value.trim().toUpperCase() ?? "";
 }
 
 function catalogOptions(rows: Array<Record<string, unknown>>): SelectOption[] {

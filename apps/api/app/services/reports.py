@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.core.paths import DATA, JSON_FILES, ROOT, TABLE_FILES
+from app.core.paths import DATA, JSON_FILES
 from app.services import warehouse
 
 
@@ -89,7 +89,7 @@ def _quality_funnel(quality: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _local_vs_global() -> dict[str, Any]:
-    if not TABLE_FILES["indices"].exists() or not TABLE_FILES.get("authors_preview") or not TABLE_FILES["authors_preview"].exists():
+    if not warehouse.table_exists("indices") or not warehouse.table_exists("authors_preview"):
         return {
             "available": False,
             "reason": "Быстрая Authors API витрина ещё не загружена; local-vs-global появится после /pipeline/fetch-authors-preview.",

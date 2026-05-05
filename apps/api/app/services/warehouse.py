@@ -69,6 +69,11 @@ def register_views(conn: duckdb.DuckDBPyConnection) -> None:
             )
 
 
+def table_exists(name: str) -> bool:
+    path = TABLE_FILES.get(name)
+    return bool(path and _preferred_table_path(name, path).exists())
+
+
 def list_tables() -> dict[str, Any]:
     return {
         name: {
@@ -102,7 +107,7 @@ def _count_csv_rows(path: Path) -> int:
 
 
 def table_schema(table: str) -> list[str]:
-    if table not in TABLE_FILES or not _preferred_table_path(table, TABLE_FILES[table]).exists():
+    if not table_exists(table):
         return []
     with connect() as conn:
         return [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
@@ -231,9 +236,8 @@ def export_table_csv(table: str, **kwargs: Any) -> str:
 def filtered_author_indices(fraction_mode: str, filters: FilterSet | None = None) -> list[dict[str, Any]]:
     if (
         fraction_mode == "openalex_native"
-        and TABLE_FILES.get("author_profiles")
-        and TABLE_FILES["author_profiles"].exists()
-        and TABLE_FILES["indices"].exists()
+        and table_exists("author_profiles")
+        and table_exists("indices")
     ):
         return _filtered_native_author_indices(fraction_mode, filters)
     return _filtered_work_author_indices(fraction_mode, filters)
@@ -286,7 +290,7 @@ def _filtered_native_author_indices(fraction_mode: str, filters: FilterSet | Non
 
 
 def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None = None) -> list[dict[str, Any]]:
-    if not TABLE_FILES["author_work"].exists() or not TABLE_FILES["works"].exists() or not TABLE_FILES["authorships"].exists():
+    if not table_exists("author_work") or not table_exists("works") or not table_exists("authorships"):
         return []
 
     filters = _clean_filters(filters or {})
@@ -317,7 +321,7 @@ def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None 
     subject_level = filters.get("subject_level")
     if subject_id:
         filter_mode = filters.get("filter_mode")
-        use_topics_any = filter_mode == "topics_any" and TABLE_FILES.get("work_topics") and TABLE_FILES["work_topics"].exists()
+        use_topics_any = filter_mode == "topics_any" and table_exists("work_topics")
         if use_topics_any and subject_level == "field":
             where.append("EXISTS (SELECT 1 FROM work_topics wt WHERE wt.work_id = w.work_id AND wt.field_id ILIKE ?)")
             args.append(f"%/{subject_id}")
@@ -582,9 +586,9 @@ def author_detail(author_id: str) -> dict[str, Any]:
         ratings = _records(conn.execute("SELECT * FROM ratings WHERE author_id = ? ORDER BY metric_name, rank_competition", [author_id]))
         profile = []
         works = []
-        if TABLE_FILES.get("author_profiles") and TABLE_FILES["author_profiles"].exists():
+        if table_exists("author_profiles"):
             profile = _records(conn.execute("SELECT * FROM author_profiles WHERE author_id = ?", [author_id]))
-        if TABLE_FILES["author_work"].exists() and TABLE_FILES["works"].exists():
+        if table_exists("author_work") and table_exists("works"):
             works = _records(conn.execute(
                 """
                 SELECT DISTINCT w.*

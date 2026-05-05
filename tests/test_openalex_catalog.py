@@ -75,6 +75,25 @@ class OpenAlexCatalogTests(unittest.TestCase):
                 self.assertEqual(result["results"][0]["level"], "work")
                 self.assertEqual(result["results"][0]["doi"], "https://doi.org/10.7717/peerj.4375")
 
+    def test_group_catalog_sync_uses_openalex_page_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "metadata.sqlite"
+            with (
+                patch.object(metadata_store, "DB_PATH", db_path),
+                patch.object(openalex_catalog.metadata_store, "DB_PATH", db_path),
+                patch.object(openalex_catalog, "_get") as get_json,
+            ):
+                get_json.return_value = {
+                    "group_by": [
+                        {"key": "article", "key_display_name": "article", "count": 10},
+                    ]
+                }
+
+                result = openalex_catalog._sync_group_catalog("work_type", "type")
+
+                self.assertEqual(result["inserted"], 1)
+                get_json.assert_called_once_with("works", {"group_by": "type", "per_page": "100"})
+
 
 if __name__ == "__main__":
     unittest.main()
