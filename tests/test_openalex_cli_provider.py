@@ -38,6 +38,16 @@ class OpenAlexCliProviderTests(unittest.TestCase):
             self.assertEqual(len(read_jsonl(raw)), 5)
             self.assertEqual(sum(item["records"] for item in manifest), 5)
 
+    def test_pack_work_files_fails_on_malformed_json_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = root / "files"
+            files.mkdir()
+            (files / "broken.json").write_text("{not-json", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                _pack_work_json_files(files, root / "works.jsonl.gz")
+
 
 def _work(short_id: str) -> dict[str, object]:
     return {"id": f"https://openalex.org/{short_id}", "display_name": short_id}

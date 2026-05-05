@@ -686,14 +686,14 @@ function SlicesPage({
           <MetricCard label="Работ найдено" value={fmt(rawEstimate.estimate_count ?? 0)} />
           <MetricCard label="Полный срез / к загрузке" value={`${fmt(rawEstimate.estimate_count ?? 0)} / ${fmt(decision.records_to_fetch ?? rawEstimate.planned_records ?? 0)}`} />
           <MetricCard label="API-запросов" value={fmt(decision.api_requests_planned ?? rawEstimate.api_requests_planned ?? 0)} />
-          <MetricCard label="Raw JSONL.gz прогноз" value={`${fmt(decision.estimated_raw_mb ?? rawEstimate.estimated_raw_mb ?? 0)}–${fmt(rawEstimate.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ`} />
+          <MetricCard label="CLI metadata прогноз" value={`${fmt(rawEstimate.estimated_cli_metadata_mb ?? decision.estimated_raw_mb ?? rawEstimate.estimated_raw_mb ?? 0)} МБ`} />
+          <MetricCard label="API preview прогноз" value={`${fmt(rawEstimate.estimated_selected_api_mb ?? rawEstimate.estimated_raw_mb ?? 0)}–${fmt(rawEstimate.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ`} />
           <MetricCard label="Parquet прогноз" value={`${fmt(rawEstimate.estimated_parquet_mb ?? 0)} МБ`} />
-          <MetricCard label="Память расчета" value={`${fmt(rawEstimate.estimated_memory_mb ?? 0)} МБ`} />
         </div>
         <EstimateBudget estimate={rawEstimate} decision={decision} />
         <EstimateFacets facets={rawEstimate.facets} />
         <div className={canRun ? "notice success" : hasEstimate ? "notice error" : "notice"}>
-          <b>{canRun ? "Можно скачивать или уточнить фильтры" : hasEstimate ? "Нет данных для загрузки" : "Сначала оцените объем"}</b>
+          <b>{canRun ? "Можно скачивать или уточнить фильтры" : hasEstimate ? "Скачивание недоступно для текущего плана" : "Сначала оцените объем"}</b>
           <span>{decision.strategy ?? "Оценка еще не выполнена"} · {decision.status ?? "нет статуса"}</span>
         </div>
         {[...(decision.reasons ?? []), ...(decision.warnings ?? [])].length > 0 && (
@@ -1441,8 +1441,8 @@ function RateLimitPanel({ rateLimit, apiKeySet, estimate }: { rateLimit: any; ap
 }
 
 function EstimateBudget({ estimate, decision }: { estimate: any; decision: any }) {
-  const p90 = Number(estimate?.estimated_raw_bytes_p90 ?? estimate?.estimated_raw_bytes ?? 0);
-  const avg = Number(estimate?.estimated_raw_bytes ?? 0);
+  const p90 = Number(estimate?.estimated_cli_metadata_bytes ?? estimate?.estimated_raw_bytes_p90 ?? estimate?.estimated_raw_bytes ?? 0);
+  const avg = Number(estimate?.estimated_selected_api_bytes ?? estimate?.estimated_raw_bytes ?? 0);
   if (!avg && !p90) return null;
   const baseline = Math.max(avg, p90, 1);
   const avgPct = Math.min(100, Math.round((avg / baseline) * 100));
@@ -1450,7 +1450,7 @@ function EstimateBudget({ estimate, decision }: { estimate: any; decision: any }
   return (
     <div className="estimate-budget">
       <div className="progress-meta">
-        <span>Прогноз физической загрузки: средний {fmt(bytesToMb(avg))} МБ, p90 {fmt(bytesToMb(p90))} МБ</span>
+        <span>Прогноз: API preview {fmt(bytesToMb(avg))} МБ, CLI metadata {fmt(bytesToMb(p90))} МБ</span>
         <b>{decision?.status ?? "estimate"}</b>
       </div>
       <div className="budget-track" aria-label={`Средний прогноз ${avgPct}%, p90 ${p90Pct}%`}>

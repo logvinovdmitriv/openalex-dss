@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from app.core.paths import DATA, SRC
 
@@ -54,7 +54,7 @@ def download_works_metadata(
     base_dir = ensure_dir(Path(out_dir) if out_dir else DATA / "raw/openalex_cli" / cfg.slice_name)
     files_dir = ensure_dir(base_dir / "files")
     raw_path = base_dir / "works.jsonl.gz"
-    passport_path = base_dir / "slice_passport.json"
+    dump_manifest_path = base_dir / "dump_manifest.json"
     stdout_path = base_dir / "openalex_cli_stdout.log"
     stderr_path = base_dir / "openalex_cli_stderr.log"
     manifest_path = base_dir / "files_manifest.json"
@@ -71,9 +71,13 @@ def download_works_metadata(
     ]
     public_command = [part if part != api_key else "***" for part in command]
     cli_version = _cli_version(str(status["executable"]))
-    estimate_signature = str((estimate or {}).get("estimate_signature") or corpus_signature(cfg))
+    current_corpus_signature = corpus_signature(cfg)
+    current_download_signature = cli_download_signature(cfg)
+    estimate_signature = str((estimate or {}).get("estimate_signature") or current_corpus_signature)
+    accepted_estimate_signature = str((estimate or {}).get("accepted_estimate_signature") or "")
+    accepted_download_signature = str((estimate or {}).get("accepted_download_signature") or "")
     planned_records = int(((estimate or {}).get("estimate_count") or 0))
-    planned_raw_bytes = int(((estimate or {}).get("estimated_raw_bytes") or 0))
+    planned_raw_bytes = int(((estimate or {}).get("estimated_cli_metadata_bytes") or (estimate or {}).get("estimated_raw_bytes_p90") or (estimate or {}).get("estimated_raw_bytes") or 0))
 
     if progress_callback:
         progress_callback({"percent": 30, "stage": "running OpenAlex CLI", "fetched": 0})
@@ -93,7 +97,7 @@ def download_works_metadata(
     dump_id = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
     finished_at = datetime.now(timezone.utc)
     actual_raw_bytes = raw_path.stat().st_size
-    passport = {
+    dump_manifest = {
         "slice_id": cfg.slice_name,
         "dump_id": dump_id,
         "source_mode": "openalex_cli",
@@ -116,9 +120,15 @@ def download_works_metadata(
         },
         "signatures": {
             "estimate_signature": estimate_signature,
-            "download_signature": cli_download_signature(cfg),
-            "corpus_signature": corpus_signature(cfg),
-            "compatible": estimate_signature == corpus_signature(cfg),
+            "download_signature": current_download_signature,
+            "corpus_signature": current_corpus_signature,
+            "accepted_estimate_signature": accepted_estimate_signature or None,
+            "accepted_download_signature": accepted_download_signature or None,
+            "estimate_signature_verified": estimate_signature == current_corpus_signature,
+            "accepted_estimate_signature_verified": bool(accepted_estimate_signature and accepted_estimate_signature == current_corpus_signature),
+            "download_signature_verified": bool(accepted_download_signature and accepted_download_signature == current_download_signature),
+            "download_equivalence": consistency.get("download_equivalence"),
+            "compatible": bool(consistency.get("compatible")),
         },
         "records_expected": planned_records or None,
         "records_downloaded": records,
@@ -139,7 +149,9 @@ def download_works_metadata(
             "checkpointing": True,
             "adaptive_rate_limiting": True,
             "parallel_downloads": True,
-            "download_signature_verified": estimate_signature == corpus_signature(cfg),
+            "estimate_signature_verified": estimate_signature == current_corpus_signature,
+            "accepted_estimate_signature_verified": bool(accepted_estimate_signature and accepted_estimate_signature == current_corpus_signature),
+            "download_signature_verified": bool(accepted_download_signature and accepted_download_signature == current_download_signature),
         },
         "storage_plan": {
             "cli_output_dir": str(files_dir),
@@ -149,42 +161,53 @@ def download_works_metadata(
             "kept_raw_files": True,
         },
     }
-    write_json(passport_path, passport)
+    write_json(dump_manifest_path, dump_manifest)
 
     if progress_callback:
         progress_callback({"percent": 95, "stage": "CLI slice packed", "fetched": records})
 
-    return passport
+    return dump_manifest
 
 
 def _pack_work_json_files(
     files_dir: Path,
     raw_path: Path,
     *,
+    strict: bool = True,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     records = 0
     manifest: list[dict[str, Any]] = []
+    errors: list[str] = []
     candidates = sorted(path for path in files_dir.rglob("*") if path.is_file() and _supported_metadata_file(path))
     with gzip.open(raw_path, "wt", encoding="utf-8", newline="\n") as handle:
         for index, path in enumerate(candidates, start=1):
             before = records
-            for payload in _iter_work_payloads(path):
-                if not str(payload.get("id") or "").startswith("https://openalex.org/W"):
-                    continue
-                handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
-                records += 1
+            error = ""
+            try:
+                for payload in _iter_work_payloads(path):
+                    if not str(payload.get("id") or "").startswith("https://openalex.org/W"):
+                        continue
+                    handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+                    records += 1
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                error = str(exc)
+                errors.append(f"{path.relative_to(files_dir)}: {error}")
             file_records = records - before
-            manifest.append(
-                {
-                    "path": str(path.relative_to(files_dir)),
-                    "bytes": path.stat().st_size,
-                    "records": file_records,
-                    "sha256": sha256_file(path) if file_records else "",
-                }
-            )
+            item = {
+                "path": str(path.relative_to(files_dir)),
+                "bytes": path.stat().st_size,
+                "records": file_records,
+                "sha256": sha256_file(path) if file_records else "",
+                "status": "failed" if error else "ok",
+            }
+            if error:
+                item["parse_error"] = error
+            manifest.append(item)
             if progress_callback and (index == len(candidates) or records % 500 == 0):
                 progress_callback({"percent": 82, "stage": f"packed {records} works", "fetched": records, "files_seen": index})
+    if strict and errors:
+        raise ValueError("Failed to parse OpenAlex CLI metadata files: " + "; ".join(errors[:5]))
     return records, manifest
 
 
@@ -193,22 +216,40 @@ def _supported_metadata_file(path: Path) -> bool:
     return name.endswith(".json") or name.endswith(".jsonl") or name.endswith(".jsonl.gz")
 
 
-def _iter_work_payloads(path: Path) -> list[dict[str, Any]]:
-    try:
-        if path.name.lower().endswith(".jsonl.gz"):
-            with gzip.open(path, "rt", encoding="utf-8", newline="\n") as handle:
-                return [json.loads(line) for line in handle if line.strip()]
-        if path.name.lower().endswith(".jsonl"):
-            with path.open("rt", encoding="utf-8", newline="\n") as handle:
-                return [json.loads(line) for line in handle if line.strip()]
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
+def _iter_work_payloads(path: Path) -> Iterator[dict[str, Any]]:
+    if path.name.lower().endswith(".jsonl.gz"):
+        with gzip.open(path, "rt", encoding="utf-8", newline="\n") as handle:
+            for line_no, line in enumerate(handle, start=1):
+                if line.strip():
+                    payload = json.loads(line)
+                    if isinstance(payload, dict):
+                        yield payload
+                    else:
+                        raise ValueError(f"{path.name}:{line_no} is not a JSON object")
+        return
+    if path.name.lower().endswith(".jsonl"):
+        with path.open("rt", encoding="utf-8", newline="\n") as handle:
+            for line_no, line in enumerate(handle, start=1):
+                if line.strip():
+                    payload = json.loads(line)
+                    if isinstance(payload, dict):
+                        yield payload
+                    else:
+                        raise ValueError(f"{path.name}:{line_no} is not a JSON object")
+        return
+    payload = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
+        for item in payload:
+            if isinstance(item, dict):
+                yield item
+        return
     if isinstance(payload, dict) and isinstance(payload.get("results"), list):
-        return [item for item in payload["results"] if isinstance(item, dict)]
-    return [payload] if isinstance(payload, dict) else []
+        for item in payload["results"]:
+            if isinstance(item, dict):
+                yield item
+        return
+    if isinstance(payload, dict):
+        yield payload
 
 
 def _cli_version(executable: str) -> str:

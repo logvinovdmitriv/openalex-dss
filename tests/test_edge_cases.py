@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from openalex_mvp.config import load_config, replace_config
 from openalex_mvp.metrics import build_author_work_metrics, compute_indices
 from openalex_mvp.normalize import normalize_raw
 from openalex_mvp.openalex import build_filter, download_consistency, estimate_works
+from openalex_mvp.passports import build_passports
 from openalex_mvp.ranking import build_ratings
 from openalex_mvp.stats import top_n_overlap
 
@@ -125,6 +127,25 @@ class EdgeCaseTests(unittest.TestCase):
         result = download_consistency(cfg)
         self.assertFalse(result["compatible"])
         self.assertIn("search", result["reasons"][0])
+
+    def test_raw_cli_dump_hash_is_primary_checksum_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "data"
+            cfg = replace_config(
+                load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
+                slice_name="slice_checksum",
+            )
+            raw_dir = data / "raw/openalex_cli/slice_checksum"
+            raw_dir.mkdir(parents=True)
+            raw_path = raw_dir / "works.jsonl.gz"
+            raw_path.write_bytes(b"compressed-placeholder")
+            (raw_dir / "dump_manifest.json").write_text("{}", encoding="utf-8")
+
+            with patch.dict(os.environ, {"OPENALEX_DSS_DATA_DIR": str(data)}):
+                checksums = build_passports(cfg, Path(__file__).resolve().parents[1], data / "passports")
+
+            self.assertIn("data/raw/openalex_cli/slice_checksum/works.jsonl.gz", checksums["primary_artifacts"])
 
 
 def _work(work_id: str, author_id: str, citations: int) -> dict:

@@ -51,6 +51,8 @@ class PipelineRequest(BaseModel):
     api_key: str | None = None
     source_path: str | None = None
     source_strategy: str | None = None
+    accepted_estimate_signature: str | None = None
+    accepted_download_signature: str | None = None
 
     @field_validator("entity_level")
     @classmethod

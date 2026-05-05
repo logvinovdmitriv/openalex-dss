@@ -19,6 +19,11 @@ _RUNS: dict[str, dict[str, Any]] = {}
 
 
 def create_run(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if action == "build_from_openalex" and not (
+        str(payload.get("accepted_estimate_signature") or "").strip()
+        and str(payload.get("accepted_download_signature") or "").strip()
+    ):
+        raise ValueError("build_from_openalex requires accepted estimate and download signatures. Create or refresh a materialization plan first.")
     run_id = _new_run_id()
     doc = {
         "run_id": run_id,
@@ -104,7 +109,7 @@ def table_for_run(
 
 
 def _run_table_path(run_id: str, table_name: str) -> Path | None:
-    run_dir = RUNS_DIR / run_id / "tables"
+    run_dir = _run_path(run_id).parent / "tables"
     for suffix in (".parquet", ".csv"):
         candidate = run_dir / f"{table_name}{suffix}"
         if candidate.is_file():
@@ -120,6 +125,7 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
         doc.update({"progress_percent": _progress_before_dispatch(action), "progress_stage": _stage_for_action(action)})
         _save(doc)
         result = _dispatch(run_id, action, payload)
+        _mark_dependent_state_completed(run_id, action, result)
         doc.update({"status": "completed", "progress_percent": 100, "progress_stage": "completed", "finished_at": _now(), "result": result, "artifacts": _artifact_links()})
     except Exception as exc:  # pragma: no cover - defensive job boundary
         doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
@@ -132,7 +138,11 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
     if action == "fetch_slice_dump":
         return pipeline.fetch_slice_dump(payload, progress_callback=lambda progress: _download_progress(run_id, progress))
     if action == "build_from_openalex":
-        fetched = pipeline.fetch_slice_dump(payload, progress_callback=lambda progress: _download_progress(run_id, progress))
+        fetched = pipeline.fetch_slice_dump(
+            payload,
+            progress_callback=lambda progress: _download_progress(run_id, progress),
+            require_accepted_signatures=True,
+        )
         dump = fetched.get("dump") or {}
         raw_jsonl = str(dump.get("raw_jsonl") or "").strip()
         if not raw_jsonl or dump.get("no_data"):
@@ -215,6 +225,17 @@ def _download_progress(run_id: str, progress: dict[str, Any]) -> None:
     else:
         stage = f"downloading works: {fetched}"
     update_progress(run_id, bounded, stage, progress)
+
+
+def _mark_dependent_state_completed(run_id: str, action: str, result: dict[str, Any]) -> None:
+    if action != "build_from_openalex":
+        return
+    try:
+        from app.services import slice_workbench
+
+        slice_workbench.mark_materialization_run_completed(run_id, result)
+    except Exception:
+        return
 
 
 def _artifact_links() -> dict[str, str]:

@@ -47,16 +47,30 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     return {"status": "ok", "mode": "recalculate", "archive": archive}
 
 
-def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+def fetch_slice_dump(
+    payload: dict[str, Any],
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    *,
+    require_accepted_signatures: bool = False,
+) -> dict[str, Any]:
     cfg = _cfg({**payload, "workflow_mode": "strict_works"})
     _write_runtime_config(cfg)
     api_key = str(payload.get("api_key") or "").strip()
     plan = query_planner.plan_slice({**payload, "workflow_mode": "strict_works"})
     decision = plan.get("decision") or {}
+    estimate = plan.get("estimate") or {}
     accepted_signature = str(payload.get("accepted_estimate_signature") or "").strip()
-    current_signature = str(((plan.get("estimate") or {}).get("estimate_signature") or "")).strip()
+    current_signature = str((estimate.get("estimate_signature") or "")).strip()
+    accepted_download_signature = str(payload.get("accepted_download_signature") or "").strip()
+    current_download_signature = str((estimate.get("download_signature") or "")).strip()
+    if require_accepted_signatures and not accepted_signature:
+        raise ValueError("Сначала оцените срез и подтвердите подпись оценки перед скачиванием.")
+    if require_accepted_signatures and not accepted_download_signature:
+        raise ValueError("Сначала оцените срез и подтвердите подпись способа загрузки перед скачиванием.")
     if accepted_signature and current_signature and accepted_signature != current_signature:
         raise ValueError("Параметры среза изменились после оценки. Обновите оценку и подтвердите скачивание заново.")
+    if accepted_download_signature and current_download_signature and accepted_download_signature != current_download_signature:
+        raise ValueError("Способ загрузки среза изменился после оценки. Обновите оценку и подтвердите скачивание заново.")
     if decision.get("status") == "no_data":
         _write_pipeline_summary("fetch_slice_dump", cfg, {**payload, "query_plan": plan, "dump": {"no_data": True}})
         return {"status": "ok", "mode": "fetch_slice_dump", "query_plan": plan, "dump": {"no_data": True, "records_downloaded": 0}}
@@ -72,7 +86,11 @@ def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[
             cfg,
             api_key=api_key,
             out_dir=DATA / "raw/openalex_cli" / cfg.slice_name,
-            estimate=plan.get("estimate") or {},
+            estimate={
+                **estimate,
+                "accepted_estimate_signature": accepted_signature or None,
+                "accepted_download_signature": accepted_download_signature or None,
+            },
             progress_callback=progress_callback,
         )
         passport["query_plan"] = plan
@@ -81,7 +99,7 @@ def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[
             passport["dump_id"] = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
         raw_jsonl = passport.get("raw_jsonl")
         if raw_jsonl:
-            write_json(Path(str(raw_jsonl)).with_name("slice_passport.json"), passport)
+            write_json(Path(str(raw_jsonl)).with_name("dump_manifest.json"), passport)
         metadata_store.record_slice_dump(passport)
     finally:
         if old is None:

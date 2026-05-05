@@ -110,7 +110,8 @@ def estimate_works(
     planned_records = count
     estimated_raw_bytes = count * estimated_record_bytes
     estimated_raw_bytes_p90 = count * p90_record_bytes
-    estimated_raw_bytes_for_budget = planned_records * estimated_record_bytes
+    estimated_cli_metadata_bytes = int(max(estimated_raw_bytes_p90, estimated_raw_bytes * 2.0))
+    estimated_raw_bytes_for_budget = estimated_cli_metadata_bytes
     planned_pages = (planned_records + max(1, cfg.per_page) - 1) // max(1, cfg.per_page)
     public_params = {key: value for key, value in count_params.items() if key != "api_key"}
     public_sample_params = {key: value for key, value in sample_params.items() if key != "api_key"}
@@ -128,6 +129,14 @@ def estimate_works(
         "estimated_raw_mb": round(estimated_raw_bytes / (1024 * 1024), 3),
         "estimated_raw_bytes_p90": estimated_raw_bytes_p90,
         "estimated_raw_mb_p90": round(estimated_raw_bytes_p90 / (1024 * 1024), 3),
+        "estimated_selected_api_bytes": estimated_raw_bytes,
+        "estimated_selected_api_mb": round(estimated_raw_bytes / (1024 * 1024), 3),
+        "estimated_cli_metadata_bytes": estimated_cli_metadata_bytes,
+        "estimated_cli_metadata_mb": round(estimated_cli_metadata_bytes / (1024 * 1024), 3),
+        "estimate_scope": {
+            "api_sample": "selected root-level Works fields for preview and facets",
+            "cli_download": "full OpenAlex CLI metadata payload; forecast is conservative because CLI currently has no select projection",
+        },
         "estimated_raw_bytes_for_download": estimated_raw_bytes_for_budget,
         "estimated_raw_mb_for_download": round(estimated_raw_bytes_for_budget / (1024 * 1024), 3),
         "api_requests_planned": planned_pages,
@@ -176,8 +185,14 @@ def download_consistency(cfg: SliceConfig) -> dict[str, Any]:
     compatible = not reasons
     return {
         "compatible": compatible,
+        "download_equivalence": {
+            "equivalent": compatible,
+            "scope": "CLI --filter request covers the same Works corpus as the API estimate request",
+            "reasons": reasons,
+        },
         "estimate_signature": corpus_signature(cfg),
         "download_signature": cli_download_signature(cfg),
+        "corpus_signature": corpus_signature(cfg),
         "tool": "openalex_cli",
         "reasons": reasons,
     }

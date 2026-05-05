@@ -40,7 +40,7 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
     decision = choose_strategy(
         estimate_count=int(estimate["estimate_count"]),
         planned_api_requests=int(estimate["api_requests_planned"]),
-        estimated_raw_bytes=int(estimate["estimated_raw_bytes"]),
+        estimated_raw_bytes=int(estimate.get("estimated_cli_metadata_bytes") or estimate["estimated_raw_bytes"]),
         limits=limits,
     )
     consistency = estimate.get("download_consistency") or {}

@@ -71,6 +71,55 @@ class SliceWorkbenchTests(unittest.TestCase):
                 self.assertEqual(materialization["download_policy"]["user_controls_download_after_estimate"], True)
                 self.assertEqual(materialization["state"], "planned")
 
+    def test_materialization_completion_advances_slice_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload = {
+                "slice_id": "slice_done",
+                "entity_level": "subfield",
+                "entity_id_short": "1706",
+                "entity_display_name": "Computer Science Applications",
+                "from_publication_date": "2020-01-01",
+                "to_publication_date": "2025-12-31",
+            }
+            fake_plan = {
+                "decision": {"status": "can_fetch", "can_execute": True, "reasons": [], "warnings": []},
+                "estimate": {
+                    "estimate_count": 10,
+                    "estimate_signature": "estimate-ok",
+                    "download_signature": "download-ok",
+                },
+                "openalex_filter": "primary_topic.subfield.id:1706",
+                "filter_classes": {},
+                "download_policy": {"user_controls_download_after_estimate": True},
+                "limits": {},
+            }
+            with (
+                patch.object(slice_workbench, "SLICES_DIR", tmp_path / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan),
+            ):
+                created = slice_workbench.create_slice(payload)
+                materialization = slice_workbench.create_materialization_plan(created["slice_id"])
+                materialization["run_id"] = "run_done"
+                materialization["state"] = "materializing"
+                slice_workbench._write_materialization(materialization)
+
+                slice_workbench.mark_materialization_run_completed(
+                    "run_done",
+                    {
+                        "fetch": {"dump": {"dump_id": "dump_done", "raw_jsonl": "/tmp/works.jsonl.gz"}},
+                        "build": {"status": "ok"},
+                        "no_data": False,
+                    },
+                )
+
+                updated_slice = slice_workbench.get_slice(created["slice_id"])
+                updated_plan = slice_workbench.get_materialization_plan(materialization["materialization_id"])
+                self.assertEqual(updated_slice["state"], "analyzed")
+                self.assertEqual(updated_plan["state"], "ready")
+                self.assertEqual(updated_plan["dump_id"], "dump_done")
+
 
 if __name__ == "__main__":
     unittest.main()

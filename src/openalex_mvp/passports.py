@@ -200,6 +200,7 @@ def build_passports(
         for rel in PRIMARY_ARTIFACTS
         if _artifact_path(root_path, data_root, rel).is_file()
     }
+    checksums.update(_dynamic_primary_artifacts(root_path, data_root, cfg))
     manifest_path = _write_sha256_manifest(root_path, data_root, cfg.slice_name, checksums)
     checksums_doc = {
         "algorithm": "SHA-256",
@@ -224,6 +225,20 @@ def _write_sha256_manifest(root_path: Path, data_root: Path, slice_id: str, chec
     lines = [f"{digest}  {rel}" for rel, digest in sorted(checksums.items())]
     manifest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8", newline="\n")
     return manifest
+
+
+def _dynamic_primary_artifacts(root_path: Path, data_root: Path, cfg: SliceConfig) -> dict[str, str]:
+    del root_path
+    artifacts: dict[str, str] = {}
+    raw_path = data_root / "raw" / "openalex_cli" / cfg.slice_name / "works.jsonl.gz"
+    if raw_path.is_file():
+        rel = str(Path("data") / raw_path.relative_to(data_root))
+        artifacts[rel] = sha256_file(raw_path)
+    dump_manifest = data_root / "raw" / "openalex_cli" / cfg.slice_name / "dump_manifest.json"
+    if dump_manifest.is_file():
+        rel = str(Path("data") / dump_manifest.relative_to(data_root))
+        artifacts[rel] = sha256_file(dump_manifest)
+    return artifacts
 
 
 def _data_root(root_path: Path) -> Path:

@@ -200,6 +200,39 @@ def list_dumps(limit: int = 50) -> dict[str, Any]:
     return {"dumps": dumps, "total": len(dumps)}
 
 
+def mark_materialization_run_completed(run_id: str, result: dict[str, Any]) -> None:
+    _ensure_dirs()
+    no_data = bool(result.get("no_data"))
+    fetch = result.get("fetch") if isinstance(result.get("fetch"), dict) else {}
+    dump = fetch.get("dump") if isinstance(fetch.get("dump"), dict) else {}
+    build = result.get("build") if isinstance(result.get("build"), dict) else {}
+    target_slice_state = "ready" if no_data else ("analyzed" if build else "ready")
+    target_materialization_state = "ready" if not no_data else "planned"
+
+    for path in MATERIALIZATIONS_DIR.glob("*.json"):
+        plan = _read_json(path)
+        if str(plan.get("run_id") or "") != run_id:
+            continue
+        plan["state"] = target_materialization_state
+        plan["updated_at_utc"] = _now()
+        if dump:
+            plan["dump_manifest"] = dump
+            plan["dump_id"] = dump.get("dump_id")
+        if build:
+            plan["analysis_result"] = build
+        _write_materialization(plan)
+        try:
+            doc = get_slice(str(plan["slice_id"]))
+        except KeyError:
+            return
+        doc["state"] = _advance_state(str(doc.get("state") or "materializing"), target_slice_state)
+        doc["latest_materialization_plan"] = plan
+        doc["updated_at_utc"] = _now()
+        doc["lifecycle"] = _lifecycle(doc["state"])
+        _write_slice(doc)
+        return
+
+
 def workbench_summary() -> dict[str, Any]:
     tables = warehouse.list_tables()
     slices = list_slices(limit=20)
