@@ -1,34 +1,30 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
 from _bootstrap import data_path
+from app.providers.openalex_cli_provider import download_works_metadata
 from openalex_mvp.config import load_config
-from openalex_mvp.openalex import fetch_works_slice_dump
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Download a compact reproducible OpenAlex Works slice as raw JSONL plus a slice passport."
+        description="Download a reproducible OpenAlex Works slice through the official OpenAlex CLI."
     )
     parser.add_argument("--config", default="config/slice.yaml")
-    parser.add_argument("--out-dir", default=None, help="Default: data/raw/openalex_slices/{slice_name}")
-    parser.add_argument("--max-records", type=int, default=None, help="Default: max_works from config")
-    parser.add_argument("--max-bytes", type=int, default=500 * 1024 * 1024)
-    parser.add_argument("--raw-filename", default="works.jsonl")
-    parser.add_argument("--passport-filename", default="slice_passport.json")
+    parser.add_argument("--out-dir", default=None, help="Default: OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_name}")
+    parser.add_argument("--api-key", default="", help="Default: environment variable configured by api_key_env")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    passport = fetch_works_slice_dump(
+    api_key = args.api_key.strip() or os.environ.get(cfg.api_key_env, "")
+    passport = download_works_metadata(
         cfg,
-        data_path(args.out_dir) if args.out_dir else None,
-        max_records=args.max_records,
-        max_bytes=args.max_bytes,
-        raw_filename=args.raw_filename,
-        passport_filename=args.passport_filename,
+        api_key=api_key,
+        out_dir=data_path(args.out_dir) if args.out_dir else None,
     )
     print(f"downloaded_records={passport['records_downloaded']}")
     print(f"stop_reason={passport['stop_reason']}")

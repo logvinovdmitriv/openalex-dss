@@ -45,6 +45,31 @@ filters:
     class: "openalex_pushdown"
     works_filter:
       field: "type"
+  from_publication_date:
+    label: "Дата публикации от"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "from_publication_date"
+  to_publication_date:
+    label: "Дата публикации до"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "to_publication_date"
+  is_retracted:
+    label: "Исключить отозванные работы"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "is_retracted"
+  is_paratext:
+    label: "Исключить служебные тексты"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "is_paratext"
+  is_xpac:
+    label: "Исключить XPAC"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "is_xpac"
   language:
     label: "Язык публикации"
     class: "openalex_pushdown"
@@ -61,6 +86,21 @@ filters:
     works_filter:
       field: "cited_by_count"
       operator: ">"
+  doi:
+    label: "DOI"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "doi"
+  source_type:
+    label: "Тип источника"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "primary_location.source.type"
+  has_abstract:
+    label: "Наличие аннотации"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "has_abstract"
   min_local_h:
     label: "Минимальный локальный h-index"
     class: "derived_after_metrics"
@@ -69,6 +109,18 @@ filters:
     label: "Минимум публикаций автора в срезе"
     class: "derived_after_metrics"
     derived_field: "p"
+sort:
+  default: "publication_date:asc,openalex:asc"
+facets:
+  work_types:
+    label: "Типы публикаций"
+    group_by: "type"
+  publication_years:
+    label: "Годы публикаций"
+    group_by: "publication_year"
+  countries:
+    label: "Страны аффилиаций"
+    group_by: "authorships.institutions.country_code"
 unsupported:
   city:
     label: "Город"

@@ -40,8 +40,6 @@ class PipelineRequest(BaseModel):
     exclude_paratext: bool | None = None
     country_code: str | None = None
     sort: str | None = None
-    max_works: int | None = Field(default=None, ge=1, le=100_000)
-    max_dump_bytes: int | None = Field(default=None, ge=1024, le=5 * 1024 * 1024 * 1024)
     per_page: int | None = Field(default=None, ge=1, le=100)
     fraction_modes: list[str] | None = None
     fraction_mode_default: str | None = None
@@ -119,22 +117,18 @@ class SliceCreateRequest(PipelineRequest):
 
 class SliceEstimateRequest(BaseModel):
     download_policy: "DownloadPolicy" = Field(default_factory=lambda: DownloadPolicy())
-    max_dump_bytes: int | None = Field(default=None, ge=1024, le=5 * 1024 * 1024 * 1024)
 
 
 class DownloadPolicy(BaseModel):
-    max_records_to_download: int | None = Field(default=None, ge=1, le=500_000)
-    max_raw_bytes: int | None = Field(default=None, ge=1024, le=5 * 1024 * 1024 * 1024)
     complete_slice_required: bool = True
     allow_incomplete_preview: bool = False
 
 
 class MaterializationPlanRequest(BaseModel):
     storage_profile_id: str = "minimal_analytics"
-    source_strategy: str = "openalex_api"
+    source_strategy: str = "openalex_cli"
     download_policy: DownloadPolicy = Field(default_factory=DownloadPolicy)
     profile_id: str | None = None
-    max_dump_bytes: int | None = Field(default=None, ge=1024, le=5 * 1024 * 1024 * 1024)
 
 
 class MaterializationRunRequest(BaseModel):

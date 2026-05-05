@@ -24,18 +24,13 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
     cfg = author_slice.config_from_payload({**payload, "workflow_mode": "strict_works"})
     limits = load_execution_limits()
     download_policy = _download_policy(payload, limits)
-    max_raw_bytes = int(download_policy["max_raw_bytes"])
 
     api_key = str(payload.get("api_key") or "").strip()
     old_api_key = os.environ.get(cfg.api_key_env)
     try:
         if api_key:
             os.environ[cfg.api_key_env] = api_key
-        estimate = estimate_works(
-            cfg,
-            max_dump_bytes=max_raw_bytes,
-            record_budget=download_policy["max_records_to_download"],
-        )
+        estimate = estimate_works(cfg)
     finally:
         if old_api_key is None:
             os.environ.pop(cfg.api_key_env, None)
@@ -44,12 +39,8 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
 
     decision = choose_strategy(
         estimate_count=int(estimate["estimate_count"]),
-        max_records_to_download=int(download_policy["max_records_to_download"]),
         planned_api_requests=int(estimate["api_requests_planned"]),
         estimated_raw_bytes=int(estimate["estimated_raw_bytes"]),
-        max_raw_bytes=max_raw_bytes,
-        complete_slice_required=bool(download_policy["complete_slice_required"]),
-        allow_incomplete_preview=bool(download_policy["allow_incomplete_preview"]),
         limits=limits,
     )
     return {
@@ -77,26 +68,19 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
 def choose_strategy(
     *,
     estimate_count: int,
-    max_records_to_download: int,
     planned_api_requests: int,
     estimated_raw_bytes: int,
-    max_raw_bytes: int,
-    complete_slice_required: bool = True,
-    allow_incomplete_preview: bool = False,
     limits: dict[str, Any],
 ) -> dict[str, Any]:
-    execution = limits.get("execution_limits", {})
     thresholds = limits.get("planner_thresholds", {})
     small = int(thresholds.get("small_slice_works", 50_000))
     medium = int(thresholds.get("medium_slice_works", 300_000))
     hard_stop = int(thresholds.get("hard_stop_works", 1_000_000))
-    max_requests = int(execution.get("max_api_requests_per_job", 2_000))
-    hard_works = int(execution.get("max_works_per_slice_hard", 300_000))
 
     reasons: list[str] = []
     warnings: list[str] = []
     status = "can_fetch"
-    strategy = "api_mini_slice"
+    strategy = "openalex_cli_slice"
 
     if estimate_count <= 0:
         return {
@@ -104,64 +88,39 @@ def choose_strategy(
             "strategy": "do_not_fetch",
             "reasons": ["OpenAlex returned zero works for this filter."],
             "warnings": [],
+            "records_to_fetch": 0,
+            "api_requests_planned": planned_api_requests,
+            "estimated_raw_mb": 0,
+            "complete_slice_required": True,
+            "allow_incomplete_preview": False,
+            "can_execute": False,
+            "user_decides_after_estimate": False,
         }
-    if estimate_count > hard_stop and max_records_to_download > small:
-        status = "blocked"
-        strategy = "refine_slice"
-        reasons.append("Estimated corpus is above the hard stop threshold.")
+    if estimate_count > hard_stop:
+        status = "very_large_slice"
+        strategy = "openalex_cli_large_slice"
+        warnings.append("Estimated corpus is very large. The user should decide whether to download it or narrow the filters.")
     elif estimate_count > medium:
-        status = "should_narrow"
-        strategy = "limited_api_mini_slice" if max_records_to_download <= small else "refine_slice"
-        warnings.append("Estimated corpus is large; narrow period, subject or work types for a dissertation-grade local run.")
+        status = "large_slice"
+        strategy = "openalex_cli_large_slice"
+        warnings.append("Estimated corpus is large. Review disk space, API budget and expected runtime before downloading.")
     elif estimate_count > small:
-        status = "can_fetch_with_warning"
-        strategy = "limited_api_mini_slice"
-        warnings.append("Estimated corpus is medium-sized; check the technical download budget before creating a local package.")
-
-    if max_records_to_download > hard_works:
-        status = "blocked"
-        strategy = "refine_slice"
-        reasons.append("Requested technical download cap exceeds local hard limit.")
-    if planned_api_requests > max_requests:
-        status = "blocked"
-        strategy = "refine_slice"
-        reasons.append("Planned API request count exceeds per-job limit.")
-    if complete_slice_required and estimate_count > max_records_to_download:
-        status = "blocked"
-        strategy = "refine_slice"
-        reasons.append("Complete slice requires more records than the technical download cap allows.")
-    elif estimate_count > max_records_to_download:
-        status = "preview_only"
-        strategy = "incomplete_preview"
-        warnings.append("This will be an incomplete technical preview and cannot be used for final conclusions.")
-    if estimated_raw_bytes > max_raw_bytes:
-        if complete_slice_required:
-            status = "blocked"
-            strategy = "refine_slice"
-            reasons.append("Estimated raw size exceeds the selected local storage budget. Narrow the slice or raise the technical budget.")
-        elif allow_incomplete_preview:
-            status = "preview_only"
-            strategy = "incomplete_preview"
-            warnings.append("Download can stop by max_raw_bytes; the result is not a complete scientific slice.")
-        else:
-            status = "blocked"
-            strategy = "refine_slice"
-            reasons.append("Estimated raw size exceeds the selected local storage budget.")
+        status = "medium_slice"
+        warnings.append("Estimated corpus is medium-sized. Download is allowed; review the forecast before proceeding.")
 
     return {
         "status": status,
         "strategy": strategy,
-        "records_to_fetch": estimate_count if complete_slice_required else min(estimate_count, max_records_to_download),
+        "records_to_fetch": estimate_count,
         "api_requests_planned": planned_api_requests,
         "estimated_raw_mb": round(estimated_raw_bytes / (1024 * 1024), 3),
-        "max_raw_mb": round(max_raw_bytes / (1024 * 1024), 3),
-        "max_dump_mb": round(max_raw_bytes / (1024 * 1024), 3),
-        "complete_slice_required": complete_slice_required,
-        "allow_incomplete_preview": allow_incomplete_preview,
-        "can_execute": status not in {"blocked", "no_data"},
+        "complete_slice_required": True,
+        "allow_incomplete_preview": False,
+        "can_execute": status != "no_data",
+        "user_decides_after_estimate": status != "no_data",
         "reasons": reasons,
         "warnings": warnings,
-        "notebook_policy": "API mini-slice first; full snapshot is a future server/S3 mode.",
+        "notebook_policy": "No local hard cap is applied by the planner. The user decides after seeing the forecast. Download uses OpenAlex CLI by default.",
     }
 
 
@@ -194,9 +153,6 @@ def load_execution_limits() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
         return {
             "execution_limits": {
-                "max_works_per_slice_default": 50_000,
-                "max_works_per_slice_hard": 300_000,
-                "max_raw_download_mb_default": 300,
                 "max_api_requests_per_job": 2_000,
             },
             "planner_thresholds": {
@@ -214,15 +170,11 @@ def planned_pages(records: int, per_page: int) -> int:
 
 
 def _download_policy(payload: dict[str, Any], limits: dict[str, Any]) -> dict[str, Any]:
-    execution = limits.get("execution_limits", {})
     raw_policy = payload.get("download_policy") if isinstance(payload.get("download_policy"), dict) else {}
-    default_records = int(execution.get("max_works_per_slice_default", 50_000))
-    default_raw_bytes = int(execution.get("max_raw_download_mb_default", 300)) * 1024 * 1024
-    max_records = raw_policy.get("max_records_to_download", payload.get("max_records_to_download", payload.get("max_works", default_records)))
-    max_raw_bytes = raw_policy.get("max_raw_bytes", payload.get("max_raw_bytes", payload.get("max_dump_bytes", default_raw_bytes)))
+    allowed = {key: value for key, value in raw_policy.items() if key in {"complete_slice_required", "allow_incomplete_preview"}}
     return {
-        "max_records_to_download": int(max_records or default_records),
-        "max_raw_bytes": int(max_raw_bytes or default_raw_bytes),
-        "complete_slice_required": bool(raw_policy.get("complete_slice_required", payload.get("complete_slice_required", True))),
-        "allow_incomplete_preview": bool(raw_policy.get("allow_incomplete_preview", payload.get("allow_incomplete_preview", False))),
+        "complete_slice_required": True,
+        "allow_incomplete_preview": False,
+        "user_controls_download_after_estimate": True,
+        **allowed,
     }

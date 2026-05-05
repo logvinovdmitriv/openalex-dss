@@ -19,7 +19,6 @@ from openalex_mvp.config import replace_config, write_config  # noqa: E402
 from openalex_mvp.io_utils import write_json  # noqa: E402
 from openalex_mvp.metrics import build_author_work_metrics, compute_indices  # noqa: E402
 from openalex_mvp.normalize import normalize_raw  # noqa: E402
-from openalex_mvp.openalex import fetch_works_slice_dump  # noqa: E402
 from openalex_mvp.passports import build_passports  # noqa: E402
 from openalex_mvp.ranking import build_ratings  # noqa: E402
 from openalex_mvp.stats import analyze_stats  # noqa: E402
@@ -52,12 +51,8 @@ def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[
     cfg = _cfg({**payload, "workflow_mode": "strict_works"})
     _write_runtime_config(cfg)
     api_key = str(payload.get("api_key") or "").strip()
-    download_policy = _download_policy(payload)
-    max_dump_bytes = int(download_policy["max_raw_bytes"])
     plan = query_planner.plan_slice({**payload, "workflow_mode": "strict_works"})
     decision = plan.get("decision") or {}
-    if decision.get("status") == "blocked":
-        raise ValueError("Срез слишком тяжелый для локального запуска: " + "; ".join(decision.get("reasons") or []))
     if decision.get("status") == "no_data":
         _write_pipeline_summary("fetch_slice_dump", cfg, {**payload, "query_plan": plan, "dump": {"no_data": True}})
         return {"status": "ok", "mode": "fetch_slice_dump", "query_plan": plan, "dump": {"no_data": True, "records_downloaded": 0}}
@@ -65,23 +60,14 @@ def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[
     try:
         if api_key:
             os.environ[cfg.api_key_env] = api_key
-        if str(payload.get("source_strategy") or "") == "openalex_cli":
-            passport = openalex_cli_provider.download_works_metadata(
-                cfg,
-                api_key=api_key,
-                out_dir=DATA / "raw/openalex_cli" / cfg.slice_name,
-                progress_callback=progress_callback,
-            )
-        else:
-            passport = fetch_works_slice_dump(
-                cfg,
-                DATA / "raw/openalex_slices" / cfg.slice_name,
-                max_records=int(download_policy["max_records_to_download"]),
-                max_bytes=max_dump_bytes,
-                complete_slice_required=bool(download_policy["complete_slice_required"]),
-                allow_incomplete_preview=bool(download_policy["allow_incomplete_preview"]),
-                progress_callback=progress_callback,
-            )
+        if str(payload.get("source_strategy") or "openalex_cli") != "openalex_cli":
+            raise ValueError("Скачивание среза выполняется через установленный OpenAlex CLI. API используется только для оценки и справочников.")
+        passport = openalex_cli_provider.download_works_metadata(
+            cfg,
+            api_key=api_key,
+            out_dir=DATA / "raw/openalex_cli" / cfg.slice_name,
+            progress_callback=progress_callback,
+        )
         passport["query_plan"] = plan
         if not passport.get("dump_id"):
             checksum = str(passport.get("raw_jsonl_sha256") or "")
@@ -335,7 +321,6 @@ def config_to_payload(cfg: Any) -> dict[str, Any]:
         "exclude_paratext": cfg.exclude_paratext,
         "include_xpac": cfg.include_xpac,
         "sort": cfg.sort,
-        "max_works": cfg.max_works,
         "per_page": cfg.per_page,
         "fraction_modes": list(cfg.fraction_modes),
         "fraction_mode_default": cfg.fraction_mode_default,
@@ -349,15 +334,3 @@ def config_to_payload(cfg: Any) -> dict[str, Any]:
 
 def _write_runtime_config(cfg: Any) -> None:
     write_config(cfg, DATA / "runtime/slice_config.yaml")
-
-
-def _download_policy(payload: dict[str, Any]) -> dict[str, Any]:
-    raw = payload.get("download_policy") if isinstance(payload.get("download_policy"), dict) else {}
-    max_records = raw.get("max_records_to_download", payload.get("max_records_to_download", payload.get("max_works", 50_000)))
-    max_raw_bytes = raw.get("max_raw_bytes", payload.get("max_raw_bytes", payload.get("max_dump_bytes", 500 * 1024 * 1024)))
-    return {
-        "max_records_to_download": int(max_records or 50_000),
-        "max_raw_bytes": int(max_raw_bytes or 500 * 1024 * 1024),
-        "complete_slice_required": bool(raw.get("complete_slice_required", payload.get("complete_slice_required", True))),
-        "allow_incomplete_preview": bool(raw.get("allow_incomplete_preview", payload.get("allow_incomplete_preview", False))),
-    }

@@ -61,8 +61,6 @@ export type PipelinePayload = {
 };
 
 export type DownloadPolicy = {
-  max_records_to_download: number;
-  max_raw_bytes: number;
   complete_slice_required: boolean;
   allow_incomplete_preview: boolean;
 };
@@ -152,7 +150,7 @@ export function buildSlicePayload(filters: ActiveFilters, fractionMode: string, 
     include_xpac: false,
     exclude_retracted: true,
     exclude_paratext: true,
-    sort: "publication_date:asc,openalex:asc",
+    sort: "",
     fraction_modes: fractionModes,
     fraction_mode_default: fractionMode,
     lrdi_p0: 5,
@@ -162,12 +160,10 @@ export function buildSlicePayload(filters: ActiveFilters, fractionMode: string, 
   };
 }
 
-export function buildDownloadPolicy(maxRecordsToDownload: number, maxRawBytes: number, allowIncompletePreview = false): DownloadPolicy {
+export function buildDownloadPolicy(): DownloadPolicy {
   return {
-    max_records_to_download: maxRecordsToDownload,
-    max_raw_bytes: maxRawBytes,
-    complete_slice_required: !allowIncompletePreview,
-    allow_incomplete_preview: allowIncompletePreview,
+    complete_slice_required: true,
+    allow_incomplete_preview: false,
   };
 }
 

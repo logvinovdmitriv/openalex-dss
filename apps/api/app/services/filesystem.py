@@ -161,6 +161,8 @@ def _source_kind(path: Path) -> str:
         text = path.as_posix()
     if "/lake/bronze/openalex/snapshot/" in text:
         return "openalex_snapshot"
+    if "/raw/openalex_cli/" in text:
+        return "openalex_cli"
     if "/lake/bronze/openalex/api/" in text or text.startswith("/raw/"):
         return "openalex_api"
     if "/lake/bronze/openalex/files/" in text:

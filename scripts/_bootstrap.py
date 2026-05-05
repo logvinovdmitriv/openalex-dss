@@ -7,8 +7,10 @@ import os
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+API = ROOT / "apps/api"
+for path in (SRC, API):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 
 DATA = Path(os.environ.get("OPENALEX_DSS_DATA_DIR", ROOT.parent / "openalex-dss-data")).expanduser().resolve()

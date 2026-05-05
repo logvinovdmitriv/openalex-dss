@@ -29,7 +29,6 @@ ui_modes:
       - query_plan
       - data_source_priority
       - api_budget
-      - download_budget
       - storage_profile
 filters:
   subject:
@@ -72,7 +71,3 @@ filters:
     type: "checkbox_group"
     visible: true
     values_source: "work_type_presets"
-  download_budget:
-    label: "Технический предохранитель загрузки"
-    type: "select"
-    visible: false

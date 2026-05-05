@@ -73,3 +73,8 @@ def languages(q: str = Query("", min_length=0), limit: int = Query(30, ge=1, le=
 @router.get("/openalex/source-types")
 def source_types(limit: int = Query(30, ge=1, le=50)) -> dict[str, Any]:
     return openalex_catalog.source_types(limit=limit)
+
+
+@router.get("/openalex/rate-limit")
+def rate_limit(api_key: str = Query("", min_length=0)) -> dict[str, Any]:
+    return openalex_catalog.rate_limit(api_key)

@@ -31,8 +31,6 @@ class SliceWorkbenchTests(unittest.TestCase):
                 "to_publication_date": "2025-12-31",
                 "work_type": "article|review",
                 "download_policy": {
-                    "max_records_to_download": 1200,
-                    "max_raw_bytes": 64 * 1024 * 1024,
                     "complete_slice_required": True,
                     "allow_incomplete_preview": False,
                 },
@@ -48,7 +46,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                 },
                 "openalex_filter": "primary_topic.subfield.id:1706,authorships.institutions.country_code:RU",
                 "filter_classes": {"pushdown_openalex": ["subject", "country"]},
-                "download_policy": payload["download_policy"],
+                "download_policy": {**payload["download_policy"], "user_controls_download_after_estimate": True},
                 "limits": {"max_api_requests_per_job": 2000},
             }
 
@@ -59,17 +57,18 @@ class SliceWorkbenchTests(unittest.TestCase):
             ):
                 created = slice_workbench.create_slice(payload)
                 self.assertNotIn("limits", created["slice_definition"])
-                self.assertEqual(created["download_policy_default"]["max_records_to_download"], 1200)
+                self.assertEqual(created["download_policy_default"]["complete_slice_required"], True)
 
                 estimate = slice_workbench.estimate_slice(created["slice_id"], {"download_policy": payload["download_policy"]})
-                self.assertEqual(estimate["download_policy"]["max_raw_bytes"], 64 * 1024 * 1024)
+                self.assertEqual(estimate["download_policy"]["user_controls_download_after_estimate"], True)
 
                 materialization = slice_workbench.create_materialization_plan(
                     created["slice_id"],
                     {"storage_profile_id": "minimal_analytics", "download_policy": payload["download_policy"]},
                 )
-                self.assertEqual(materialization["download_policy"]["max_records_to_download"], 1200)
-                self.assertEqual(materialization["technical_payload"]["max_raw_bytes"], 64 * 1024 * 1024)
+                self.assertEqual(materialization["source_strategy"], "openalex_cli")
+                self.assertEqual(materialization["download_policy"]["complete_slice_required"], True)
+                self.assertEqual(materialization["download_policy"]["user_controls_download_after_estimate"], True)
                 self.assertEqual(materialization["state"], "planned")
 
 

@@ -88,9 +88,6 @@ function Workbench() {
   const [filters, setFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
   const [metric, setMetric] = useState("h");
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
-  const [technicalRecordCap, setTechnicalRecordCap] = useState(0);
-  const [maxRawBytes, setMaxRawBytes] = useState(0);
-  const [allowIncompletePreview, setAllowIncompletePreview] = useState(false);
   const [topN, setTopN] = useState(0);
   const [storageProfileId, setStorageProfileId] = useState("");
   const [sourceStrategy, setSourceStrategy] = useState("");
@@ -147,6 +144,11 @@ function Workbench() {
   const cohorts = useQuery({ queryKey: ["cohorts"], queryFn: () => getJson<any>("/cohorts?limit=50") });
   const countries = useQuery({ queryKey: ["countries"], queryFn: () => getJson<any>("/openalex/countries?limit=50") });
   const workTypes = useQuery({ queryKey: ["work-types"], queryFn: () => getJson<any>("/openalex/work-types?limit=50") });
+  const rateLimit = useQuery({
+    queryKey: ["openalex-rate-limit", apiKey],
+    queryFn: () => getJson<any>(`/openalex/rate-limit?api_key=${encodeURIComponent(apiKey.trim())}`),
+    enabled: Boolean(apiKey.trim()),
+  });
   const cohortStats = useQuery({
     queryKey: ["cohort-stats", selectedCohortId],
     queryFn: () => postJson<any>(`/cohorts/${encodeURIComponent(selectedCohortId)}/statistics`, {}),
@@ -182,30 +184,21 @@ function Workbench() {
   const workTypeOptions = catalogOptions(workTypes.data?.results ?? []);
   const storageProfileOptions = configuredOptions(catalog.data?.storage_profiles ?? []);
   const uiOptions = catalog.data?.ui_options ?? {};
-  const recordBudgetOptions = configuredOptions(uiOptions.download_record_budgets ?? []);
-  const rawBudgetOptions = configuredOptions(uiOptions.raw_size_budgets ?? []);
   const topNOptions = configuredOptions(uiOptions.top_n ?? []);
   const primaryMetricOptions = configuredOptions(catalog.data?.metrics ?? []);
   const fractionModeOptions = configuredOptions(catalog.data?.fraction_modes ?? []);
   const tableOptions = Object.keys(state.data?.tables ?? {}).map((value) => ({ value, label: value }));
   const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
-    .filter((item) => ["openalex_api", "openalex_cli"].includes(item.value));
+    .filter((item) => ["openalex_cli"].includes(item.value));
   const defaultStorageProfileId = String(defaultOption(storageProfileOptions)?.value ?? "minimal_analytics");
-  const defaultSourceStrategy = String(defaultOption(sourceStrategyOptions)?.value ?? "openalex_api");
-  const defaultRecordBudget = Number(defaultOption(recordBudgetOptions)?.value ?? 50_000);
-  const defaultRawBudget = Number(defaultOption(rawBudgetOptions)?.value ?? 500 * 1024 * 1024);
+  const defaultSourceStrategy = String(defaultOption(sourceStrategyOptions)?.value ?? "openalex_cli");
   const defaultTopN = Number(defaultOption(topNOptions)?.value ?? 100);
   const activeStorageProfileId = storageProfileId || defaultStorageProfileId;
   const activeSourceStrategy = sourceStrategy || defaultSourceStrategy;
-  const activeRecordBudget = technicalRecordCap || defaultRecordBudget;
-  const activeRawBudget = maxRawBytes || defaultRawBudget;
   const activeTopN = topN || defaultTopN;
   const payload = useMemo(() => buildSlicePayload(filters, fractionMode, apiKey, fractionModeOptions.map((item) => item.value)), [filters, fractionMode, apiKey, fractionModeOptions]);
-  const downloadConfigReady = Boolean(activeStorageProfileId && activeRecordBudget && activeRawBudget);
-  const downloadPolicy = useMemo(
-    () => buildDownloadPolicy(Math.max(1, activeRecordBudget || 1), Math.max(1024, activeRawBudget || 1024), allowIncompletePreview),
-    [activeRecordBudget, activeRawBudget, allowIncompletePreview],
-  );
+  const downloadConfigReady = Boolean(activeStorageProfileId && activeSourceStrategy);
+  const downloadPolicy = useMemo(() => buildDownloadPolicy(), []);
 
   useEffect(() => {
     if (!storageProfileId && defaultStorageProfileId) setStorageProfileId(defaultStorageProfileId);
@@ -214,14 +207,6 @@ function Workbench() {
   useEffect(() => {
     if (!sourceStrategy && defaultSourceStrategy) setSourceStrategy(defaultSourceStrategy);
   }, [sourceStrategy, defaultSourceStrategy]);
-
-  useEffect(() => {
-    if (!technicalRecordCap && defaultRecordBudget) setTechnicalRecordCap(defaultRecordBudget);
-  }, [technicalRecordCap, defaultRecordBudget]);
-
-  useEffect(() => {
-    if (!maxRawBytes && defaultRawBudget) setMaxRawBytes(defaultRawBudget);
-  }, [maxRawBytes, defaultRawBudget]);
 
   useEffect(() => {
     if (!topN && defaultTopN) setTopN(defaultTopN);
@@ -279,9 +264,9 @@ function Workbench() {
       setEstimate(estimateResult);
       setSliceDoc({ ...doc, latest_estimate: estimateResult, state: "estimated" });
       const decision = estimateResult?.decision ?? {};
-      if (decision.can_execute === false) {
+      if (decision.status === "no_data") {
         const reason = [...(decision.reasons ?? []), ...(decision.warnings ?? [])].filter(Boolean).join(" ");
-        throw new Error(reason || "Срез превышает технический бюджет загрузки. Уточните фильтры или настройте скачивание.");
+        throw new Error(reason || "OpenAlex не вернул работ для выбранных фильтров.");
       }
       const plan = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy });
       setMaterialization(plan);
@@ -421,16 +406,9 @@ function Workbench() {
             sourceStrategy={activeSourceStrategy}
             setSourceStrategy={setSourceStrategy}
             sourceStrategyOptions={sourceStrategyOptions}
-            technicalRecordCap={activeRecordBudget}
-            setTechnicalRecordCap={setTechnicalRecordCap}
-            recordBudgetOptions={recordBudgetOptions}
-            maxRawBytes={activeRawBudget}
-            setMaxRawBytes={setMaxRawBytes}
-            rawBudgetOptions={rawBudgetOptions}
-            allowIncompletePreview={allowIncompletePreview}
-            setAllowIncompletePreview={setAllowIncompletePreview}
             apiKey={apiKey}
             setApiKey={setApiKey}
+            rateLimit={rateLimit.data}
             onRun={() => downloadSlice.mutate()}
             saving={createSlice.isPending}
             estimating={estimateSlice.isPending}
@@ -566,16 +544,9 @@ function SlicesPage({
   sourceStrategy,
   setSourceStrategy,
   sourceStrategyOptions,
-  technicalRecordCap,
-  setTechnicalRecordCap,
-  recordBudgetOptions,
-  maxRawBytes,
-  setMaxRawBytes,
-  rawBudgetOptions,
-  allowIncompletePreview,
-  setAllowIncompletePreview,
   apiKey,
   setApiKey,
+  rateLimit,
   onRun,
   saving,
   estimating,
@@ -601,16 +572,9 @@ function SlicesPage({
   sourceStrategy: string;
   setSourceStrategy: (value: string) => void;
   sourceStrategyOptions: SelectOption[];
-  technicalRecordCap: number;
-  setTechnicalRecordCap: (value: number) => void;
-  recordBudgetOptions: SelectOption[];
-  maxRawBytes: number;
-  setMaxRawBytes: (value: number) => void;
-  rawBudgetOptions: SelectOption[];
-  allowIncompletePreview: boolean;
-  setAllowIncompletePreview: (value: boolean) => void;
   apiKey: string;
   setApiKey: (value: string) => void;
+  rateLimit: any;
   onRun: () => void;
   saving: boolean;
   estimating: boolean;
@@ -626,7 +590,7 @@ function SlicesPage({
   const decision = estimate?.decision ?? {};
   const rawEstimate = estimate?.estimate ?? {};
   const hasEstimate = Boolean(estimate);
-  const canRun = hasEstimate && decision.can_execute !== false;
+  const canRun = hasEstimate && decision.status !== "no_data";
 
   return (
     <div className="stack">
@@ -714,7 +678,7 @@ function SlicesPage({
           <div>
             <span className="step-badge">2. Оценка и скачивание</span>
             <h2>Настройка локального пакета</h2>
-            <p>Технические ограничения не являются фильтрами исследования. Они только защищают ноутбук от слишком большой загрузки.</p>
+            <p>Система автоматически считает объем и стоимость среза. Решение скачивать или ужесточать фильтры принимает пользователь.</p>
           </div>
           <button onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} Обновить оценку</button>
         </div>
@@ -726,10 +690,10 @@ function SlicesPage({
           <MetricCard label="Parquet прогноз" value={`${fmt(rawEstimate.estimated_parquet_mb ?? 0)} МБ`} />
           <MetricCard label="Память расчета" value={`${fmt(rawEstimate.estimated_memory_mb ?? 0)} МБ`} />
         </div>
-        <EstimateBudget estimate={rawEstimate} decision={decision} maxRawBytes={maxRawBytes} />
+        <EstimateBudget estimate={rawEstimate} decision={decision} />
         <EstimateFacets facets={rawEstimate.facets} />
         <div className={canRun ? "notice success" : hasEstimate ? "notice error" : "notice"}>
-          <b>{canRun ? "Полная загрузка допустима" : hasEstimate ? "Нужно уточнить срез" : "Сначала оцените объем"}</b>
+          <b>{canRun ? "Можно скачивать или уточнить фильтры" : hasEstimate ? "Нет данных для загрузки" : "Сначала оцените объем"}</b>
           <span>{decision.strategy ?? "Оценка еще не выполнена"} · {decision.status ?? "нет статуса"}</span>
         </div>
         {[...(decision.reasons ?? []), ...(decision.warnings ?? [])].length > 0 && (
@@ -754,29 +718,12 @@ function SlicesPage({
                 onChange={setSourceStrategy}
               />
             </Field>
-            <Field label="Защитный порог raw">
-              <SingleChoicePicker
-                options={rawBudgetOptions}
-                selected={String(maxRawBytes)}
-                onChange={(value) => setMaxRawBytes(Number(value))}
-              />
-            </Field>
-            <Field label="Технический предохранитель записей">
-              <SingleChoicePicker
-                options={recordBudgetOptions}
-                selected={String(technicalRecordCap)}
-                onChange={(value) => setTechnicalRecordCap(Number(value))}
-              />
-            </Field>
-            <label className="field checkbox-field">
-              <input type="checkbox" checked={allowIncompletePreview} onChange={(event) => setAllowIncompletePreview(event.target.checked)} />
-              <span>Разрешить неполный черновой preview</span>
-            </label>
             <Field label="OpenAlex API key">
               <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Нужен для OpenAlex CLI и повышенных лимитов API" />
             </Field>
           </div>
         </details>
+        <RateLimitPanel rateLimit={rateLimit} apiKeySet={Boolean(apiKey.trim())} estimate={rawEstimate} />
         {materialization && (
           <div className="materialization-card">
             <b>{materialization.profile?.label}</b>
@@ -785,7 +732,7 @@ function SlicesPage({
           </div>
         )}
         <div className="action-row">
-          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !downloadConfigReady || (hasEstimate && decision.can_execute === false)}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} {hasEstimate ? "Скачать срез" : "Оценить и скачать"}</button>
+          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !hasEstimate || !downloadConfigReady || decision.status === "no_data"}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} Скачать срез через OpenAlex CLI</button>
         </div>
       </section>
 
@@ -1478,18 +1425,33 @@ function SingleChoicePicker({ options, selected, onChange }: { options: SelectOp
   );
 }
 
-function EstimateBudget({ estimate, decision, maxRawBytes }: { estimate: any; decision: any; maxRawBytes: number }) {
+function RateLimitPanel({ rateLimit, apiKeySet, estimate }: { rateLimit: any; apiKeySet: boolean; estimate: any }) {
+  const headerLimit = estimate?.rate_limit ?? {};
+  const dailyRemaining = rateLimit?.daily_remaining_usd;
+  const dailyBudget = rateLimit?.daily_budget_usd;
+  const estimatedCost = estimate?.estimated_cost_usd;
+  return (
+    <div className="metric-grid">
+      <MetricCard label="API key" value={apiKeySet ? "задан" : "не задан"} />
+      <MetricCard label="Остаток OpenAlex" value={dailyRemaining !== undefined ? `$${fmt(dailyRemaining)}` : headerLimit.remaining !== undefined ? fmt(headerLimit.remaining) : "нет данных"} />
+      <MetricCard label="Дневной лимит" value={dailyBudget !== undefined ? `$${fmt(dailyBudget)}` : headerLimit.limit !== undefined ? fmt(headerLimit.limit) : "нет данных"} />
+      <MetricCard label="Стоимость оценки" value={estimatedCost !== undefined ? `$${fmt(estimatedCost)}` : "нет данных"} />
+    </div>
+  );
+}
+
+function EstimateBudget({ estimate, decision }: { estimate: any; decision: any }) {
   const p90 = Number(estimate?.estimated_raw_bytes_p90 ?? estimate?.estimated_raw_bytes ?? 0);
   const avg = Number(estimate?.estimated_raw_bytes ?? 0);
-  const limit = Number(maxRawBytes || decision?.max_raw_mb * 1024 * 1024 || estimate?.max_dump_bytes || 0);
-  if (!avg && !p90 && !limit) return null;
-  const avgPct = limit ? Math.min(100, Math.round((avg / limit) * 100)) : 0;
-  const p90Pct = limit ? Math.min(100, Math.round((p90 / limit) * 100)) : 0;
+  if (!avg && !p90) return null;
+  const baseline = Math.max(avg, p90, 1);
+  const avgPct = Math.min(100, Math.round((avg / baseline) * 100));
+  const p90Pct = Math.min(100, Math.round((p90 / baseline) * 100));
   return (
     <div className="estimate-budget">
       <div className="progress-meta">
         <span>Прогноз физической загрузки: средний {fmt(bytesToMb(avg))} МБ, p90 {fmt(bytesToMb(p90))} МБ</span>
-        <b>лимит {fmt(bytesToMb(limit))} МБ</b>
+        <b>{decision?.status ?? "estimate"}</b>
       </div>
       <div className="budget-track" aria-label={`Средний прогноз ${avgPct}%, p90 ${p90Pct}%`}>
         <span className="budget-avg" style={{ width: `${avgPct}%` }} />

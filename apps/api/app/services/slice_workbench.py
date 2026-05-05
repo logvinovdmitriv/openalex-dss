@@ -120,7 +120,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
     profile_id = str(payload.get("storage_profile_id") or payload.get("profile_id") or payload.get("materialization_profile") or "minimal_analytics")
     profiles = _storage_profiles()
     profile = profiles.get(profile_id) or next(iter(profiles.values()))
-    source_strategy = str(payload.get("source_strategy") or payload.get("data_source_id") or "openalex_api")
+    source_strategy = str(payload.get("source_strategy") or payload.get("data_source_id") or "openalex_cli")
     download_policy = _download_policy(payload, fallback=doc.get("download_policy_default"))
     plan_id = _safe_id(f"mat_{slice_id}_{profile['profile_id']}_{uuid.uuid4().hex[:8]}")
     estimate = doc.get("latest_estimate") or estimate_slice(slice_id, {"download_policy": download_policy})
@@ -133,17 +133,14 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         "profile": profile,
         "source_strategy": source_strategy,
         "download_policy": download_policy,
-        "max_dump_bytes": int(download_policy["max_raw_bytes"]),
         "estimated": estimate,
         "technical_payload": {
             **doc["technical_payload"],
             "source_strategy": source_strategy,
             "download_policy": download_policy,
-            "max_records_to_download": int(download_policy["max_records_to_download"]),
-            "max_raw_bytes": int(download_policy["max_raw_bytes"]),
         },
         "outputs": [
-            "raw/openalex_slices/{slice_id}/works.jsonl.gz",
+            "raw/openalex_cli/{slice_id}/works.jsonl.gz",
             "tables/{dump_id}/works.parquet",
             "tables/{dump_id}/authorships.parquet",
             "tables/{dump_id}/work_topics.parquet",
@@ -237,24 +234,13 @@ def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _download_policy(payload: dict[str, Any], fallback: dict[str, Any] | None = None) -> dict[str, Any]:
     raw = payload.get("download_policy") if isinstance(payload.get("download_policy"), dict) else {}
     default = fallback or {
-        "max_records_to_download": 50_000,
-        "max_raw_bytes": 500 * 1024 * 1024,
         "complete_slice_required": True,
         "allow_incomplete_preview": False,
     }
-    max_records = raw.get(
-        "max_records_to_download",
-        payload.get("max_records_to_download", payload.get("max_works", default.get("max_records_to_download", 50_000))),
-    )
-    max_raw_bytes = raw.get(
-        "max_raw_bytes",
-        payload.get("max_raw_bytes", payload.get("max_dump_bytes", default.get("max_raw_bytes", 500 * 1024 * 1024))),
-    )
     return {
-        "max_records_to_download": int(max_records or default.get("max_records_to_download", 50_000)),
-        "max_raw_bytes": int(max_raw_bytes or default.get("max_raw_bytes", 500 * 1024 * 1024)),
         "complete_slice_required": bool(raw.get("complete_slice_required", payload.get("complete_slice_required", default.get("complete_slice_required", True)))),
         "allow_incomplete_preview": bool(raw.get("allow_incomplete_preview", payload.get("allow_incomplete_preview", default.get("allow_incomplete_preview", False)))),
+        "user_controls_download_after_estimate": True,
     }
 
 

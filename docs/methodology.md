@@ -5,8 +5,8 @@
 устойчивость рангов и ограничения данных. Для этого в системе оставлен один
 исследовательский контур:
 
-- сначала загружается предметный срез `/works` как фиксированный компактный
-  JSONL-дамп;
+- сначала предметный Works-срез скачивается через официальный OpenAlex CLI как
+  фиксированный компактный JSONL.GZ-дамп;
 - затем `authorships` нормализуется в локальные таблицы;
 - после этого авторские индексы считаются только по работам внутри выбранного
   среза.
@@ -20,7 +20,8 @@ OpenAlex Author object и глобальные `summary_stats` не исполь
 
 Срез по умолчанию:
 
-- endpoint: `https://api.openalex.org/works`
+- источник оценки: `https://api.openalex.org/works`
+- источник скачивания: установленный `openalex download`
 - предметный фильтр: `primary_topic.subfield.id:2604`
 - название: `Applied Mathematics`
 - период: `2020-01-01` - `2024-12-31`
@@ -111,11 +112,14 @@ OpenAlex Works API возвращает вложенные `authorships`; MVP н
 ## Data Flow
 
 1. Пользователь выбирает область, подобласть или тему OpenAlex по названию.
-2. Пользователь задает период, страну автора и объем загрузки.
+2. Пользователь задает период, страну автора и организацию; объем загрузки
+   система прогнозирует автоматически.
 3. Пользователь при необходимости выбирает keyword и организацию через
    подсказки OpenAlex.
-4. Backend показывает точный OpenAlex filter, search и select.
-5. Backend скачивает фиксированный Works JSONL-dump или импортирует уже
+4. Backend показывает точный OpenAlex filter, search, оценку объема, стоимость
+   оценки и доступные лимиты API.
+5. Backend запускает OpenAlex CLI для скачивания фиксированного Works
+   JSONL.GZ-dump или импортирует уже
    существующий локальный OpenAlex Works dump.
 6. JSON нормализуется в тонкий curated-слой `works_flat` и
    `authorships_flat`; dependency-light реализация пишет CSV, production-слой
@@ -147,7 +151,7 @@ statistics, stability report и ссылки на CSV exports.
 Целевой контур хранения для развития СППР размещается вне репозитория, в
 каталоге `OPENALEX_DSS_DATA_DIR`:
 
-- `$OPENALEX_DSS_DATA_DIR/raw/{slice_id}/` - неизменяемые API pages / локальный микродамп;
+- `$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/` - неизменяемый локальный микродамп;
 - `data/ref/` и `config/mappings/vak_topic_mapping.yaml` - mapping ВАК ->
   OpenAlex topics/subfields/keywords;
 - `$OPENALEX_DSS_DATA_DIR/curated/{slice_id}/` - тонкие `works_flat` и `authorships_flat`;
@@ -164,36 +168,34 @@ statistics, stability report и ссылки на CSV exports.
 ## Компактный дамп MVP
 
 Для ноутбука и воспроизводимой проверки используется не полный OpenAlex S3
-snapshot, а компактный API-срез:
+snapshot, а локальный срез, скачанный через официальный OpenAlex CLI:
 
 ```bash
-python3 scripts/01_fetch_openalex_slice.py \
-  --config config/slice.yaml \
-  --out-dir data/raw/openalex_slices/{slice_id} \
-  --max-records 50000 \
-  --max-bytes 524288000
+openalex download \
+  --api-key YOUR_KEY \
+  --output data/raw/openalex_cli/{slice_id}/files \
+  --filter "primary_topic.subfield.id:2604,from_publication_date:2020-01-01,to_publication_date:2024-12-31"
 ```
 
-Скрипт создает:
+Backend упаковывает результат CLI в:
 
-- `works.jsonl` - неизменяемый raw-файл работ выбранного среза;
-- `slice_passport.json` - фильтр OpenAlex, `select`, лимиты, число записей,
-  причину остановки, SHA-256 и заметку, что это compact slice, а не полный
-  snapshot.
+- `works.jsonl.gz` - неизменяемый raw-файл работ выбранного среза;
+- `slice_passport.json` - фильтр OpenAlex, способ загрузки, число записей,
+  SHA-256 и заметку, что это compact slice, а не полный snapshot.
 
 Если путь начинается с `data/`, CLI и backend сохраняют файл во внешний
 `OPENALEX_DSS_DATA_DIR`, поэтому тяжелые дампы и таблицы не попадают в
 репозиторий.
 
-После этого нормализация и расчет индексов должны выполняться локально от
-зафиксированного JSONL. API используется только для первичного скачивания
-фиксированного среза, подсказок/ID в выпадающих списках и точечного
-дообогащения авторов или публикаций.
+После этого нормализация и расчет индексов выполняются локально от
+зафиксированного JSONL.GZ. API используется только для подсказок/ID в
+выпадающих списках, OpenAlex field/filter справочников, оценки объема,
+просмотра доступных лимитов и точечного дообогащения авторов или публикаций.
 
 В UI этот же режим находится в рабочей области `Выборка`: пользователь
 выбирает предметный срез, страну, организацию, период и типы работ. Система
-оценивает число работ, API-страниц и размер raw/parquet до загрузки; после
+оценивает число работ, стоимость estimate-запросов и размер raw/parquet до загрузки; после
 подтверждения выполняется единое действие `Скачать срез`, которое сохраняет
 JSONL и запускает локальную нормализацию без повторного обращения к OpenAlex.
-Для сервера скачивание остается отдельным endpoint
-`/api/v1/pipeline/fetch-slice-dump`; он не смешивает raw dump с витринами.
+Для сервера скачивание остается отдельным lifecycle endpoint
+`/api/v1/materializations/{materialization_id}/run`; он не смешивает raw dump с витринами.

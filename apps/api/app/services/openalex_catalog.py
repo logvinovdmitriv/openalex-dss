@@ -214,27 +214,50 @@ def search_countries(q: str = "", *, limit: int = 12) -> dict[str, Any]:
 
 
 def work_types(*, limit: int = 50) -> dict[str, Any]:
-    _ensure_group_catalog("work_type", "type")
+    _ensure_group_catalog("work_type", _openalex_filter_field("work_type"))
     return {"results": _generic_results(metadata_store.list_entities("work_type", limit=limit)), "cache": catalog_status()["work_types"]}
 
 
 def languages(q: str = "", *, limit: int = 30) -> dict[str, Any]:
-    _ensure_group_catalog("language", "language")
+    _ensure_group_catalog("language", _openalex_filter_field("language"))
     return _search_group_catalog("language", q, limit=limit)
 
 
 def source_types(*, limit: int = 30) -> dict[str, Any]:
-    _ensure_group_catalog("source_type", "primary_location.source.type")
+    _ensure_group_catalog("source_type", _openalex_filter_field("source_type"))
     return {"results": _generic_results(metadata_store.list_entities("source_type", limit=limit)), "cache": catalog_status()["source_types"]}
+
+
+def rate_limit(api_key: str) -> dict[str, Any]:
+    key = api_key.strip()
+    if not key:
+        return {
+            "available": False,
+            "requires_api_key": True,
+            "message": "OpenAlex /rate-limit requires an API key.",
+        }
+    payload = _get("rate-limit", {"api_key": key})
+    limit = payload.get("rate_limit") or {}
+    return {
+        "available": True,
+        "daily_budget_usd": limit.get("daily_budget_usd"),
+        "daily_used_usd": limit.get("daily_used_usd"),
+        "daily_remaining_usd": limit.get("daily_remaining_usd"),
+        "prepaid_remaining_usd": limit.get("prepaid_remaining_usd"),
+        "resets_at": limit.get("resets_at"),
+        "resets_in_seconds": limit.get("resets_in_seconds"),
+        "endpoint_costs_usd": limit.get("endpoint_costs_usd") or {},
+        "raw": payload,
+    }
 
 
 def sync_group_catalogs() -> dict[str, Any]:
     return {
         "status": "ok",
         "countries": _sync_country_catalog(),
-        "work_types": _sync_group_catalog("work_type", "type"),
-        "languages": _sync_group_catalog("language", "language"),
-        "source_types": _sync_group_catalog("source_type", "primary_location.source.type"),
+        "work_types": _sync_group_catalog("work_type", _openalex_filter_field("work_type")),
+        "languages": _sync_group_catalog("language", _openalex_filter_field("language")),
+        "source_types": _sync_group_catalog("source_type", _openalex_filter_field("source_type")),
         "catalog": catalog_status(),
     }
 
@@ -294,7 +317,7 @@ def _sync_country_catalog() -> dict[str, Any]:
                 break
             page += 1
     except RuntimeError:
-        return _sync_group_catalog("country", "authorships.institutions.country_code")
+        return _sync_group_catalog("country", _openalex_filter_field("country"))
     inserted = metadata_store.upsert_entities("country", items, source="openalex_countries")
     return {"inserted": inserted, "items": len(items)}
 
@@ -304,6 +327,14 @@ def _sync_group_catalog(entity_type: str, group_by: str) -> dict[str, Any]:
     items = [_group_item(row, entity_type) for row in payload.get("group_by", [])]
     inserted = metadata_store.upsert_entities(entity_type, items, source=f"openalex_group_by:{group_by}")
     return {"inserted": inserted, "items": len(items)}
+
+
+def _openalex_filter_field(filter_key: str) -> str:
+    filters = (registry.registry().get("openalex_filter_registry") or {}).get("filters") or {}
+    field = (((filters.get(filter_key) or {}).get("works_filter") or {}).get("field") or "").strip()
+    if not field:
+        raise RuntimeError(f"OpenAlex field is not configured for {filter_key}")
+    return field
 
 
 def _group_item(row: dict[str, Any], entity_type: str) -> dict[str, Any]:

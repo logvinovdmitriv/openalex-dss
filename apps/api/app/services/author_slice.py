@@ -10,7 +10,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from openalex_mvp.config import SliceConfig, load_config, replace_config  # noqa: E402
-from openalex_mvp.openalex import build_filter  # noqa: E402
+from openalex_mvp.openalex import build_filter, default_sort  # noqa: E402
 
 
 SUBJECT_LEVELS = {"field", "subfield", "topic"}
@@ -21,7 +21,7 @@ WORK_TYPE_RE = re.compile(r"^[a-z0-9-]+$")
 SOURCE_TYPE_RE = re.compile(r"^[a-z0-9-]+$")
 LANGUAGE_RE = re.compile(r"^[a-z]{2,3}$")
 SORT_PART_RE = re.compile(r"^[A-Za-z0-9_.-]+:(asc|desc)$")
-DEFAULT_SORT = "publication_date:asc,openalex:asc"
+DEFAULT_SORT = default_sort()
 COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
 
 
@@ -68,7 +68,6 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
         "request": {
             "filter": build_filter(cfg),
             "sort": cfg.sort,
-            "max_works": cfg.max_works,
             "per_page": cfg.per_page,
             "select_fields": list(cfg.select_fields),
         },
@@ -172,10 +171,6 @@ def _clean_updates(payload: dict[str, Any], *, base: SliceConfig) -> dict[str, A
         raise ValueError("sort must use OpenAlex format field:asc or field:desc, comma-separated")
     updates["sort"] = sort
 
-    max_works = int(updates.get("max_works") or base.max_works or 1000)
-    if max_works < 1 or max_works > 100_000:
-        raise ValueError("max_works must be between 1 and 100000")
-    updates["max_works"] = max_works
     updates["per_page"] = max(1, min(int(updates.get("per_page") or base.per_page or 100), 100))
 
     fraction_modes = _clean_fraction_modes(updates.get("fraction_modes") or base.fraction_modes)

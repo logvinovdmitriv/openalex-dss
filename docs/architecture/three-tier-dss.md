@@ -70,7 +70,7 @@ The DSS treats OpenAlex as an external source, not as the working database.
 Every heavy run should follow:
 
 ```text
-resolve -> estimate -> plan -> fetch compact works dump -> normalize minimal fields -> analyze locally
+resolve -> estimate -> plan -> fetch works dump through OpenAlex CLI -> normalize minimal fields -> analyze locally
 ```
 
 The supported estimate endpoint is:
@@ -79,9 +79,10 @@ The supported estimate endpoint is:
 POST /api/v1/slices/plan
 ```
 
-It sends a lightweight `/works` request, reads `meta.count`, estimates planned
-records, API pages and raw JSONL size, then classifies the run as
-`can_fetch`, `can_fetch_with_warning`, `should_narrow`, `blocked` or `no_data`.
+It sends lightweight `/works` estimate/sample/group_by requests, reads
+`meta.count`, estimates records, API cost and raw JSONL size, then classifies the run as
+`can_fetch`, `medium_slice`, `large_slice`, `very_large_slice` or `no_data`.
+These statuses are user-facing guidance, not hard download caps.
 The same planner is used by `POST /api/v1/runs` action `plan`.
 
 OpenAlex GET responses are cached under:
@@ -104,7 +105,7 @@ The local data layout follows a lakehouse pattern under the external
 only a small README/placeholder and is ignored by git.
 
 ```text
-$OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/api/       raw API JSONL
+$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/               CLI-downloaded raw JSONL.GZ mini-dumps
 $OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/snapshot/  S3 snapshot manifests and downloaded partitions
 $OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/files/     local user-provided OpenAlex dumps
 $OPENALEX_DSS_DATA_DIR/lake/silver/openalex/           normalized works and authorships
@@ -128,12 +129,14 @@ calculates local author metrics only inside the current slice. Mathematical
 conclusions about indices must use this mode.
 
 For reproducible dissertation runs, `scripts/01_fetch_openalex_slice.py` or
-`POST /api/v1/pipeline/fetch-slice-dump` materializes the strict Works request
-as a compact raw JSONL dump under
-`$OPENALEX_DSS_DATA_DIR/raw/openalex_slices/{slice_id}` with a
+`POST /api/v1/materializations/{materialization_id}/run` materializes the
+strict Works request through the installed official OpenAlex CLI. API calls are
+kept for field catalogs, entity resolving, estimates, rate-limit visibility and
+point enrichment. The CLI output is packed as
+`$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/works.jsonl.gz` with a
 passport and checksum. The calculation step imports this fixed file locally;
-the download endpoint does not calculate rankings. This is the MVP dump mode
-and is intentionally separate from the full S3 snapshot.
+the materialization endpoint does not calculate rankings. This is the MVP dump
+mode and is intentionally separate from the full S3 snapshot.
 
 ## Primary Workflow
 
@@ -142,7 +145,7 @@ The primary DSS workflow is:
 1. choose OpenAlex field, subfield or topic by name;
 2. choose filter mode: primary topic, any topic, keyword or fixed text search;
 3. optionally restrict by organization and country code;
-4. materialize the `/works` request as a fixed JSONL dump using deterministic sorting;
+4. materialize the Works request as a fixed JSONL.GZ dump through OpenAlex CLI;
 5. import the fixed dump, then flatten works and authorships locally;
 6. build `author_work_metrics`;
 7. compute core indices P, C, C_frac, CPP, h, i10, g and m_local;
@@ -175,8 +178,8 @@ gzip-compressed JSON Lines and partitioned by `updated_date`. Incremental
 updates should download the manifest, identify new partitions, verify the
 manifest did not change during download, and upsert by OpenAlex entity ID.
 
-The full snapshot is a future bulk-ingestion mode. For the MVP, the supported
-working mode is API/CLI for resolving IDs and creating a compact slice dump,
-then local offline calculation from the fixed raw file. API calls after that
-are reserved for dropdown suggestions and point enrichment of selected
-authors/publications.
+The full snapshot is a future bulk-ingestion mode. For the MVP, API calls are
+reserved for dropdown suggestions, field catalogs, estimates, usage limits and
+point enrichment of selected authors/publications. Materializing the actual
+works corpus uses the installed OpenAlex CLI, then local offline calculation
+from the fixed raw file.

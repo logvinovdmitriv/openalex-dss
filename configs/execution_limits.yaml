@@ -1,9 +1,5 @@
 version: "1.0"
 execution_limits:
-  max_works_per_slice_default: 50000
-  max_works_per_slice_hard: 300000
-  max_raw_download_mb_default: 300
-  max_api_requests_per_job: 2000
   max_parallel_api_requests: 2
   max_enrichment_ids_per_entity: 10000
   max_chart_points: 5000
@@ -12,6 +8,7 @@ execution_limits:
   require_estimate_before_fetch: true
   require_passport_before_analysis: true
 planner_thresholds:
+  # Информационные пороги для UI. Они не блокируют скачивание.
   small_slice_works: 50000
   medium_slice_works: 300000
   hard_stop_works: 1000000

@@ -20,7 +20,6 @@ include_xpac: false
 country_code: 
 sort: publication_date:asc,openalex:asc
 per_page: 100
-max_works: 1000
 api_key_env: OPENALEX_API_KEY
 fraction_modes: strict_authors_count,renorm_valid_authors,integer
 fraction_mode_default: strict_authors_count

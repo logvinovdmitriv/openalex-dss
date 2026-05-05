@@ -103,7 +103,6 @@ def build_passports(
         "include_xpac": cfg.include_xpac,
         "sort": cfg.sort,
         "per_page": cfg.per_page,
-        "max_works": cfg.max_works,
         "select_fields": list(cfg.select_fields),
         "storage_strategy": {
             "principle": "raw immutable dump -> thin curated slice -> transient marts -> reports/passports",

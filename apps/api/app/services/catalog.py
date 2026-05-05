@@ -53,16 +53,7 @@ def system_catalog() -> dict[str, Any]:
         "openalex_snapshot_entities": snapshot.ENTITIES,
         "export_formats": ["csv", "json"],
         "workflow_stages": workflow.STAGE_DEFINITIONS,
-        "author_filters": [
-            {"id": "field", "label": "Область OpenAlex", "source": "works.primary_topic.field.id"},
-            {"id": "subfield", "label": "Подобласть OpenAlex", "source": "works.primary_topic.subfield.id"},
-            {"id": "topic", "label": "Тема OpenAlex", "source": "works.primary_topic.id"},
-            {"id": "keyword", "label": "Keyword OpenAlex", "source": "works.keywords.id"},
-            {"id": "institution", "label": "Организация", "source": "works.authorships.institutions.id"},
-            {"id": "country", "label": "Страна организации автора", "source": "works.authorships.institutions.country_code"},
-            {"id": "period", "label": "Период публикаций", "source": "works.publication_date"},
-            {"id": "type", "label": "Тип работы", "source": "works.type=article|review|conference-paper"},
-        ],
+        "author_filters": _openalex_filter_options(config_registry.get("openalex_filter_registry") or {}),
     }
 
 
@@ -84,3 +75,16 @@ def _catalog_metrics(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return metrics
+
+
+def _openalex_filter_options(filter_registry: dict[str, Any]) -> list[dict[str, str]]:
+    filters = filter_registry.get("filters") or {}
+    out: list[dict[str, str]] = []
+    for filter_id, item in filters.items():
+        if not isinstance(item, dict):
+            continue
+        works_filter = item.get("works_filter") or {}
+        field = str(works_filter.get("field") or "").strip()
+        if field and item.get("class") == "openalex_pushdown":
+            out.append({"id": str(filter_id), "label": str(item.get("label") or filter_id), "source": f"works.{field}"})
+    return out

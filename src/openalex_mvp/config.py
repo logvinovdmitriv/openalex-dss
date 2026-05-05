@@ -41,7 +41,6 @@ class SliceConfig:
     country_code: str
     sort: str
     per_page: int
-    max_works: int
     api_key_env: str
     fraction_modes: tuple[str, ...]
     fraction_mode_default: str
@@ -157,7 +156,6 @@ def load_config(path: str | Path = "config/slice.yaml") -> SliceConfig:
         country_code=str(raw.get("country_code", "") or ""),
         sort=str(raw["sort"]),
         per_page=int(raw.get("per_page", 100)),
-        max_works=int(raw.get("max_works", 5000)),
         api_key_env=str(raw["api_key_env"]),
         fraction_modes=_csv_tuple(raw.get("fraction_modes", raw["fraction_mode_default"])),
         fraction_mode_default=str(raw["fraction_mode_default"]),
@@ -208,7 +206,6 @@ def config_to_dict(cfg: SliceConfig) -> dict[str, object]:
         "country_code": cfg.country_code,
         "sort": cfg.sort,
         "per_page": cfg.per_page,
-        "max_works": cfg.max_works,
         "api_key_env": cfg.api_key_env,
         "fraction_modes": list(cfg.fraction_modes),
         "fraction_mode_default": cfg.fraction_mode_default,
@@ -233,7 +230,9 @@ def write_config(cfg: SliceConfig, path: str | Path = "config/slice.yaml") -> No
         else:
             out = str(value)
         lines.append(f"{key}: {out}")
-    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 def replace_config(cfg: SliceConfig, **updates: object) -> SliceConfig:
@@ -283,7 +282,6 @@ def replace_config(cfg: SliceConfig, **updates: object) -> SliceConfig:
         country_code=str(data.get("country_code", "") or ""),
         sort=str(data["sort"]),
         per_page=int(data["per_page"]),
-        max_works=int(data["max_works"]),
         api_key_env=str(data["api_key_env"]),
         fraction_modes=fraction_modes,
         fraction_mode_default=str(data["fraction_mode_default"]),

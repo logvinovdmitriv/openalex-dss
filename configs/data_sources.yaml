@@ -2,20 +2,20 @@ version: "1.0"
 sources:
   - id: openalex_api
     label: "OpenAlex API"
-    role: "Поиск сущностей, оценка среза, компактная загрузка Works, точечное обогащение ORCID/ROR/DOI."
+    role: "Поиск сущностей, оценка среза, group_by/sample preview и точечное обогащение ORCID/ROR/DOI. Не используется для скачивания полного среза."
     status: "implemented"
-    default: true
+    default: false
     supports:
       - resolve_ids
       - search
       - group_by_estimate
       - sample_estimate
-      - cursor_fetch
       - select_fields
   - id: openalex_cli
     label: "OpenAlex CLI"
     role: "Официальная CLI-загрузка фильтрованных Works metadata с checkpointing, parallel downloads и adaptive rate limiting."
-    status: "optional"
+    status: "implemented"
+    default: true
     install: "pip install openalex-official"
     supports:
       - filtered_work_metadata
