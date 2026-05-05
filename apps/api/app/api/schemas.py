@@ -68,8 +68,8 @@ class PipelineRequest(BaseModel):
     def validate_workflow_mode(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        if value not in {"strict_works", "author_preview"}:
-            raise ValueError("workflow_mode must be strict_works or author_preview")
+        if value not in {"strict_works"}:
+            raise ValueError("workflow_mode must be strict_works")
         return value
 
     @field_validator("filter_mode")
@@ -108,7 +108,6 @@ class RunRequest(BaseModel):
         "build_from_openalex",
         "import_file",
         "recalculate",
-        "author_preview",
     ] = "build_from_openalex"
     payload: PipelineRequest = Field(default_factory=PipelineRequest)
 

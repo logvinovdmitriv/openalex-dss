@@ -294,13 +294,6 @@ function Workbench() {
       navigate("data");
     },
   });
-  const buildAuthorPreview = useMutation({
-    mutationFn: () => postJson<any>("/runs", { action: "author_preview", payload: { ...payload, workflow_mode: "author_preview" } }),
-    onSuccess: (result) => {
-      setRunId(result.run_id);
-      navigate("enrichment");
-    },
-  });
   const recalculate = useMutation({
     mutationFn: () => postJson<any>("/runs", { action: "recalculate", payload }),
     onSuccess: (result) => {
@@ -353,7 +346,6 @@ function Workbench() {
     mutationError(runMaterialization.error),
     mutationError(downloadSlice.error),
     mutationError(recalculate.error),
-    mutationError(buildAuthorPreview.error),
     mutationError(createCohort.error),
   ].filter(Boolean);
 
@@ -464,8 +456,6 @@ function Workbench() {
           <EnrichmentPage
             qualityCounts={qualityCounts}
             tables={tables}
-            onPreview={() => buildAuthorPreview.mutate()}
-            previewing={buildAuthorPreview.isPending || running}
             run={run.data}
             onSelect={setSelected}
           />
@@ -861,15 +851,11 @@ type PointLookupTab = "author" | "institution" | "work" | "source";
 function EnrichmentPage({
   qualityCounts,
   tables,
-  onPreview,
-  previewing,
   run,
   onSelect,
 }: {
   qualityCounts: any;
   tables: any;
-  onPreview: () => void;
-  previewing: boolean;
   run: any;
   onSelect: (value: { kind: "author" | "work"; id: string }) => void;
 }) {
@@ -951,16 +937,11 @@ function EnrichmentPage({
             <small>{picked.openalex_id ?? picked.id} {picked.ror ? `· ROR: ${picked.ror}` : ""} {picked.orcid ? `· ORCID: ${picked.orcid}` : ""} {(picked as any).doi ? `· DOI: ${(picked as any).doi}` : ""}</small>
           </div>
         )}
-        <details className="technical-details">
-          <summary>Черновая витрина авторов OpenAlex</summary>
-          <p>Этот режим обращается к Authors API и показывает глобальные показатели профиля. Используйте его только как предварительный ориентир.</p>
-          <button onClick={onPreview} disabled={previewing}>{previewing ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />} Запустить author preview</button>
-        </details>
         {run && <RunCard run={run} />}
         <div className="metric-grid">
           <MetricCard label="Null author" value={fmt(qualityCounts?.authorships_null_author_id ?? 0)} />
           <MetricCard label="Нет авторств" value={fmt(qualityCounts?.works_without_authorships ?? 0)} />
-          <MetricCard label="Authors preview" value={fmt(tables?.authors_preview?.rows ?? 0)} />
+          <MetricCard label="Локальные авторы" value={fmt(tables?.indices?.rows ?? 0)} />
           <MetricCard label="Флаги качества" value={fmt(Object.values(qualityCounts ?? {}).reduce((a: number, b: any) => a + Number(b || 0), 0))} />
         </div>
       </section>

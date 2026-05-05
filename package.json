@@ -7,6 +7,8 @@
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "build:web": "npm --workspace apps/web run build",
-    "preview:web": "npm --workspace apps/web run preview"
+    "preview:web": "npm --workspace apps/web run preview",
+    "clean": "python3 scripts/clean_project.py",
+    "clean:all": "python3 scripts/clean_project.py --data --deps --empty-old"
   }
 }

@@ -25,8 +25,7 @@ def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_autho
         "bundle_version": "report_bundle_v1",
         "interpretation_policy": {
             "strict_mode": "Математические выводы строятся только по локально пересчитанным works-based индексам.",
-            "author_preview": "Authors API используется как быстрая витрина и предварительная воронка, не как доказательная база.",
-            "api_usage": "OpenAlex API используется для подсказок, ID, компактного дампа и точечного обогащения; расчеты выполняются от локального фиксированного файла.",
+            "api_usage": "OpenAlex API используется для подсказок, ID, компактного Works-дампа и точечного обогащения; расчеты выполняются от локального фиксированного файла.",
             "decision_boundary": "Метрики формируют пул кандидатов и объяснение, но не заменяют экспертное решение.",
         },
         "slice_passport": slice_passport,
@@ -42,7 +41,6 @@ def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_autho
             "fraction_mode_sensitivity": theory.get("fraction_mode_sensitivity"),
             "prefix_convergence": theory.get("prefix_convergence"),
         },
-        "local_vs_global_report": _local_vs_global(),
         "checksums": checksums,
         "exports": {
             "ranking_csv": f"/api/v1/analytics/ranking.csv?fraction_mode={fraction_mode}&metric={metric}",
@@ -86,37 +84,6 @@ def _quality_funnel(quality: dict[str, Any]) -> list[dict[str, Any]]:
         {"stage": "Authorships без NULL/deleted", "count": max(0, authorships - null_authors - deleted_authors)},
         {"stage": "Авторы с локальными индексами", "count": warehouse.count_rows("indices")},
     ]
-
-
-def _local_vs_global() -> dict[str, Any]:
-    if not warehouse.table_exists("indices") or not warehouse.table_exists("authors_preview"):
-        return {
-            "available": False,
-            "reason": "Быстрая Authors API витрина ещё не загружена; local-vs-global появится после /pipeline/fetch-authors-preview.",
-        }
-    with warehouse.connect() as conn:
-        rows = warehouse._records(  # type: ignore[attr-defined]
-            conn.execute(
-                """
-                SELECT
-                  i.author_id,
-                  i.author_display_name,
-                  i.fraction_mode,
-                  i.c AS local_c,
-                  i.h AS local_h,
-                  p.cited_by_count AS native_cited_by_count,
-                  p.h AS native_h_index,
-                  (p.cited_by_count - i.c) AS citation_gap,
-                  (p.h - i.h) AS h_gap
-                FROM indices i
-                JOIN authors_preview p USING(author_id)
-                WHERE i.fraction_mode = 'strict_authors_count'
-                ORDER BY abs(p.h - i.h) DESC, abs(p.cited_by_count - i.c) DESC
-                LIMIT 100
-                """
-            )
-        )
-    return {"available": True, "rows": rows, "total_compared": len(rows)}
 
 
 def _read_json(path: Path) -> dict[str, Any]:

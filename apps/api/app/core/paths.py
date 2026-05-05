@@ -17,11 +17,8 @@ def _data_root() -> Path:
 
 DATA = _data_root()
 WAREHOUSE = DATA / "warehouse" / "openalex_dss.duckdb"
-BI_WAREHOUSE = DATA / "warehouse" / "openalex_dss_bi.duckdb"
 
 TABLE_FILES = {
-    "authors_preview": DATA / "normalized" / "author_profiles_flat.csv",
-    "author_profiles": DATA / "normalized" / "author_profiles_flat.csv",
     "works": DATA / "normalized" / "works_flat.csv",
     "authorships": DATA / "normalized" / "authorships_flat.csv",
     "work_topics": DATA / "normalized" / "work_topics_flat.csv",
@@ -34,8 +31,6 @@ TABLE_FILES = {
 }
 
 PARQUET_TABLE_FILES = {
-    "authors_preview": DATA / "parquet" / "author_profiles_flat.parquet",
-    "author_profiles": DATA / "parquet" / "author_profiles_flat.parquet",
     "works": DATA / "parquet" / "works_flat.parquet",
     "authorships": DATA / "parquet" / "authorships_flat.parquet",
     "work_topics": DATA / "parquet" / "work_topics_flat.parquet",
@@ -52,7 +47,5 @@ JSON_FILES = {
     "theory": DATA / "results" / "theory_validation.json",
     "checksums": DATA / "passports" / "checksums.json",
     "pipeline": DATA / "passports" / "pipeline_summary.json",
-    "author_preview_meta": DATA / "passports" / "author_preview_meta.json",
-    "author_preview_quality": DATA / "passports" / "author_preview_quality.json",
     "report_bundle": DATA / "results" / "report_bundle.json",
 }

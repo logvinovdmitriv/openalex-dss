@@ -234,59 +234,7 @@ def export_table_csv(table: str, **kwargs: Any) -> str:
 
 
 def filtered_author_indices(fraction_mode: str, filters: FilterSet | None = None) -> list[dict[str, Any]]:
-    if (
-        fraction_mode == "openalex_native"
-        and table_exists("author_profiles")
-        and table_exists("indices")
-    ):
-        return _filtered_native_author_indices(fraction_mode, filters)
     return _filtered_work_author_indices(fraction_mode, filters)
-
-
-def _filtered_native_author_indices(fraction_mode: str, filters: FilterSet | None = None) -> list[dict[str, Any]]:
-    filters = _clean_filters(filters or {})
-    where = ["i.fraction_mode = ?"]
-    args: list[Any] = [fraction_mode]
-
-    subject_id = filters.get("subject_id")
-    if subject_id:
-        where.append("(ap.topic_ids_csv ILIKE ? OR ap.topic_share_ids_csv ILIKE ? OR ap.primary_topic_id ILIKE ?)")
-        args.extend([f"%{subject_id}%", f"%{subject_id}%", f"%{subject_id}%"])
-
-    country_code = filters.get("country_code")
-    if country_code:
-        where.append("upper(coalesce(ap.last_known_institution_country_codes_csv, '')) ILIKE ?")
-        args.append(f"%{country_code}%")
-
-    author_id = filters.get("author_id")
-    if author_id:
-        where.append("i.author_id ILIKE ?")
-        args.append(f"%{_short_openalex_id(author_id)}%")
-
-    author_name = filters.get("author_display_name")
-    if author_name:
-        where.append("i.author_display_name ILIKE ?")
-        args.append(f"%{author_name}%")
-
-    with connect() as conn:
-        rows = _records(
-            conn.execute(
-                f"""
-                SELECT
-                  i.*,
-                  ap.last_known_institution_country_codes_csv AS country_code,
-                  ap.primary_topic_display_name AS subject_name,
-                  ap.primary_field_display_name,
-                  ap.primary_subfield_display_name,
-                  ap.works_api_url
-                FROM indices i
-                LEFT JOIN author_profiles ap USING(author_id)
-                WHERE {" AND ".join(where)}
-                """,
-                args,
-            )
-        )
-    return sort_metric_rows(rows, "p")
 
 
 def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None = None) -> list[dict[str, Any]]:
@@ -584,10 +532,7 @@ def author_detail(author_id: str) -> dict[str, Any]:
     with connect() as conn:
         indices = _records(conn.execute("SELECT * FROM indices WHERE author_id = ?", [author_id]))
         ratings = _records(conn.execute("SELECT * FROM ratings WHERE author_id = ? ORDER BY metric_name, rank_competition", [author_id]))
-        profile = []
         works = []
-        if table_exists("author_profiles"):
-            profile = _records(conn.execute("SELECT * FROM author_profiles WHERE author_id = ?", [author_id]))
         if table_exists("author_work") and table_exists("works"):
             works = _records(conn.execute(
                 """
@@ -599,7 +544,7 @@ def author_detail(author_id: str) -> dict[str, Any]:
                 """,
                 [author_id],
             ))
-    return {"author_id": author_id, "profile": profile[0] if profile else None, "indices": indices, "ratings": ratings, "works": works}
+    return {"author_id": author_id, "indices": indices, "ratings": ratings, "works": works}
 
 
 def work_detail(work_id: str) -> dict[str, Any]:

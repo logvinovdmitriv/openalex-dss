@@ -19,26 +19,10 @@ def pipeline_recalculate(request: PipelineRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/pipeline/fetch", deprecated=True)
-def pipeline_fetch(request: PipelineRequest) -> dict[str, Any]:
-    try:
-        return pipeline.fetch_and_run(request.model_dump(exclude_none=True))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @router.post("/pipeline/fetch-slice-dump")
 def pipeline_fetch_slice_dump(request: PipelineRequest) -> dict[str, Any]:
     try:
         return pipeline.fetch_slice_dump(request.model_dump(exclude_none=True))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.post("/pipeline/fetch-authors-preview")
-def pipeline_fetch_authors_preview(request: PipelineRequest) -> dict[str, Any]:
-    try:
-        return pipeline.fetch_author_preview(request.model_dump(exclude_none=True))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -131,8 +131,6 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
         return pipeline.import_local_file(payload)
     if action == "recalculate":
         return pipeline.recalculate(payload)
-    if action == "author_preview":
-        return pipeline.fetch_author_preview(payload)
     raise ValueError(f"Unsupported run action: {action}")
 
 
@@ -173,7 +171,6 @@ def _progress_before_dispatch(action: str) -> int:
         "build_from_openalex": 20,
         "import_file": 35,
         "recalculate": 45,
-        "author_preview": 30,
     }.get(action, 20)
 
 
@@ -184,7 +181,6 @@ def _stage_for_action(action: str) -> str:
         "build_from_openalex": "fetching and building local mart",
         "import_file": "normalizing local file",
         "recalculate": "computing indices",
-        "author_preview": "enriching author preview",
     }.get(action, "running")
 
 

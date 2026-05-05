@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import analytics, bi, cohorts, entities, health, openalex, pipeline, registry, reports, runs, slices, snapshot, sources, state, tables
+from app.api.routes import analytics, cohorts, entities, health, openalex, pipeline, registry, reports, runs, slices, snapshot, sources, state, tables
 
 
 app = FastAPI(
@@ -35,7 +35,6 @@ for router in (
     runs.router,
     registry.router,
     reports.router,
-    bi.router,
 ):
     api_v1.include_router(router)
 

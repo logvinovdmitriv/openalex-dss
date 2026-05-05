@@ -19,7 +19,7 @@ export type EntitySuggestion = {
 
 export type PipelinePayload = {
   slice_name: string;
-  workflow_mode: "strict_works" | "author_preview";
+  workflow_mode: "strict_works";
   entity_level: string;
   entity_id_short: string;
   entity_id_full: string;

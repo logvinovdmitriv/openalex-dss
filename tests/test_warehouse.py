@@ -28,8 +28,6 @@ class WarehouseTests(unittest.TestCase):
                 "author_work": root / "csv" / "author_work_metrics.csv",
                 "indices": root / "csv" / "author_indices.csv",
                 "authors_local_metrics": root / "csv" / "author_indices.csv",
-                "author_profiles": root / "csv" / "author_profiles_flat.csv",
-                "authors_preview": root / "csv" / "author_profiles_flat.csv",
                 "ratings": root / "csv" / "rating_positions.csv",
             }
             parquet_paths = {
@@ -39,8 +37,6 @@ class WarehouseTests(unittest.TestCase):
                 "author_work": root / "parquet" / "author_work_metrics.parquet",
                 "indices": root / "parquet" / "author_indices.parquet",
                 "authors_local_metrics": root / "parquet" / "author_indices.parquet",
-                "author_profiles": root / "parquet" / "author_profiles_flat.parquet",
-                "authors_preview": root / "parquet" / "author_profiles_flat.parquet",
                 "ratings": root / "parquet" / "rating_positions.parquet",
             }
             write_parquet_dicts(

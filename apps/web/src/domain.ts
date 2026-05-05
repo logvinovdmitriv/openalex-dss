@@ -1,6 +1,6 @@
 export const METRICS = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "lrdi", "f5", "fm5", "iupv", "islv"] as const;
 export const FRACTION_MODES = ["strict_authors_count", "renorm_valid_authors", "integer"] as const;
-export const TABLES = ["authors_local_metrics", "authors_preview", "indices", "ratings", "works", "authorships", "work_topics", "author_work", "top1_sensitivity", "fraction_sensitivity"] as const;
+export const TABLES = ["authors_local_metrics", "indices", "ratings", "works", "authorships", "work_topics", "author_work", "top1_sensitivity", "fraction_sensitivity"] as const;
 
 export type Metric = (typeof METRICS)[number];
 export type FractionMode = (typeof FRACTION_MODES)[number];
@@ -157,7 +157,6 @@ const modeDescriptions: Record<string, string> = {
 const tableLabels: Record<string, string> = {
   indices: "Индексы авторов",
   authors_local_metrics: "Локальные метрики авторов",
-  authors_preview: "Быстрая витрина авторов",
   ratings: "Рейтинговые позиции",
   works: "Работы OpenAlex",
   authorships: "Авторства",
@@ -170,7 +169,6 @@ const tableLabels: Record<string, string> = {
 const tableDescriptions: Record<string, string> = {
   indices: "Готовые значения индексов по авторам.",
   authors_local_metrics: "Строгие локальные индексы, рассчитанные по works/authorships.",
-  authors_preview: "Глобальные author profile поля OpenAlex для предварительного отбора.",
   ratings: "Ранги по метрикам и режимам учёта.",
   works: "Плоская таблица работ, полученных из OpenAlex.",
   authorships: "Авторства и организации из OpenAlex.",
@@ -232,11 +230,6 @@ export const METRIC_OPTIONS: SelectOption[] = METRICS.map((value) => ({
 
 export const CORE_METRIC_OPTIONS: SelectOption[] = METRIC_OPTIONS.filter((item) => ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"].includes(item.value));
 export const PRIMARY_METRIC_OPTIONS: SelectOption[] = METRIC_OPTIONS.filter((item) => ["islv", "iupv", "p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"].includes(item.value));
-
-export const WORKFLOW_MODE_OPTIONS: SelectOption[] = [
-  { value: "strict_works", label: "Строгий срез", description: "Works API, локальные индексы и доказательная аналитика." },
-  { value: "author_preview", label: "Быстрая витрина", description: "Authors API для предварительного отбора и сравнения с глобальным профилем." },
-];
 
 export const FILTER_MODE_OPTIONS: SelectOption[] = [
   { value: "primary_topic", label: "Точная тематическая принадлежность", description: "Работа относится к выбранному направлению как к основной теме." },

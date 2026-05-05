@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -71,35 +70,6 @@ WORK_TOPIC_FIELDS = [
     "domain_id",
     "is_primary",
 ]
-
-AUTHOR_PROFILE_FIELDS = [
-    "author_id",
-    "author_display_name",
-    "orcid",
-    "works_count",
-    "cited_by_count",
-    "h",
-    "i10",
-    "two_year_mean_citedness",
-    "last_known_institution_ids_csv",
-    "last_known_institution_display_names_csv",
-    "last_known_institution_country_codes_csv",
-    "affiliation_country_codes_csv",
-    "primary_topic_id",
-    "primary_topic_display_name",
-    "primary_subfield_id",
-    "primary_subfield_display_name",
-    "primary_field_id",
-    "primary_field_display_name",
-    "topic_ids_csv",
-    "topic_display_names_csv",
-    "topic_share_ids_csv",
-    "counts_by_year_json",
-    "works_api_url",
-    "created_date",
-    "updated_date",
-]
-
 
 def normalize_raw(
     raw_path: str | Path = "data/raw/works_raw.jsonl",
@@ -280,87 +250,6 @@ def normalize_raw(
     return report
 
 
-def normalize_authors_raw(
-    raw_path: str | Path = "data/raw/authors_raw.jsonl",
-    authors_out: str | Path = "data/normalized/author_profiles_flat.csv",
-    quality_out: str | Path = "data/passports/quality_report.json",
-) -> dict[str, Any]:
-    authors = read_jsonl(raw_path)
-    rows: list[dict[str, Any]] = []
-    author_ids_seen: set[str] = set()
-    quality = Counter()
-
-    for author in authors:
-        author_id = str(author.get("id") or "")
-        if not author_id:
-            quality["authors_missing_id"] += 1
-            continue
-        if author_id in author_ids_seen:
-            quality["duplicate_author_ids"] += 1
-            continue
-        author_ids_seen.add(author_id)
-
-        summary = author.get("summary_stats") or {}
-        last_known = author.get("last_known_institutions") or []
-        affiliations = author.get("affiliations") or []
-        topics = author.get("topics") or []
-        topic_share = author.get("topic_share") or []
-        primary_topic = topics[0] if topics else {}
-        primary_subfield = primary_topic.get("subfield") or {}
-        primary_field = primary_topic.get("field") or {}
-
-        if not topics:
-            quality["authors_without_topics"] += 1
-        if not last_known:
-            quality["authors_without_last_known_institution"] += 1
-
-        rows.append(
-            {
-                "author_id": author_id,
-                "author_display_name": author.get("display_name"),
-                "orcid": author.get("orcid"),
-                "works_count": int(author.get("works_count") or 0),
-                "cited_by_count": int(author.get("cited_by_count") or 0),
-                "h": int(summary.get("h_index") or 0),
-                "i10": int(summary.get("i10_index") or 0),
-                "two_year_mean_citedness": float(summary.get("2yr_mean_citedness") or 0.0),
-                "last_known_institution_ids_csv": "|".join(_ids(last_known)),
-                "last_known_institution_display_names_csv": "|".join(_names(last_known)),
-                "last_known_institution_country_codes_csv": "|".join(_country_codes(last_known)),
-                "affiliation_country_codes_csv": "|".join(_affiliation_country_codes(affiliations)),
-                "primary_topic_id": primary_topic.get("id"),
-                "primary_topic_display_name": primary_topic.get("display_name"),
-                "primary_subfield_id": primary_subfield.get("id"),
-                "primary_subfield_display_name": primary_subfield.get("display_name"),
-                "primary_field_id": primary_field.get("id"),
-                "primary_field_display_name": primary_field.get("display_name"),
-                "topic_ids_csv": "|".join(_ids(topics)),
-                "topic_display_names_csv": "|".join(_names(topics)),
-                "topic_share_ids_csv": "|".join(_ids(topic_share)),
-                "counts_by_year_json": json.dumps(author.get("counts_by_year") or [], ensure_ascii=False, sort_keys=True),
-                "works_api_url": author.get("works_api_url"),
-                "created_date": author.get("created_date"),
-                "updated_date": author.get("updated_date"),
-            }
-        )
-
-    rows.sort(key=lambda row: str(row["author_id"]))
-    write_csv_dicts(authors_out, rows, AUTHOR_PROFILE_FIELDS)
-    write_parquet_dicts(_parquet_peer(authors_out), rows, AUTHOR_PROFILE_FIELDS)
-    report = {
-        "source_entity": "authors",
-        "raw_authors": len(authors),
-        "author_rows": len(rows),
-        "quality_counts": dict(sorted(quality.items())),
-        "notes": [
-            "Основной сценарий использует OpenAlex Authors API и только поля Author object.",
-            "Пол и возраст не рассчитываются, потому что OpenAlex не предоставляет эти поля.",
-        ],
-    }
-    write_json(quality_out, report)
-    return report
-
-
 def _author_id(authorship: dict[str, Any]) -> str | None:
     author = authorship.get("author") or {}
     return author.get("id")
@@ -400,25 +289,3 @@ def _short_id(openalex_id: object) -> str | None:
         return None
     text = str(openalex_id).rstrip("/")
     return text.rsplit("/", 1)[-1]
-
-
-def _ids(items: list[dict[str, Any]]) -> list[str]:
-    return sorted({str(item.get("id")) for item in items if item.get("id")})
-
-
-def _names(items: list[dict[str, Any]]) -> list[str]:
-    return sorted({str(item.get("display_name")) for item in items if item.get("display_name")})
-
-
-def _country_codes(items: list[dict[str, Any]]) -> list[str]:
-    return sorted({str(item.get("country_code")).upper() for item in items if item.get("country_code")})
-
-
-def _affiliation_country_codes(affiliations: list[dict[str, Any]]) -> list[str]:
-    countries = set()
-    for affiliation in affiliations:
-        institution = affiliation.get("institution") or {}
-        code = institution.get("country_code")
-        if code:
-            countries.add(str(code).upper())
-    return sorted(countries)

@@ -41,7 +41,7 @@ STAGE_DEFINITIONS = [
     {
         "id": "export",
         "label": "Экспорт",
-        "description": "Результаты доступны через CSV/JSON/BI-витрину.",
+        "description": "Результаты доступны через CSV, JSON, Parquet и воспроизводимый report bundle.",
     },
 ]
 
@@ -89,7 +89,6 @@ def state() -> dict[str, Any]:
         "next_action": _next_action(active["id"]),
         "modes": {
             "strict_works": "Основной исследовательский контур: Works/Authorships и локальные индексы.",
-            "author_preview": "Быстрая витрина: Authors API для предварительного отбора и local-vs-global сравнения.",
         },
     }
 
@@ -101,5 +100,5 @@ def _next_action(stage_id: str) -> str:
         "flatten": "Нажмите «Построить из дампа» или импортируйте локальный JSONL: плоские таблицы ещё не готовы.",
         "indices": "Пересчитайте индексы после локального импорта данных.",
         "analytics": "Пересчитайте аналитику и проверьте распределение.",
-        "export": "Экспортируйте текущий рейтинг или подготовьте BI-витрину.",
+        "export": "Экспортируйте текущий рейтинг, паспорта и report bundle.",
     }.get(stage_id, "Рабочий процесс завершён.")

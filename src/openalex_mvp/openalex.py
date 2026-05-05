@@ -12,29 +12,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import SliceConfig
-from .io_utils import ensure_dir, ensure_parent, sha256_file, write_json
+from .io_utils import ensure_dir, sha256_file, write_json
 
 API_BASE = "https://api.openalex.org/works"
-AUTHORS_API_BASE = "https://api.openalex.org/authors"
 _CACHE_STATS = {"hits": 0, "misses": 0}
-
-AUTHOR_SELECT_FIELDS = (
-    "id",
-    "display_name",
-    "orcid",
-    "works_count",
-    "cited_by_count",
-    "summary_stats",
-    "last_known_institutions",
-    "affiliations",
-    "topics",
-    "topic_share",
-    "counts_by_year",
-    "works_api_url",
-    "ids",
-    "created_date",
-    "updated_date",
-)
 
 
 def build_filter(cfg: SliceConfig) -> str:
@@ -105,102 +86,6 @@ def build_filter(cfg: SliceConfig) -> str:
     if cfg.raw_openalex_filter:
         filters.extend(_raw_filter_parts(cfg.raw_openalex_filter))
     return ",".join(filters)
-
-
-def build_author_filter(cfg: SliceConfig) -> str:
-    filters = []
-    if cfg.author_id:
-        filters.append(f"openalex:{_openalex_filter_ids(cfg.author_id)}")
-    if cfg.entity_level != "topic":
-        if cfg.author_id:
-            return ",".join(filters)
-        raise ValueError("Author-first OpenAlex loading supports topic slices through authors.topics.id")
-    filters.append(f"topics.id:{cfg.entity_id_short}")
-    if cfg.country_code:
-        if cfg.affiliation_mode == "historical":
-            filters.append(f"affiliations.institution.country_code:{cfg.country_code.upper()}")
-        else:
-            filters.append(f"last_known_institutions.country_code:{cfg.country_code.upper()}")
-    if cfg.institution_id:
-        inst_id = _short_openalex_id(cfg.institution_id)
-        if cfg.affiliation_mode == "historical":
-            filters.append(f"affiliations.institution.id:{inst_id}")
-        else:
-            filters.append(f"last_known_institutions.id:{inst_id}")
-    return ",".join(filters)
-
-
-def fetch_works(
-    cfg: SliceConfig,
-    out_path: str | Path = "data/raw/works_raw.jsonl",
-    meta_path: str | Path = "data/passports/fetch_meta.json",
-    max_works: int | None = None,
-) -> dict[str, Any]:
-    out = ensure_parent(_resolve_data_path(out_path))
-    meta_out = ensure_parent(_resolve_data_path(meta_path))
-    limit = max_works if max_works is not None else cfg.max_works
-    per_page = max(1, min(cfg.per_page, 100))
-
-    params = _works_params(cfg, per_page)
-    api_key = os.environ.get(cfg.api_key_env)
-    if api_key:
-        params["api_key"] = api_key
-
-    fetched = 0
-    page_count = 0
-    total_available = None
-    cursors: list[dict[str, Any]] = []
-
-    with out.open("w", encoding="utf-8", newline="\n") as f:
-        cursor = "*"
-        while fetched < limit:
-            params["cursor"] = cursor
-            payload = _get_json(API_BASE, params)
-            page_count += 1
-            meta = payload.get("meta") or {}
-            if total_available is None:
-                total_available = meta.get("count")
-            results = payload.get("results") or []
-            if not results:
-                break
-
-            remaining = limit - fetched
-            selected = results[:remaining]
-            for work in selected:
-                f.write(json.dumps(work, ensure_ascii=False, sort_keys=True) + "\n")
-            fetched += len(selected)
-
-            next_cursor = meta.get("next_cursor")
-            cursors.append(
-                {
-                    "page_no": page_count,
-                    "n_results": len(results),
-                    "n_written": len(selected),
-                    "cursor_in": cursor,
-                    "cursor_out": next_cursor,
-                }
-            )
-            if not next_cursor or next_cursor == cursor or len(selected) < len(results):
-                break
-            cursor = str(next_cursor)
-
-    meta_doc = {
-        "api_base": API_BASE,
-        "filter": params["filter"],
-        "sort": cfg.sort,
-        "select": params["select"],
-        "search": params.get("search"),
-        "per_page": per_page,
-        "max_works": limit,
-        "fetched_works": fetched,
-        "total_available": total_available,
-        "pages_count": page_count,
-        "used_api_key": bool(api_key),
-        "pages": cursors,
-        "output_file": str(out),
-    }
-    write_json(meta_out, meta_doc)
-    return meta_doc
 
 
 def fetch_works_slice_dump(
@@ -486,92 +371,6 @@ def _estimate_facets(cfg: SliceConfig, count_params: dict[str, str], api_key: st
         ]
         facets[name] = {"group_by": group_by, "rows": rows}
     return facets
-
-
-def fetch_authors(
-    cfg: SliceConfig,
-    out_path: str | Path = "data/raw/authors_raw.jsonl",
-    meta_path: str | Path = "data/passports/fetch_meta.json",
-    max_authors: int | None = None,
-) -> dict[str, Any]:
-    out = ensure_parent(_resolve_data_path(out_path))
-    meta_out = ensure_parent(_resolve_data_path(meta_path))
-    limit = max_authors if max_authors is not None else cfg.max_works
-    per_page = max(1, min(cfg.per_page, 100))
-    sort = _author_sort(cfg.sort)
-
-    params = {
-        "filter": build_author_filter(cfg),
-        "sort": sort,
-        "per_page": str(per_page),
-        "cursor": "*",
-        "select": ",".join(AUTHOR_SELECT_FIELDS),
-    }
-    api_key = os.environ.get(cfg.api_key_env)
-    if api_key:
-        params["api_key"] = api_key
-
-    fetched = 0
-    page_count = 0
-    total_available = None
-    cursors: list[dict[str, Any]] = []
-
-    with out.open("w", encoding="utf-8", newline="\n") as f:
-        cursor = "*"
-        while fetched < limit:
-            params["cursor"] = cursor
-            payload = _get_json(AUTHORS_API_BASE, params)
-            page_count += 1
-            meta = payload.get("meta") or {}
-            if total_available is None:
-                total_available = meta.get("count")
-            results = payload.get("results") or []
-            if not results:
-                break
-
-            remaining = limit - fetched
-            selected = results[:remaining]
-            for author in selected:
-                f.write(json.dumps(author, ensure_ascii=False, sort_keys=True) + "\n")
-            fetched += len(selected)
-
-            next_cursor = meta.get("next_cursor")
-            cursors.append(
-                {
-                    "page_no": page_count,
-                    "n_results": len(results),
-                    "n_written": len(selected),
-                    "cursor_in": cursor,
-                    "cursor_out": next_cursor,
-                }
-            )
-            if not next_cursor or next_cursor == cursor or len(selected) < len(results):
-                break
-            cursor = str(next_cursor)
-
-    meta_doc = {
-        "api_base": AUTHORS_API_BASE,
-        "source_entity": "authors",
-        "filter": params["filter"],
-        "sort": sort,
-        "select": params["select"],
-        "per_page": per_page,
-        "max_authors": limit,
-        "fetched_authors": fetched,
-        "total_available": total_available,
-        "pages_count": page_count,
-        "used_api_key": bool(api_key),
-        "pages": cursors,
-        "output_file": str(out),
-    }
-    write_json(meta_out, meta_doc)
-    return meta_doc
-
-
-def _author_sort(sort: str) -> str:
-    if sort in {"works_count:desc", "cited_by_count:desc", "summary_stats.h_index:desc", "summary_stats.i10_index:desc"}:
-        return sort
-    return "cited_by_count:desc"
 
 
 def _works_params(cfg: SliceConfig, per_page: int) -> dict[str, str]:

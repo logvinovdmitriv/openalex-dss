@@ -51,21 +51,6 @@ AUTHOR_INDEX_FIELDS = [
     "n_truncated_works",
 ]
 
-NATIVE_AUTHOR_METRICS = ("p", "c", "h", "i10", "two_year_mean_citedness")
-
-AUTHOR_PROFILE_INDEX_FIELDS = [
-    "run_id",
-    "fraction_mode",
-    "author_id",
-    "author_display_name",
-    "p",
-    "c",
-    "h",
-    "i10",
-    "two_year_mean_citedness",
-]
-
-
 def h_index(citations: list[int]) -> int:
     c = sorted((max(0, int(x)) for x in citations), reverse=True)
     h = 0
@@ -321,34 +306,6 @@ def compute_indices(
     out_rows.sort(key=lambda row: (row["fraction_mode"], row["author_id"]))
     write_csv_dicts(out_path, out_rows, AUTHOR_INDEX_FIELDS)
     write_parquet_dicts(Path(out_path).with_suffix(".parquet"), out_rows, AUTHOR_INDEX_FIELDS)
-    return out_rows
-
-
-def compute_author_profile_indices(
-    author_profiles_path: str | Path = "data/normalized/author_profiles_flat.csv",
-    out_path: str | Path = "data/results/author_indices.csv",
-    fraction_mode: str = "openalex_native",
-    run_id: str = "authors",
-) -> list[dict[str, Any]]:
-    rows = read_csv_dicts(author_profiles_path)
-    out_rows: list[dict[str, Any]] = []
-    for row in rows:
-        out_rows.append(
-            {
-                "run_id": run_id,
-                "fraction_mode": fraction_mode,
-                "author_id": row.get("author_id"),
-                "author_display_name": row.get("author_display_name"),
-                "p": as_int(row.get("works_count")),
-                "c": as_float(row.get("cited_by_count")),
-                "h": as_int(row.get("h")),
-                "i10": as_int(row.get("i10")),
-                "two_year_mean_citedness": as_float(row.get("two_year_mean_citedness")),
-            }
-        )
-    out_rows.sort(key=lambda row: str(row["author_id"]))
-    write_csv_dicts(out_path, out_rows, AUTHOR_PROFILE_INDEX_FIELDS)
-    write_parquet_dicts(Path(out_path).with_suffix(".parquet"), out_rows, AUTHOR_PROFILE_INDEX_FIELDS)
     return out_rows
 
 

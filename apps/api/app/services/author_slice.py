@@ -15,7 +15,7 @@ from openalex_mvp.openalex import build_filter  # noqa: E402
 
 SUBJECT_LEVELS = {"field", "subfield", "topic"}
 FILTER_MODES = {"all", "primary_topic", "topics_any", "keyword", "search"}
-WORKFLOW_MODES = {"strict_works", "author_preview"}
+WORKFLOW_MODES = {"strict_works"}
 FRACTION_MODES = {"strict_authors_count", "renorm_valid_authors", "integer"}
 WORK_TYPE_RE = re.compile(r"^[a-z0-9-]+$")
 SOURCE_TYPE_RE = re.compile(r"^[a-z0-9-]+$")
@@ -112,7 +112,7 @@ def _clean_updates(payload: dict[str, Any], *, base: SliceConfig) -> dict[str, A
 
     workflow_mode = str(updates.get("workflow_mode") or base.workflow_mode or "strict_works").strip()
     if workflow_mode not in WORKFLOW_MODES:
-        raise ValueError("workflow_mode must be strict_works or author_preview")
+        raise ValueError("workflow_mode must be strict_works")
     updates["workflow_mode"] = workflow_mode
 
     level = str(updates.get("entity_level") or base.entity_level).strip()

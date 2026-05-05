@@ -112,7 +112,7 @@ def build_passports(
             "mart_layer": f"data/marts/{cfg.slice_name}/",
             "reports_layer": f"data/reports/{cfg.slice_name}/",
             "checksums_layer": f"data/checksums/{cfg.slice_name}/",
-            "current_smoke_paths": {
+            "latest_view_paths": {
                 "raw": "data/raw/works_raw.jsonl",
                 "works_flat": "data/normalized/works_flat.csv",
                 "authorships_flat": "data/normalized/authorships_flat.csv",
@@ -150,7 +150,7 @@ def build_passports(
             "formula_version": "v2_percentile_geometric_mean",
             "percentile_scope": "current slice within each fraction_mode",
             "status": "experimental",
-            "legacy_parameters_ignored": {"n0": cfg.iupv_n0, "lambda": cfg.iupv_lambda},
+            "unused_previous_parameters": {"n0": cfg.iupv_n0, "lambda": cfg.iupv_lambda},
         },
         "islv": {
             "name_ru": "индекс сбалансированного локального вклада",
@@ -209,7 +209,7 @@ def build_passports(
             "sha256_manifest": _display_path(root_path, data_root, manifest_path),
         "notes": [
             "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
-            "The dependency-light smoke implementation writes CSV; the architecture reserves slice-based Parquet paths for the production data layer.",
+            "CSV files are latest-view exports; Parquet files are written alongside them for local analytical reads.",
         ],
     }
     write_json(out / "checksums.json", checksums_doc)

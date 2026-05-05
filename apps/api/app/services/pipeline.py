@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import gzip
-import json
 import os
 import shutil
 import sys
@@ -19,9 +17,9 @@ if str(SRC) not in sys.path:
 
 from openalex_mvp.config import replace_config, write_config  # noqa: E402
 from openalex_mvp.io_utils import write_json  # noqa: E402
-from openalex_mvp.metrics import NATIVE_AUTHOR_METRICS, build_author_work_metrics, compute_author_profile_indices, compute_indices  # noqa: E402
-from openalex_mvp.normalize import normalize_authors_raw, normalize_raw  # noqa: E402
-from openalex_mvp.openalex import fetch_authors, fetch_works, fetch_works_slice_dump  # noqa: E402
+from openalex_mvp.metrics import build_author_work_metrics, compute_indices  # noqa: E402
+from openalex_mvp.normalize import normalize_raw  # noqa: E402
+from openalex_mvp.openalex import fetch_works_slice_dump  # noqa: E402
 from openalex_mvp.passports import build_passports  # noqa: E402
 from openalex_mvp.ranking import build_ratings  # noqa: E402
 from openalex_mvp.stats import analyze_stats  # noqa: E402
@@ -29,8 +27,6 @@ from openalex_mvp.theory import analyze_theory  # noqa: E402
 
 
 GENERATED_FILES = [
-    DATA / "raw/authors_raw.jsonl",
-    DATA / "raw/works_raw.jsonl",
     *TABLE_FILES.values(),
     *PARQUET_TABLE_FILES.values(),
     *JSON_FILES.values(),
@@ -46,47 +42,10 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     _write_runtime_config(cfg)
     run_id = str(payload.get("run_id") or cfg.slice_name or "recalculate")
     dump_id = str(payload.get("dump_id") or _dump_id_from_payload(payload) or cfg.slice_name)
-    if cfg.fraction_mode_default == "openalex_native" and (DATA / "normalized/author_profiles_flat.csv").exists():
-        _run_compute_author_profiles(cfg, run_id=run_id, dump_id=dump_id)
-    else:
-        _run_compute(cfg, run_id=run_id, dump_id=dump_id)
+    _run_compute(cfg, run_id=run_id, dump_id=dump_id)
     archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id})
     _write_pipeline_summary("recalculate", cfg, payload)
     return {"status": "ok", "mode": "recalculate", "archive": archive}
-
-
-def fetch_and_run(payload: dict[str, Any]) -> dict[str, Any]:
-    """Legacy direct API fetch kept for compatibility.
-
-    The UI uses fetch_slice_dump -> import_local_file so dissertation runs stay
-    dump-first and reproducible.
-    """
-    cfg = _cfg(payload)
-    _write_runtime_config(cfg)
-    api_key = str(payload.get("api_key") or "").strip()
-    old = os.environ.get(cfg.api_key_env)
-    try:
-        if api_key:
-            os.environ[cfg.api_key_env] = api_key
-        fetch_works(cfg, DATA / "raw/works_raw.jsonl", DATA / "passports/fetch_meta.json", cfg.max_works)
-    finally:
-        if old is None:
-            os.environ.pop(cfg.api_key_env, None)
-        else:
-            os.environ[cfg.api_key_env] = old
-    for stale in (DATA / "raw/authors_raw.jsonl", DATA / "normalized/author_profiles_flat.csv"):
-        if stale.exists():
-            stale.unlink()
-    normalize_raw(
-        DATA / "raw/works_raw.jsonl",
-        DATA / "normalized/works_flat.csv",
-        DATA / "normalized/authorships_flat.csv",
-        DATA / "passports/quality_report.json",
-        DATA / "normalized/work_topics_flat.csv",
-    )
-    _run_compute(cfg)
-    _write_pipeline_summary("fetch_and_run", cfg, payload)
-    return {"status": "ok", "mode": "fetch_and_run", "deprecated": True, "preferred_flow": "fetch_slice_dump_then_import_file"}
 
 
 def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
@@ -144,38 +103,6 @@ def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[
     return {"status": "ok", "mode": "fetch_slice_dump", "query_plan": plan, "dump": passport}
 
 
-def fetch_author_preview(payload: dict[str, Any]) -> dict[str, Any]:
-    cfg = _cfg({**payload, "workflow_mode": "author_preview", "filter_mode": "primary_topic"})
-    if cfg.entity_level != "topic":
-        raise ValueError("Быстрая витрина Authors API поддерживает только выбранную тему OpenAlex, например topic T13674")
-    api_key = str(payload.get("api_key") or "").strip()
-    old = os.environ.get(cfg.api_key_env)
-    try:
-        if api_key:
-            os.environ[cfg.api_key_env] = api_key
-        meta = fetch_authors(cfg, DATA / "raw/authors_raw.jsonl", DATA / "passports/author_preview_meta.json", cfg.max_works)
-    finally:
-        if old is None:
-            os.environ.pop(cfg.api_key_env, None)
-        else:
-            os.environ[cfg.api_key_env] = old
-    quality = normalize_authors_raw(
-        DATA / "raw/authors_raw.jsonl",
-        DATA / "normalized/author_profiles_flat.csv",
-        DATA / "passports/author_preview_quality.json",
-    )
-    write_json(
-        JSON_FILES["author_preview_meta"],
-        {
-            **meta,
-            "source_role": "fast_author_preview",
-            "slice": author_slice.preview(config_to_payload(cfg))["slice"],
-            "usage_policy": "Только предварительный отбор и просмотр; математические выводы строятся по локальным works-based индексам.",
-        },
-    )
-    return {"status": "ok", "mode": "fetch_author_preview", "meta": meta, "quality": quality}
-
-
 def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     source_path = str(payload.get("source_path") or "").strip()
     if not source_path:
@@ -193,42 +120,26 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             "Локальный дамп пуст: OpenAlex вернул 0 работ для выбранных фильтров. "
             "Расширьте период, уберите организацию или выберите более широкую предметную область."
         )
-    if _looks_like_author_dump(source):
-        quality = normalize_authors_raw(source, DATA / "normalized/author_profiles_flat.csv", DATA / "passports/quality_report.json")
-        write_json(
-            DATA / "passports/fetch_meta.json",
-            {
-                "source_type": "local_file",
-                "source_entity": "authors",
-                "source_file": profile,
-                "fetched_authors": quality.get("raw_authors"),
-                "total_available": quality.get("raw_authors"),
-                "filter": "локальный импорт дампа OpenAlex Authors",
-                "used_api_key": False,
-            },
-        )
-        _run_compute_author_profiles(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
-    else:
-        quality = normalize_raw(
-            source,
-            DATA / "normalized/works_flat.csv",
-            DATA / "normalized/authorships_flat.csv",
-            DATA / "passports/quality_report.json",
-            DATA / "normalized/work_topics_flat.csv",
-        )
-        write_json(
-            DATA / "passports/fetch_meta.json",
-            {
-                "source_type": "local_file",
-                "source_entity": "works",
-                "source_file": profile,
-                "fetched_works": quality.get("raw_works"),
-                "total_available": quality.get("raw_works"),
-                "filter": "локальный импорт дампа OpenAlex Works",
-                "used_api_key": False,
-            },
-        )
-        _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
+    quality = normalize_raw(
+        source,
+        DATA / "normalized/works_flat.csv",
+        DATA / "normalized/authorships_flat.csv",
+        DATA / "passports/quality_report.json",
+        DATA / "normalized/work_topics_flat.csv",
+    )
+    write_json(
+        DATA / "passports/fetch_meta.json",
+        {
+            "source_type": "local_file",
+            "source_entity": "works",
+            "source_file": profile,
+            "fetched_works": quality.get("raw_works"),
+            "total_available": quality.get("raw_works"),
+            "filter": "локальный импорт дампа OpenAlex Works",
+            "used_api_key": False,
+        },
+    )
+    _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
     archive = _archive_run_artifacts(cfg, {**payload, "source_file": profile, "dump_id": dump_id})
     _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "archive": archive})
     return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive}
@@ -285,36 +196,6 @@ def _run_compute(cfg: Any, *, run_id: str = "base", dump_id: str = "") -> None:
     )
     build_passports(cfg, ROOT, DATA / "passports", run_id=run_id, dump_id=dump_id)
     reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100)
-
-
-def _run_compute_author_profiles(cfg: Any, *, run_id: str = "authors", dump_id: str = "") -> None:
-    compute_author_profile_indices(
-        DATA / "normalized/author_profiles_flat.csv",
-        DATA / "results/author_indices.csv",
-        cfg.fraction_mode_default,
-        run_id=run_id,
-    )
-    build_ratings(DATA / "results/author_indices.csv", DATA / "results/rating_positions.csv", NATIVE_AUTHOR_METRICS)
-    analyze_stats(
-        DATA / "results/author_indices.csv",
-        DATA / "results/rating_positions.csv",
-        DATA / "results/figures",
-        DATA / "results/stats_summary.json",
-        NATIVE_AUTHOR_METRICS,
-    )
-    write_json(
-        DATA / "results/theory_validation.json",
-        {
-            "theory_version": "openalex_author_native",
-            "metric_source": "OpenAlex Author object",
-            "metrics": list(NATIVE_AUTHOR_METRICS),
-            "interpretation_notes": [
-                "Этот режим оставлен только для совместимости с локальными OpenAlex Authors dumps.",
-                "Основной UI СППР использует Works/Authorships pipeline и фракционные авторские индексы.",
-            ],
-        },
-    )
-    build_passports(cfg, ROOT, DATA / "passports", run_id=run_id, dump_id=dump_id)
 
 
 def _cfg(payload: dict[str, Any]) -> Any:
@@ -480,18 +361,3 @@ def _download_policy(payload: dict[str, Any]) -> dict[str, Any]:
         "complete_slice_required": bool(raw.get("complete_slice_required", payload.get("complete_slice_required", True))),
         "allow_incomplete_preview": bool(raw.get("allow_incomplete_preview", payload.get("allow_incomplete_preview", False))),
     }
-
-
-def _looks_like_author_dump(path: Any) -> bool:
-    opener = gzip.open if str(path).endswith(".gz") else open
-    with opener(path, "rt", encoding="utf-8") as handle:
-        for line in handle:
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                obj = json.loads(text)
-            except json.JSONDecodeError:
-                return False
-            return "works_count" in obj and "summary_stats" in obj and "authorships" not in obj
-    return False

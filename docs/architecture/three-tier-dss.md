@@ -15,8 +15,8 @@ OPENALEX_DSS_DATA_DIR/* -> external lakehouse and warehouse layer
 `apps/web` is a React + TypeScript application with Vite, TanStack Query,
 Recharts, Framer Motion and Lucide icons. The first screen is a Russian
 workspace: choose a slice, create or import a fixed dump, inspect author
-ratings, compare metric lines, drill into flat tables, export CSV, and prepare
-BI views.
+ratings, compare metric lines, drill into flat tables, and export reproducible
+tables, passports and report bundles.
 
 The UI intentionally hides unsupported or noisy filters. It exposes only
 OpenAlex-backed controls: subject object, keyword, institution, affiliation
@@ -36,11 +36,8 @@ mode and ranking metric.
 - filesystem/lakehouse source catalog;
 - normalization into works/authorships/author-work tables;
 - author index calculation and statistics;
-- fast Authors API preview for preliminary candidate discovery;
-- report bundle assembly with passports, quality funnel, stability and
-  local-vs-global sections;
-- filtered table/rating exports;
-- BI warehouse preparation for Superset or Metabase.
+- report bundle assembly with passports, quality funnel and stability sections;
+- filtered table/rating exports.
 
 HTTP/REST is the primary UI-backend protocol. WebSocket or SSE should be added
 later for long-running progress events. gRPC is reserved for future
@@ -60,8 +57,8 @@ GET  /api/v1/runs/{run_id}
 GET  /api/v1/runs/{run_id}/tables/{table_name}
 ```
 
-`POST /runs` accepts actions such as `plan`, `fetch_slice_dump`,
-`build_from_openalex`, `import_file`, `recalculate` and `author_preview`.
+`POST /runs` accepts `plan`, `fetch_slice_dump`, `build_from_openalex`,
+`import_file` and `recalculate`.
 Jobs execute in one in-process worker and persist status JSON under
 `$OPENALEX_DSS_DATA_DIR/runs/{run_id}/run_status.json`. This gives the UI and
 future Go gateway a stable contract without adding Celery/RQ/Redis before they
@@ -113,7 +110,6 @@ $OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/files/     local user-provided OpenA
 $OPENALEX_DSS_DATA_DIR/lake/silver/openalex/           normalized works and authorships
 $OPENALEX_DSS_DATA_DIR/lake/gold/scientometrics/       author indices, ratings, stats and exports
 $OPENALEX_DSS_DATA_DIR/warehouse/openalex_dss.duckdb   query warehouse/catalog
-$OPENALEX_DSS_DATA_DIR/warehouse/openalex_dss_bi.duckdb materialized BI warehouse
 ```
 
 The current MVP keeps CSV/JSON as primary reproducibility artifacts and
@@ -125,9 +121,7 @@ passports. It is not the analytical store. Analytical tables should move toward
 Parquet + DuckDB/Polars; PostgreSQL is reserved for later multi-user server
 mode with roles, durable jobs and permissions.
 
-## Two-mode contract
-
-The DSS has two deliberately separate modes.
+## Works-Based Contract
 
 `strict_works` is the research mode. It loads Works, flattens authorships and
 calculates local author metrics only inside the current slice. Mathematical
@@ -141,12 +135,7 @@ passport and checksum. The calculation step imports this fixed file locally;
 the download endpoint does not calculate rankings. This is the MVP dump mode
 and is intentionally separate from the full S3 snapshot.
 
-`author_preview` is the fast funnel. It uses OpenAlex Authors profile fields for
-early candidate discovery and for local-vs-global comparison after the strict
-slice is built. Native author profile metrics are not treated as local
-scientometric evidence.
-
-## Works-based contract
+## Primary Workflow
 
 The primary DSS workflow is:
 
@@ -170,16 +159,8 @@ quality flags for missing/deleted/truncated author information.
 
 ## Visualization layer
 
-The core DSS UI remains the main working area. Apache Superset and Metabase are
-optional BI tools connected to a materialized DuckDB warehouse:
-
-```text
-apps/web BI tab -> /bi/prepare -> data/warehouse/openalex_dss_bi.duckdb
-Superset        -> duckdb:////app/openalex-dss/data/warehouse/openalex_dss_bi.duckdb
-Metabase        -> /app/openalex-dss/data/warehouse/openalex_dss_bi.duckdb
-```
-
-Recommended dashboard families:
+The core DSS UI remains the main working area. It should provide a small set of
+purpose-built visualizations instead of a separate BI layer:
 
 - subject-slice overview: works by year, country and source;
 - author rankings: top-N by selected index and multi-line metric comparison;

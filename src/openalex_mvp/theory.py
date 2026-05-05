@@ -61,7 +61,7 @@ def analyze_theory(
         "iupv_parameters": {
             "formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
             "percentile_scope": "current_slice_and_fraction_mode",
-            "legacy_n0_lambda_ignored": {"n0": n0, "lambda": lam},
+            "unused_previous_parameters": {"n0": n0, "lambda": lam},
         },
         "islv_parameters": {
             "formula": "100 * weighted_geometric_mean(pr(h), pr(C_frac), pr(g), pr(i10), pr(P)) * concentration_penalty(top1_share)",
