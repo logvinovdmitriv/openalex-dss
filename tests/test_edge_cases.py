@@ -10,7 +10,7 @@ import _path  # noqa: F401
 from openalex_mvp.config import load_config, replace_config
 from openalex_mvp.metrics import build_author_work_metrics, compute_indices
 from openalex_mvp.normalize import normalize_raw
-from openalex_mvp.openalex import build_filter, fetch_works_slice_dump
+from openalex_mvp.openalex import build_filter, estimate_works, fetch_works_slice_dump
 from openalex_mvp.ranking import build_ratings
 from openalex_mvp.stats import top_n_overlap
 
@@ -115,6 +115,27 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertTrue(raw_path.exists())
             self.assertEqual(len(passport["raw_jsonl_sha256"]), 64)
             self.assertNotIn("api_key", passport["openalex_request"])
+
+    def test_estimate_works_uses_sample_and_facets_without_network(self) -> None:
+        cfg = replace_config(
+            load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
+            max_works=10,
+        )
+        with patch("openalex_mvp.openalex._get_json") as get_json:
+            get_json.side_effect = [
+                {"meta": {"count": 2}, "results": [_work("W1", "A1", 12)]},
+                {"meta": {"count": 2}, "results": [_work("W2", "A2", 5), _work("W3", "A3", 3)]},
+                {"group_by": [{"key": "article", "key_display_name": "article", "count": 2}]},
+                {"group_by": [{"key": "2020", "key_display_name": "2020", "count": 2}]},
+                {"group_by": [{"key": "RU", "key_display_name": "Russia", "count": 2}]},
+            ]
+            estimate = estimate_works(cfg, record_budget=10, sample_size=2)
+            self.assertEqual(estimate["estimate_count"], 2)
+            self.assertEqual(estimate["sample_size"], 2)
+            self.assertIn("facets", estimate)
+            self.assertEqual(estimate["facets"]["work_types"]["rows"][0]["key"], "article")
+            called_params = [call.args[1] for call in get_json.call_args_list]
+            self.assertTrue(all("per-page" not in params for params in called_params))
 
 
 def _work(work_id: str, author_id: str, citations: int) -> dict:

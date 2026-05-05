@@ -236,7 +236,7 @@ def _ensure_group_catalog(entity_type: str, group_by: str) -> None:
 
 
 def _sync_group_catalog(entity_type: str, group_by: str) -> dict[str, Any]:
-    payload = _get("works", {"group_by": group_by, "per-page": "200"})
+    payload = _get("works", {"group_by": group_by, "per_page": "200"})
     items = [_group_item(row, entity_type) for row in payload.get("group_by", [])]
     inserted = metadata_store.upsert_entities(entity_type, items, source=f"openalex_group_by:{group_by}")
     return {"inserted": inserted, "items": len(items)}
@@ -473,7 +473,7 @@ def _get_cached(entity: str, query: str, limit: int) -> dict[str, Any]:
         select = "id,display_name,type,works_count"
     else:
         select = "id,display_name,works_count"
-    return _get(entity, {"search": query, "per-page": str(limit), "select": select})
+    return _get(entity, {"search": query, "per_page": str(limit), "select": select})
 
 
 def _lookup_subject_by_id(query: str, level: str, entity: str) -> dict[str, Any] | None:
@@ -541,7 +541,7 @@ def _download_subject_entity(entity: str, level: str, select: str, *, max_record
     rows: list[dict[str, Any]] = []
     cursor = "*"
     while True:
-        payload = _get(entity, {"cursor": cursor, "per-page": "100", "select": select, "sort": "works_count:desc"})
+        payload = _get(entity, {"cursor": cursor, "per_page": "100", "select": select, "sort": "works_count:desc"})
         for item in payload.get("results") or []:
             rows.append(_subject_catalog_item(item, level))
             if max_records is not None and len(rows) >= max_records:

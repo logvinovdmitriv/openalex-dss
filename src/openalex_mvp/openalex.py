@@ -404,6 +404,7 @@ def estimate_works(
     before = cache_stats()
     count_payload = _get_json(API_BASE, count_params)
     sample_payload = _get_json(API_BASE, sample_params)
+    facet_payloads = _estimate_facets(cfg, count_params, api_key)
     after = cache_stats()
     meta = count_payload.get("meta") or {}
     results = sample_payload.get("results") or count_payload.get("results") or []
@@ -441,8 +442,11 @@ def estimate_works(
         "max_dump_mb": round(max_bytes / (1024 * 1024), 3),
         "api_requests_planned": planned_pages,
         "per_page": cfg.per_page,
+        "estimated_memory_mb": round((planned_records * 260) / (1024 * 1024), 3),
+        "estimated_parquet_mb": round((planned_records * max(512, estimated_record_bytes * 0.32)) / (1024 * 1024), 3),
         "openalex_request": public_params,
         "sample_request": public_sample_params,
+        "facets": facet_payloads,
         "cache": {
             "hits_delta": after["hits"] - before["hits"],
             "misses_delta": after["misses"] - before["misses"],
@@ -450,6 +454,38 @@ def estimate_works(
             "misses_total": after["misses"],
         },
     }
+
+
+def _estimate_facets(cfg: SliceConfig, count_params: dict[str, str], api_key: str | None) -> dict[str, Any]:
+    base = {
+        key: value
+        for key, value in count_params.items()
+        if key in {"filter", "search"} and value
+    }
+    if api_key:
+        base["api_key"] = api_key
+    facets: dict[str, Any] = {}
+    for name, group_by in (
+        ("work_types", "type"),
+        ("publication_years", "publication_year"),
+        ("countries", "authorships.institutions.country_code"),
+    ):
+        params = {**base, "group_by": group_by, "per_page": "20"}
+        try:
+            payload = _get_json(API_BASE, params)
+        except RuntimeError as exc:
+            facets[name] = {"group_by": group_by, "rows": [], "error": str(exc)}
+            continue
+        rows = [
+            {
+                "key": row.get("key"),
+                "label": row.get("key_display_name") or row.get("key") or "",
+                "count": int(row.get("count") or 0),
+            }
+            for row in payload.get("group_by", [])
+        ]
+        facets[name] = {"group_by": group_by, "rows": rows}
+    return facets
 
 
 def fetch_authors(
@@ -467,7 +503,7 @@ def fetch_authors(
     params = {
         "filter": build_author_filter(cfg),
         "sort": sort,
-        "per-page": str(per_page),
+        "per_page": str(per_page),
         "cursor": "*",
         "select": ",".join(AUTHOR_SELECT_FIELDS),
     }
@@ -543,7 +579,7 @@ def _works_params(cfg: SliceConfig, per_page: int) -> dict[str, str]:
     params = {
         "filter": build_filter(cfg),
         "sort": cfg.sort,
-        "per-page": str(per_page),
+        "per_page": str(per_page),
         "cursor": "*",
         "select": ",".join(select_fields),
     }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -79,15 +80,24 @@ def cohort_statistics(cohort_id: str) -> dict[str, Any]:
     ]
     descriptive = {metric: _describe([_as_float(row.get(metric)) for row in rows]) for metric in COHORT_METRICS}
     boxplots = {metric: _boxplot([_as_float(row.get(metric)) for row in rows]) for metric in COHORT_METRICS}
+    histograms = {
+        metric: {
+            "raw": _histogram([_as_float(row.get(metric)) for row in rows]),
+            "log1p": _histogram([math.log1p(max(0.0, _as_float(row.get(metric)))) for row in rows]),
+        }
+        for metric in COHORT_METRICS
+    }
     return {
         "cohort": cohort,
         "n_rows": len(rows),
         "metrics": list(COHORT_METRICS),
         "descriptive": descriptive,
         "boxplots": boxplots,
+        "histograms": histograms,
         "notes": [
             "Statistics are computed for the stored author cohort, not for every author in the slice.",
-            "Q-Q plots and bootstrap intervals are reserved for the next statistics iteration.",
+            "Histogram bins are pre-aggregated so the frontend does not need the full author table.",
+            "Formal Q-Q plots, Shapiro/Anderson tests and bootstrap intervals are reserved for the SciPy-backed statistics iteration.",
         ],
     }
 
@@ -128,15 +138,25 @@ def _describe(values: list[float]) -> dict[str, float]:
     values = sorted(value for value in values if value == value)
     if not values:
         return {"n": 0}
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    std = math.sqrt(variance)
+    skewness = (sum((value - mean) ** 3 for value in values) / len(values) / (std**3)) if std > 0 else 0.0
+    kurtosis = (sum((value - mean) ** 4 for value in values) / len(values) / (std**4) - 3.0) if std > 0 else 0.0
     return {
         "n": len(values),
-        "mean": sum(values) / len(values),
+        "mean": mean,
         "min": values[0],
         "q1": _quantile(values, 0.25),
         "median": _quantile(values, 0.5),
         "q3": _quantile(values, 0.75),
         "max": values[-1],
         "iqr": _quantile(values, 0.75) - _quantile(values, 0.25),
+        "std": std,
+        "skewness": skewness,
+        "kurtosis": kurtosis,
+        "zero_rate": sum(1 for value in values if value == 0) / len(values),
+        "tie_rate": 1.0 - (len(set(values)) / len(values)),
     }
 
 
@@ -166,6 +186,30 @@ def _quantile(values: list[float], q: float) -> float:
         return 0.0
     index = int(round((len(values) - 1) * max(0.0, min(1.0, q))))
     return float(values[index])
+
+
+def _histogram(values: list[float], bins: int = 12) -> list[dict[str, float]]:
+    clean = [value for value in values if value == value]
+    if not clean:
+        return []
+    lo = min(clean)
+    hi = max(clean)
+    if lo == hi:
+        return [{"bin_start": lo, "bin_end": hi, "count": float(len(clean))}]
+    bins = max(1, min(bins, 50))
+    step = (hi - lo) / bins
+    counts = [0] * bins
+    for value in clean:
+        idx = min(bins - 1, int((value - lo) / step))
+        counts[idx] += 1
+    return [
+        {
+            "bin_start": lo + idx * step,
+            "bin_end": lo + (idx + 1) * step,
+            "count": float(count),
+        }
+        for idx, count in enumerate(counts)
+    ]
 
 
 def _as_float(value: Any) -> float:

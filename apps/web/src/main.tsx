@@ -189,11 +189,11 @@ function Workbench() {
   const tableOptions = Object.keys(state.data?.tables ?? {}).map((value) => ({ value, label: value }));
   const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
     .filter((item) => ["openalex_api", "openalex_cli"].includes(item.value));
-  const defaultStorageProfileId = String(defaultOption(storageProfileOptions)?.value ?? "");
-  const defaultSourceStrategy = String(defaultOption(sourceStrategyOptions)?.value ?? "");
-  const defaultRecordBudget = Number(defaultOption(recordBudgetOptions)?.value ?? 0);
-  const defaultRawBudget = Number(defaultOption(rawBudgetOptions)?.value ?? 0);
-  const defaultTopN = Number(defaultOption(topNOptions)?.value ?? 0);
+  const defaultStorageProfileId = String(defaultOption(storageProfileOptions)?.value ?? "minimal_analytics");
+  const defaultSourceStrategy = String(defaultOption(sourceStrategyOptions)?.value ?? "openalex_api");
+  const defaultRecordBudget = Number(defaultOption(recordBudgetOptions)?.value ?? 50_000);
+  const defaultRawBudget = Number(defaultOption(rawBudgetOptions)?.value ?? 500 * 1024 * 1024);
+  const defaultTopN = Number(defaultOption(topNOptions)?.value ?? 100);
   const activeStorageProfileId = storageProfileId || defaultStorageProfileId;
   const activeSourceStrategy = sourceStrategy || defaultSourceStrategy;
   const activeRecordBudget = technicalRecordCap || defaultRecordBudget;
@@ -715,8 +715,12 @@ function SlicesPage({
           <MetricCard label="Работ найдено" value={fmt(rawEstimate.estimate_count ?? 0)} />
           <MetricCard label="Полный срез / к загрузке" value={`${fmt(rawEstimate.estimate_count ?? 0)} / ${fmt(decision.records_to_fetch ?? rawEstimate.planned_records ?? 0)}`} />
           <MetricCard label="API-запросов" value={fmt(decision.api_requests_planned ?? rawEstimate.api_requests_planned ?? 0)} />
-          <MetricCard label="Прогноз raw" value={`${fmt(decision.estimated_raw_mb ?? rawEstimate.estimated_raw_mb ?? 0)}–${fmt(rawEstimate.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ`} />
+          <MetricCard label="Raw JSONL.gz прогноз" value={`${fmt(decision.estimated_raw_mb ?? rawEstimate.estimated_raw_mb ?? 0)}–${fmt(rawEstimate.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ`} />
+          <MetricCard label="Parquet прогноз" value={`${fmt(rawEstimate.estimated_parquet_mb ?? 0)} МБ`} />
+          <MetricCard label="Память расчета" value={`${fmt(rawEstimate.estimated_memory_mb ?? 0)} МБ`} />
         </div>
+        <EstimateBudget estimate={rawEstimate} decision={decision} maxRawBytes={maxRawBytes} />
+        <EstimateFacets facets={rawEstimate.facets} />
         <div className={canRun ? "notice success" : hasEstimate ? "notice error" : "notice"}>
           <b>{canRun ? "Полная загрузка допустима" : hasEstimate ? "Нужно уточнить срез" : "Сначала оцените объем"}</b>
           <span>{decision.strategy ?? "Оценка еще не выполнена"} · {decision.status ?? "нет статуса"}</span>
@@ -774,7 +778,7 @@ function SlicesPage({
           </div>
         )}
         <div className="action-row">
-          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !downloadConfigReady}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} {hasEstimate ? "Скачать срез" : "Оценить и скачать"}</button>
+          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !downloadConfigReady || (hasEstimate && decision.can_execute === false)}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} {hasEstimate ? "Скачать срез" : "Оценить и скачать"}</button>
         </div>
       </section>
 
@@ -785,8 +789,15 @@ function SlicesPage({
 
 function LocalDataPage({ workbench, dumps, tables, run, running, onRefresh }: { workbench: any; dumps: any; tables: any; run: any; running: boolean; onRefresh: () => void }) {
   const dumpRows = dumps?.dumps ?? workbench?.dumps ?? [];
+  const totalRawMb = dumpRows.reduce((sum: number, dump: any) => sum + bytesToMb(Number(dump.bytes_written ?? dump.raw_size_bytes ?? 0)), 0);
   return (
     <div className="stack">
+      <section className="metric-grid">
+        <MetricCard label="Локальных дампов" value={fmt(dumpRows.length)} />
+        <MetricCard label="Raw на диске" value={`${fmt(totalRawMb)} МБ`} />
+        <MetricCard label="Parquet таблиц" value={fmt(["works", "authorships", "work_topics", "author_work"].filter((name) => tables?.[name]?.exists).length)} />
+        <MetricCard label="Индексов авторов" value={fmt(tables?.indices?.rows ?? 0)} />
+      </section>
       <section className="panel">
         <div className="panel-head split">
           <div>
@@ -800,8 +811,12 @@ function LocalDataPage({ workbench, dumps, tables, run, running, onRefresh }: { 
         <div className="dump-list">
           {dumpRows.length === 0 && <EmptyState title="Мини-дампов пока нет" detail="Сначала оцените срез и скачайте локальный пакет данных." />}
           {dumpRows.map((dump: any) => (
-            <div className="dump-card" key={`${dump.slice_id}-${dump.raw_jsonl}`}>
-              <b>{dump.slice_id}</b>
+            <div className="dump-card" key={`${dump.dump_id ?? dump.slice_id}-${dump.raw_jsonl}`}>
+              <div className="dump-card-head">
+                <b>{dump.slice_id}</b>
+                <span className={dump.allowed_for_final_analysis === false ? "status-chip warn" : "status-chip ok"}>{dump.scientific_completeness ?? "complete"}</span>
+              </div>
+              <span>{dump.dump_id ?? "dump_id не указан"}</span>
               <span>{dump.raw_jsonl}</span>
               <small>{fmt(dump.records_downloaded ?? 0)} работ · {fmt(bytesToMb(dump.bytes_written ?? 0))} МБ · {dump.stop_reason}</small>
             </div>
@@ -1094,7 +1109,13 @@ function StatisticsPage({
   }));
   const describe = cohortStats?.descriptive?.[metric] ?? {};
   const box = cohortStats?.boxplots?.[metric] ?? {};
+  const histogramRows = (cohortStats?.histograms?.[metric]?.raw ?? []).map((row: any, index: number) => ({
+    label: `${fmt(row.bin_start)}-${fmt(row.bin_end)}`,
+    score: Number(row.count ?? 0),
+    author: `bin-${index + 1}`,
+  }));
   const activeN = cohortStats?.cohort?.n_authors ?? (table?.total ? Math.min(Number(table.total), topN) : 0);
+  const distributionRows = histogramRows.length ? histogramRows : chartRows;
   return (
     <div className="stack">
       {!selectedCohortId && (
@@ -1109,18 +1130,21 @@ function StatisticsPage({
         <MetricCard label="Авторов в распределении" value={fmt(describe.n ?? analytics?.distribution?.n ?? 0)} />
         <MetricCard label="Среднее" value={fmt(describe.mean ?? analytics?.distribution?.mean ?? 0)} />
         <MetricCard label="Медиана" value={fmt(describe.median ?? analytics?.distribution?.median ?? 0)} />
+        <MetricCard label="Zero-rate" value={fmt(describe.zero_rate ?? 0)} />
+        <MetricCard label="Tie-rate" value={fmt(describe.tie_rate ?? 0)} />
+        <MetricCard label="Skewness" value={fmt(describe.skewness ?? 0)} />
       </section>
       <section className="chart-table-grid">
         <div className="panel">
           <h2>Распределение индекса</h2>
           <div className="chart-box">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartRows}>
+              <BarChart data={distributionRows}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="score" fill="#0f766e" name={metricLabel(metric)} />
+                <Bar dataKey="score" fill="#0f766e" name={histogramRows.length ? "Авторов в bin" : metricLabel(metric)} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1368,6 +1392,64 @@ function SingleChoicePicker({ options, selected, onChange }: { options: SelectOp
   );
 }
 
+function EstimateBudget({ estimate, decision, maxRawBytes }: { estimate: any; decision: any; maxRawBytes: number }) {
+  const p90 = Number(estimate?.estimated_raw_bytes_p90 ?? estimate?.estimated_raw_bytes ?? 0);
+  const avg = Number(estimate?.estimated_raw_bytes ?? 0);
+  const limit = Number(maxRawBytes || decision?.max_raw_mb * 1024 * 1024 || estimate?.max_dump_bytes || 0);
+  if (!avg && !p90 && !limit) return null;
+  const avgPct = limit ? Math.min(100, Math.round((avg / limit) * 100)) : 0;
+  const p90Pct = limit ? Math.min(100, Math.round((p90 / limit) * 100)) : 0;
+  return (
+    <div className="estimate-budget">
+      <div className="progress-meta">
+        <span>Прогноз физической загрузки: средний {fmt(bytesToMb(avg))} МБ, p90 {fmt(bytesToMb(p90))} МБ</span>
+        <b>лимит {fmt(bytesToMb(limit))} МБ</b>
+      </div>
+      <div className="budget-track" aria-label={`Средний прогноз ${avgPct}%, p90 ${p90Pct}%`}>
+        <span className="budget-avg" style={{ width: `${avgPct}%` }} />
+        <span className="budget-p90" style={{ width: `${p90Pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function EstimateFacets({ facets }: { facets: any }) {
+  const groups = [
+    { key: "publication_years", title: "Годы публикаций" },
+    { key: "work_types", title: "Типы публикаций" },
+    { key: "countries", title: "Страны аффилиаций" },
+  ];
+  if (!facets || groups.every((group) => !(facets[group.key]?.rows ?? []).length)) return null;
+  return (
+    <div className="facet-grid">
+      {groups.map((group) => (
+        <FacetBars key={group.key} title={group.title} rows={facets[group.key]?.rows ?? []} />
+      ))}
+    </div>
+  );
+}
+
+function FacetBars({ title, rows }: { title: string; rows: Array<{ key?: string; label?: string; count?: number }> }) {
+  const cleanRows = rows.filter((row) => row.label || row.key).slice(0, 8);
+  const max = Math.max(1, ...cleanRows.map((row) => Number(row.count ?? 0)));
+  return (
+    <section className="facet-card">
+      <b>{title}</b>
+      {cleanRows.length === 0 && <small>Нет данных предпросмотра</small>}
+      {cleanRows.map((row) => {
+        const count = Number(row.count ?? 0);
+        return (
+          <div className="facet-row" key={`${row.key ?? row.label}`}>
+            <span>{row.label || row.key}</span>
+            <i><em style={{ width: `${Math.max(2, Math.round((count / max) * 100))}%` }} /></i>
+            <strong>{fmt(count)}</strong>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 function ProgressPanel({ filters, estimate, materialization, run }: { filters: ActiveFilters; estimate: any; materialization: any; run: any }) {
   const steps = [
     { id: "draft", label: "Срез", ready: true },
@@ -1405,11 +1487,19 @@ function StatusRail({ state, run, running }: { state: any; run: any; running: bo
 function RunCard({ run }: { run: WorkbenchRun }) {
   if (!run) return null;
   const progress = progressForRun(run);
+  const details = (run as any).progress ?? {};
   return (
     <div className={`run-card ${run.status === "failed" ? "error" : ""}`}>
       <b>{run.action} · {run.status}</b>
       <span>{run.run_id}</span>
       <ProgressBar percent={progress.percent} label={progress.label} tone={run.status === "failed" ? "error" : "normal"} />
+      {Object.keys(details).length > 0 && (
+        <div className="run-progress-details">
+          <span>{fmt(details.fetched ?? 0)} / {fmt(details.target_records ?? details.total_available ?? 0)} работ</span>
+          <span>{fmt(details.page_count ?? 0)} страниц</span>
+          <span>{fmt(bytesToMb(details.bytes_written ?? 0))} МБ</span>
+        </div>
+      )}
       {run.error && <small>{run.error}</small>}
     </div>
   );
@@ -1521,21 +1611,24 @@ function SubjectInput({
 
   return (
     <div className="validated-input">
-      <input
-        value={draft}
-        list="subject-options"
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? "subject-error" : undefined}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commit();
-          }
-        }}
-        placeholder="Программная инженерия, AI, ergonomics"
-      />
+      <div className="lookup-row">
+        <input
+          value={draft}
+          list="subject-options"
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? "subject-error" : undefined}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit();
+            }
+          }}
+          placeholder="Программная инженерия, AI, ergonomics"
+        />
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraft("Все направления"); onClear(); }}>Все</button>
+      </div>
       <datalist id="subject-options">
         <option value="Все направления" />
         {visibleOptions.map((item) => (
@@ -1610,21 +1703,24 @@ function OrganizationInput({
 
   return (
     <div className="validated-input">
-      <input
-        value={draft}
-        list="organization-options"
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? "organization-error" : undefined}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commit();
-          }
-        }}
-        placeholder="БГТУ, ROR, OpenAlex Institution ID"
-      />
+      <div className="lookup-row">
+        <input
+          value={draft}
+          list="organization-options"
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? "organization-error" : undefined}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit();
+            }
+          }}
+          placeholder="БГТУ, ROR, OpenAlex Institution ID"
+        />
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraft("Все организации"); onClear(); }}>Все</button>
+      </div>
       <datalist id="organization-options">
         <option value="Все организации" />
         {visibleOptions.map((item) => (
@@ -1670,21 +1766,24 @@ function CountryInput({ value, options, onChange }: { value: string; options: Se
 
   return (
     <div className="validated-input">
-      <input
-        value={draft}
-        list="country-options"
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? "country-error" : undefined}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commit();
-          }
-        }}
-        placeholder="Россия, RU или United States"
-      />
+      <div className="lookup-row">
+        <input
+          value={draft}
+          list="country-options"
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? "country-error" : undefined}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit();
+            }
+          }}
+          placeholder="Россия, RU или United States"
+        />
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraft("Все страны"); onChange(""); }}>Все</button>
+      </div>
       <datalist id="country-options">
         <option value="Все страны" />
         {options.filter((item) => item.value).map((item) => (
