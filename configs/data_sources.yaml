@@ -41,8 +41,9 @@ sources:
       - jsonl_gz
   - id: openalex_snapshot_parquet
     label: "OpenAlex snapshot Parquet"
-    role: "Parquet snapshot для серверного/enterprise режима; публичный квартальный Parquet ожидается в документации с июня 2026."
-    status: "prepared"
+    role: "Parquet snapshot для серверного/enterprise режима; не является основным режимом ноутбука и не используется без локального/серверного lakehouse."
+    status: "research_note"
+    research_note: "Документация OpenAlex описывает enterprise Parquet snapshot и план публичного Parquet snapshot; в MVP это будущий provider, а не готовый источник маленьких тематических срезов."
     supports:
       - parquet
       - duckdb

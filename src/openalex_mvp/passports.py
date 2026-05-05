@@ -35,6 +35,9 @@ def build_passports(
     cfg: SliceConfig,
     root: str | Path = ".",
     out_dir: str | Path = "data/passports",
+    *,
+    run_id: str = "base",
+    dump_id: str = "",
 ) -> dict[str, Any]:
     root_path = Path(root)
     data_root = _data_root(root_path)
@@ -169,7 +172,8 @@ def build_passports(
     }
 
     calculation_passport = {
-        "run_id": "base",
+        "run_id": run_id,
+        "dump_id": dump_id,
         "fraction_modes": list(cfg.fraction_modes),
         "fraction_mode_default": cfg.fraction_mode_default,
         "ranking_rule": {

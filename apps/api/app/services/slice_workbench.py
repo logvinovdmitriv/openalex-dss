@@ -144,10 +144,11 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         },
         "outputs": [
             "raw/openalex_slices/{slice_id}/works.jsonl.gz",
-            "normalized/works_flat.csv",
-            "normalized/authorships_flat.csv",
-            "results/author_indices.csv",
-            "passports/slice_passport.json",
+            "tables/{dump_id}/works.parquet",
+            "tables/{dump_id}/authorships.parquet",
+            "tables/{dump_id}/work_topics.parquet",
+            "runs/{run_id}/tables/author_indices.parquet",
+            "runs/{run_id}/passports/slice_passport.json",
         ],
     }
     _write_materialization(materialization)
@@ -241,6 +242,20 @@ def _download_policy(payload: dict[str, Any], fallback: dict[str, Any] | None = 
         "complete_slice_required": True,
         "allow_incomplete_preview": False,
     }
+    max_records = raw.get(
+        "max_records_to_download",
+        payload.get("max_records_to_download", payload.get("max_works", default.get("max_records_to_download", 50_000))),
+    )
+    max_raw_bytes = raw.get(
+        "max_raw_bytes",
+        payload.get("max_raw_bytes", payload.get("max_dump_bytes", default.get("max_raw_bytes", 500 * 1024 * 1024))),
+    )
+    return {
+        "max_records_to_download": int(max_records or default.get("max_records_to_download", 50_000)),
+        "max_raw_bytes": int(max_raw_bytes or default.get("max_raw_bytes", 500 * 1024 * 1024)),
+        "complete_slice_required": bool(raw.get("complete_slice_required", payload.get("complete_slice_required", default.get("complete_slice_required", True)))),
+        "allow_incomplete_preview": bool(raw.get("allow_incomplete_preview", payload.get("allow_incomplete_preview", default.get("allow_incomplete_preview", False)))),
+    }
 
 
 def _storage_profiles() -> dict[str, dict[str, Any]]:
@@ -259,14 +274,6 @@ def _storage_profiles() -> dict[str, dict[str, Any]]:
             "selected_fields": [],
         }
     return out
-    max_records = raw.get("max_records_to_download", payload.get("max_records_to_download", payload.get("max_works", default.get("max_records_to_download", 50_000))))
-    max_raw_bytes = raw.get("max_raw_bytes", payload.get("max_raw_bytes", payload.get("max_dump_bytes", default.get("max_raw_bytes", 500 * 1024 * 1024))))
-    return {
-        "max_records_to_download": int(max_records or default.get("max_records_to_download", 50_000)),
-        "max_raw_bytes": int(max_raw_bytes or default.get("max_raw_bytes", 500 * 1024 * 1024)),
-        "complete_slice_required": bool(raw.get("complete_slice_required", payload.get("complete_slice_required", default.get("complete_slice_required", True)))),
-        "allow_incomplete_preview": bool(raw.get("allow_incomplete_preview", payload.get("allow_incomplete_preview", default.get("allow_incomplete_preview", False)))),
-    }
 
 
 def _slice_title(cfg: Any) -> str:

@@ -118,7 +118,14 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
         if not raw_jsonl or dump.get("no_data"):
             return {"fetch": fetched, "build": None, "no_data": True}
         update_progress(run_id, 96, "normalizing local file", {"source_path": raw_jsonl})
-        built = pipeline.import_local_file({**payload, "source_path": raw_jsonl, "api_key": None})
+        built = pipeline.import_local_file({
+            **payload,
+            "source_path": raw_jsonl,
+            "api_key": None,
+            "run_id": run_id,
+            "dump_id": dump.get("dump_id"),
+            "dump_manifest": dump,
+        })
         return {"fetch": fetched, "build": built, "no_data": False}
     if action == "import_file":
         return pipeline.import_local_file(payload)

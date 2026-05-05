@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .io_utils import as_float, as_int, read_csv_dicts, write_csv_dicts
+from .io_utils import as_float, as_int, read_csv_dicts, write_csv_dicts, write_parquet_dicts
 
 CORE_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local")
 EXPERIMENTAL_METRICS = ("f5", "fm5", "iupv", "islv", "lrdi")
@@ -67,6 +67,7 @@ def build_ratings(
 
     out_rows.sort(key=lambda row: (row["fraction_mode"], row["metric_name"], int(row["rank_competition"]), row["author_id"]))
     write_csv_dicts(out_path, out_rows, RATING_FIELDS)
+    write_parquet_dicts(Path(out_path).with_suffix(".parquet"), out_rows, RATING_FIELDS)
     return out_rows
 
 

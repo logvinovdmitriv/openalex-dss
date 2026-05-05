@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -43,12 +44,15 @@ GENERATED_FILES = [
 def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     cfg = _cfg(payload)
     _write_runtime_config(cfg)
+    run_id = str(payload.get("run_id") or cfg.slice_name or "recalculate")
+    dump_id = str(payload.get("dump_id") or _dump_id_from_payload(payload) or cfg.slice_name)
     if cfg.fraction_mode_default == "openalex_native" and (DATA / "normalized/author_profiles_flat.csv").exists():
-        _run_compute_author_profiles(cfg)
+        _run_compute_author_profiles(cfg, run_id=run_id, dump_id=dump_id)
     else:
-        _run_compute(cfg)
+        _run_compute(cfg, run_id=run_id, dump_id=dump_id)
+    archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id})
     _write_pipeline_summary("recalculate", cfg, payload)
-    return {"status": "ok", "mode": "recalculate"}
+    return {"status": "ok", "mode": "recalculate", "archive": archive}
 
 
 def fetch_and_run(payload: dict[str, Any]) -> dict[str, Any]:
@@ -120,6 +124,9 @@ def fetch_slice_dump(payload: dict[str, Any], progress_callback: Callable[[dict[
                 progress_callback=progress_callback,
             )
         passport["query_plan"] = plan
+        if not passport.get("dump_id"):
+            checksum = str(passport.get("raw_jsonl_sha256") or "")
+            passport["dump_id"] = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
         raw_jsonl = passport.get("raw_jsonl")
         if raw_jsonl:
             write_json(Path(str(raw_jsonl)).with_name("slice_passport.json"), passport)
@@ -180,6 +187,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     cfg = _cfg(payload)
     _write_runtime_config(cfg)
     profile = file_profile(source)
+    dump_id = str(payload.get("dump_id") or _dump_id_from_payload({"source_file": profile}) or cfg.slice_name)
     if int(profile.get("bytes") or 0) == 0:
         raise ValueError(
             "Локальный дамп пуст: OpenAlex вернул 0 работ для выбранных фильтров. "
@@ -199,7 +207,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
                 "used_api_key": False,
             },
         )
-        _run_compute_author_profiles(cfg)
+        _run_compute_author_profiles(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
     else:
         quality = normalize_raw(
             source,
@@ -220,9 +228,10 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
                 "used_api_key": False,
             },
         )
-        _run_compute(cfg)
-    _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile})
-    return {"status": "ok", "mode": "import_local_file", "source": profile}
+        _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
+    archive = _archive_run_artifacts(cfg, {**payload, "source_file": profile, "dump_id": dump_id})
+    _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "archive": archive})
+    return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive}
 
 
 def preview(payload: dict[str, Any]) -> dict[str, Any]:
@@ -249,8 +258,8 @@ def clear_generated_data() -> dict[str, Any]:
     return {"status": "ok", "mode": "clear_generated_data", "removed": removed}
 
 
-def _run_compute(cfg: Any) -> None:
-    build_author_work_metrics(DATA / "normalized/works_flat.csv", DATA / "normalized/authorships_flat.csv", DATA / "marts/author_work_metrics.csv", cfg.fraction_modes)
+def _run_compute(cfg: Any, *, run_id: str = "base", dump_id: str = "") -> None:
+    build_author_work_metrics(DATA / "normalized/works_flat.csv", DATA / "normalized/authorships_flat.csv", DATA / "marts/author_work_metrics.csv", cfg.fraction_modes, run_id=run_id)
     compute_indices(
         DATA / "marts/author_work_metrics.csv",
         DATA / "results/author_indices.csv",
@@ -274,12 +283,17 @@ def _run_compute(cfg: Any) -> None:
         cfg.analysis_year,
         cfg.fraction_mode_default,
     )
-    build_passports(cfg, ROOT, DATA / "passports")
+    build_passports(cfg, ROOT, DATA / "passports", run_id=run_id, dump_id=dump_id)
     reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100)
 
 
-def _run_compute_author_profiles(cfg: Any) -> None:
-    compute_author_profile_indices(DATA / "normalized/author_profiles_flat.csv", DATA / "results/author_indices.csv", cfg.fraction_mode_default)
+def _run_compute_author_profiles(cfg: Any, *, run_id: str = "authors", dump_id: str = "") -> None:
+    compute_author_profile_indices(
+        DATA / "normalized/author_profiles_flat.csv",
+        DATA / "results/author_indices.csv",
+        cfg.fraction_mode_default,
+        run_id=run_id,
+    )
     build_ratings(DATA / "results/author_indices.csv", DATA / "results/rating_positions.csv", NATIVE_AUTHOR_METRICS)
     analyze_stats(
         DATA / "results/author_indices.csv",
@@ -300,7 +314,7 @@ def _run_compute_author_profiles(cfg: Any) -> None:
             ],
         },
     )
-    build_passports(cfg, ROOT, DATA / "passports")
+    build_passports(cfg, ROOT, DATA / "passports", run_id=run_id, dump_id=dump_id)
 
 
 def _cfg(payload: dict[str, Any]) -> Any:
@@ -326,6 +340,83 @@ def _write_pipeline_summary(mode: str, cfg: Any, payload: dict[str, Any]) -> Non
     if payload.get("dump"):
         doc["dump"] = payload["dump"]
     write_json(JSON_FILES["pipeline"], doc)
+
+
+def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    run_id = _safe_id(str(payload.get("run_id") or "latest"))
+    dump_id = _safe_id(str(payload.get("dump_id") or _dump_id_from_payload(payload) or cfg.slice_name))
+    run_dir = DATA / "runs" / run_id
+    dump_dir = DATA / "dumps" / dump_id
+    tables_dir = DATA / "tables" / dump_id
+    copied: dict[str, str] = {}
+
+    for base in (run_dir, dump_dir, tables_dir):
+        base.mkdir(parents=True, exist_ok=True)
+
+    manifest = {
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "slice_id": cfg.slice_name,
+        "source_file": payload.get("source_file"),
+        "dump_manifest": payload.get("dump_manifest"),
+        "latest_view_note": "Global normalized/results paths are only the UI latest-view; reproducible artifacts are archived under this run_id and dump_id.",
+    }
+    write_json(run_dir / "metric_run.json", manifest)
+    write_json(dump_dir / "dump_manifest.json", payload.get("dump_manifest") or manifest)
+
+    run_artifacts = {
+        **{f"tables/{name}{Path(path).suffix}": path for name, path in TABLE_FILES.items()},
+        **{f"tables/{name}{Path(path).suffix}": path for name, path in PARQUET_TABLE_FILES.items()},
+        **{f"passports/{name}.json": path for name, path in JSON_FILES.items()},
+        "passports/slice_passport.json": DATA / "passports/slice_passport.json",
+        "passports/calculation_passport.json": DATA / "passports/calculation_passport.json",
+        "passports/quality_report.json": DATA / "passports/quality_report.json",
+    }
+    for rel, path in run_artifacts.items():
+        source = Path(path)
+        if source.is_file():
+            target = run_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            copied[rel] = str(target)
+
+    dump_tables = {
+        "works.parquet": PARQUET_TABLE_FILES.get("works"),
+        "authorships.parquet": PARQUET_TABLE_FILES.get("authorships"),
+        "work_topics.parquet": PARQUET_TABLE_FILES.get("work_topics"),
+        "author_work.parquet": PARQUET_TABLE_FILES.get("author_work"),
+    }
+    for rel, path in dump_tables.items():
+        source = Path(path) if path else None
+        if source and source.is_file():
+            target = tables_dir / rel
+            shutil.copy2(source, target)
+            copied[f"tables_by_dump/{rel}"] = str(target)
+
+    return {
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "run_dir": str(run_dir),
+        "dump_dir": str(dump_dir),
+        "tables_dir": str(tables_dir),
+        "copied": copied,
+    }
+
+
+def _dump_id_from_payload(payload: dict[str, Any]) -> str:
+    manifest = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
+    if manifest.get("dump_id"):
+        return str(manifest["dump_id"])
+    if manifest.get("raw_jsonl_sha256"):
+        return f"dump_{str(manifest['raw_jsonl_sha256'])[:16]}"
+    source = payload.get("source_file") if isinstance(payload.get("source_file"), dict) else {}
+    if source.get("sha256"):
+        return f"dump_{str(source['sha256'])[:16]}"
+    return ""
+
+
+def _safe_id(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "_.-" else "_" for ch in value.strip())[:140] or "artifact"
 
 
 def config_to_payload(cfg: Any) -> dict[str, Any]:

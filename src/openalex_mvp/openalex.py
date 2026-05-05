@@ -305,12 +305,14 @@ def fetch_works_slice_dump(
             cursor = str(next_cursor)
 
     checksum = sha256_file(raw_path)
+    dump_id = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
     public_params = {key: value for key, value in params.items() if key != "api_key"}
     incomplete_by_limit = stop_reason in {"max_records", "max_bytes"}
     scientific_completeness = "incomplete" if incomplete_by_limit else "complete"
     allowed_for_final_analysis = not incomplete_by_limit
     passport = {
         "slice_id": cfg.slice_name,
+        "dump_id": dump_id,
         "source_mode": "api_dump_first",
         "source": "OpenAlex API works",
         "base_url": API_BASE,

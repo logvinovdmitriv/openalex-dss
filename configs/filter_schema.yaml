@@ -51,8 +51,10 @@ filters:
     modes:
       - all
       - country
-      - region
-      - city
+    derived_modes:
+      - id: city_via_institutions
+        label: "Город через организации"
+        description: "Works API не фильтрует работы по городу напрямую; город разворачивается в список OpenAlex Institutions, затем в authorships.institutions.id."
   organization:
     label: "Организация"
     type: "organization_picker"

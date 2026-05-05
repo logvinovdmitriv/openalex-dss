@@ -74,8 +74,10 @@ def download_works_metadata(
 
     records = _pack_work_json_files(files_dir, raw_path)
     checksum = sha256_file(raw_path)
+    dump_id = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
     passport = {
         "slice_id": cfg.slice_name,
+        "dump_id": dump_id,
         "source_mode": "openalex_cli",
         "source": "OpenAlex CLI works metadata",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),

@@ -5,7 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .io_utils import as_float, as_int, read_csv_dicts, truthy, write_csv_dicts
+from .io_utils import as_float, as_int, read_csv_dicts, truthy, write_csv_dicts, write_parquet_dicts
 from .normalize import DELETED_AUTHOR_ID, NULL_AUTHOR_ID
 
 AUTHOR_WORK_FIELDS = [
@@ -257,6 +257,7 @@ def build_author_work_metrics(
 
     rows.sort(key=lambda row: (row["fraction_mode"], row["author_id"], row["work_id"]))
     write_csv_dicts(out_path, rows, AUTHOR_WORK_FIELDS)
+    write_parquet_dicts(Path(out_path).with_suffix(".parquet"), rows, AUTHOR_WORK_FIELDS)
     return rows
 
 
@@ -319,6 +320,7 @@ def compute_indices(
     assign_iupv_percentiles(out_rows)
     out_rows.sort(key=lambda row: (row["fraction_mode"], row["author_id"]))
     write_csv_dicts(out_path, out_rows, AUTHOR_INDEX_FIELDS)
+    write_parquet_dicts(Path(out_path).with_suffix(".parquet"), out_rows, AUTHOR_INDEX_FIELDS)
     return out_rows
 
 
@@ -326,13 +328,14 @@ def compute_author_profile_indices(
     author_profiles_path: str | Path = "data/normalized/author_profiles_flat.csv",
     out_path: str | Path = "data/results/author_indices.csv",
     fraction_mode: str = "openalex_native",
+    run_id: str = "authors",
 ) -> list[dict[str, Any]]:
     rows = read_csv_dicts(author_profiles_path)
     out_rows: list[dict[str, Any]] = []
     for row in rows:
         out_rows.append(
             {
-                "run_id": "authors",
+                "run_id": run_id,
                 "fraction_mode": fraction_mode,
                 "author_id": row.get("author_id"),
                 "author_display_name": row.get("author_display_name"),
@@ -345,6 +348,7 @@ def compute_author_profile_indices(
         )
     out_rows.sort(key=lambda row: str(row["author_id"]))
     write_csv_dicts(out_path, out_rows, AUTHOR_PROFILE_INDEX_FIELDS)
+    write_parquet_dicts(Path(out_path).with_suffix(".parquet"), out_rows, AUTHOR_PROFILE_INDEX_FIELDS)
     return out_rows
 
 
