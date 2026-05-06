@@ -1990,6 +1990,7 @@ function ReportsPage({
   const scientometricsTopOutliersUrl = `${API_BASE}/analytics/scientometrics/top-outliers.csv?${scientometricParams.toString()}`;
   const scientometricsFindingsUrl = `${API_BASE}/analytics/scientometrics/findings.csv?${scientometricParams.toString()}`;
   const scientometricsConclusionUrl = `${API_BASE}/analytics/scientometrics/conclusion.md?${scientometricParams.toString()}`;
+  const hasReportDataScope = Boolean(runId || dumpId);
   const localIndicesUrl = `${API_BASE}${localDataPreviewCsvUrl("indices", { runId, dumpId, limit: 100_000 })}`;
   const localWorksUrl = `${API_BASE}${localDataPreviewCsvUrl("works", { runId, dumpId, limit: 100_000 })}`;
   const localAuthorshipsUrl = `${API_BASE}${localDataPreviewCsvUrl("authorships", { runId, dumpId, limit: 100_000 })}`;
@@ -2014,13 +2015,23 @@ function ReportsPage({
           {cohortMetricsJsonUrl && <a href={cohortMetricsJsonUrl}>JSON метрик когорты</a>}
           {cohortStatsUrl && <a href={cohortStatsUrl}>JSON статистики когорты</a>}
           <a href={bundleUrl}>JSON-пакет отчета</a>
-          <a href={localIndicesUrl}>CSV локальных индексов авторов</a>
-          <a href={localWorksUrl}>CSV локальных работ</a>
-          <a href={localAuthorshipsUrl}>CSV локальных авторств</a>
-          <a href={localWorkTopicsUrl}>CSV тематических связей работ</a>
+          {hasReportDataScope && (
+            <>
+              <a href={localIndicesUrl}>CSV локальных индексов авторов</a>
+              <a href={localWorksUrl}>CSV локальных работ</a>
+              <a href={localAuthorshipsUrl}>CSV локальных авторств</a>
+              <a href={localWorkTopicsUrl}>CSV тематических связей работ</a>
+            </>
+          )}
           <a href={`${API_BASE}/workbench`}>JSON workbench</a>
           <a href={`${API_BASE}/catalog`}>Каталог конфигураций</a>
         </div>
+        {!hasReportDataScope && (
+          <div className="notice warn">
+            <b>Локальные CSV требуют явный scope</b>
+            <span>Выберите run_id или dump_id: ссылки на локальные витрины не показываются для неявного latest/local context.</span>
+          </div>
+        )}
         {cohortMetricsCsvUrl && (
           <div className="notice">
             <b>CSV когорты требует контекст</b>

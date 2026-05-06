@@ -163,6 +163,25 @@ def build_report_bundle(
             "cohort_filter_policy": cohort_filter_policy,
         }
     )
+    exports = {
+        "ranking_csv": f"/api/v1/analytics/ranking.csv?{export_query}",
+        "cohort_author_metrics_csv": f"/api/v1/cohorts/{cohort_id}/author-metrics.csv?{export_query}" if cohort_id else None,
+        "cohort_author_metrics_json": f"/api/v1/cohorts/{cohort_id}/author-metrics.json?{export_query}" if cohort_id else None,
+        "cohort_statistics_json": f"/api/v1/cohorts/{cohort_id}/statistics?{statistics_query}" if cohort_id else None,
+        "scientometrics_json": f"/api/v1/analytics/scientometrics.json?{scientometric_query}",
+        "scientometrics_descriptive_csv": f"/api/v1/analytics/scientometrics/descriptive.csv?{scientometric_query}",
+        "scientometrics_correlations_csv": f"/api/v1/analytics/scientometrics/correlations.csv?{scientometric_query}",
+        "scientometrics_rank_shifts_csv": f"/api/v1/analytics/scientometrics/rank-shifts.csv?{scientometric_query}",
+        "scientometrics_largest_rank_shifts_csv": f"/api/v1/analytics/scientometrics/largest-rank-shifts.csv?{scientometric_query}",
+        "scientometrics_outliers_csv": f"/api/v1/analytics/scientometrics/outliers.csv?{scientometric_query}",
+        "scientometrics_top_outliers_csv": f"/api/v1/analytics/scientometrics/top-outliers.csv?{scientometric_query}",
+        "scientometrics_findings_csv": f"/api/v1/analytics/scientometrics/findings.csv?{scientometric_query}",
+        "scientometrics_conclusion_md": f"/api/v1/analytics/scientometrics/conclusion.md?{scientometric_query}",
+        "report_bundle_json": f"/api/v1/reports/bundle.json?{bundle_query}" if bundle_query else "/api/v1/reports/bundle.json",
+        "sha256_manifest": checksums.get("sha256_manifest"),
+    }
+    exports.update(_local_data_csv_exports(run_id=run_id, dump_id=resolved_dump_id))
+
     report = {
         "bundle_version": REPORT_BUNDLE_VERSION,
         "status": "ok",
@@ -197,27 +216,7 @@ def build_report_bundle(
             "prefix_convergence": theory.get("prefix_convergence"),
         },
         "checksums": checksums,
-        "exports": {
-            "ranking_csv": f"/api/v1/analytics/ranking.csv?{export_query}",
-            "cohort_author_metrics_csv": f"/api/v1/cohorts/{cohort_id}/author-metrics.csv?{export_query}" if cohort_id else None,
-            "cohort_author_metrics_json": f"/api/v1/cohorts/{cohort_id}/author-metrics.json?{export_query}" if cohort_id else None,
-            "cohort_statistics_json": f"/api/v1/cohorts/{cohort_id}/statistics?{statistics_query}" if cohort_id else None,
-            "scientometrics_json": f"/api/v1/analytics/scientometrics.json?{scientometric_query}",
-            "scientometrics_descriptive_csv": f"/api/v1/analytics/scientometrics/descriptive.csv?{scientometric_query}",
-            "scientometrics_correlations_csv": f"/api/v1/analytics/scientometrics/correlations.csv?{scientometric_query}",
-            "scientometrics_rank_shifts_csv": f"/api/v1/analytics/scientometrics/rank-shifts.csv?{scientometric_query}",
-            "scientometrics_largest_rank_shifts_csv": f"/api/v1/analytics/scientometrics/largest-rank-shifts.csv?{scientometric_query}",
-            "scientometrics_outliers_csv": f"/api/v1/analytics/scientometrics/outliers.csv?{scientometric_query}",
-            "scientometrics_top_outliers_csv": f"/api/v1/analytics/scientometrics/top-outliers.csv?{scientometric_query}",
-            "scientometrics_findings_csv": f"/api/v1/analytics/scientometrics/findings.csv?{scientometric_query}",
-            "scientometrics_conclusion_md": f"/api/v1/analytics/scientometrics/conclusion.md?{scientometric_query}",
-            "local_indices_csv": _local_data_csv_export("indices", run_id=run_id, dump_id=resolved_dump_id),
-            "local_works_csv": _local_data_csv_export("works", run_id=run_id, dump_id=resolved_dump_id),
-            "local_authorships_csv": _local_data_csv_export("authorships", run_id=run_id, dump_id=resolved_dump_id),
-            "local_work_topics_csv": _local_data_csv_export("work_topics", run_id=run_id, dump_id=resolved_dump_id),
-            "report_bundle_json": f"/api/v1/reports/bundle.json?{bundle_query}" if bundle_query else "/api/v1/reports/bundle.json",
-            "sha256_manifest": checksums.get("sha256_manifest"),
-        },
+        "exports": exports,
         "export_notes": {
             "scientometrics_rank_shifts_csv": "Contains all rank deltas for every author present in both baseline and comparison metric ranks.",
             "scientometrics_largest_rank_shifts_csv": "Contains the compact largest-shifts table used by the UI panel.",
@@ -431,7 +430,7 @@ def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = ""
             return False
     if cohort_id and not ((cached.get("exports") or {}).get("cohort_statistics_json")):
         return False
-    for key in (
+    required_export_keys = (
         "scientometrics_json",
         "scientometrics_descriptive_csv",
         "scientometrics_correlations_csv",
@@ -441,11 +440,16 @@ def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = ""
         "scientometrics_top_outliers_csv",
         "scientometrics_findings_csv",
         "scientometrics_conclusion_md",
-        "local_indices_csv",
-        "local_works_csv",
-        "local_authorships_csv",
-        "local_work_topics_csv",
-    ):
+    )
+    if cached.get("run_id") or cached.get("dump_id"):
+        required_export_keys = (
+            *required_export_keys,
+            "local_indices_csv",
+            "local_works_csv",
+            "local_authorships_csv",
+            "local_work_topics_csv",
+        )
+    for key in required_export_keys:
         if not ((cached.get("exports") or {}).get(key)):
             return False
     return True
@@ -500,6 +504,17 @@ def _query_params(params: dict[str, Any]) -> str:
 def _local_data_csv_export(kind: str, *, run_id: str = "", dump_id: str = "") -> str:
     query = _query_params({"kind": kind, "run_id": run_id, "dump_id": dump_id})
     return f"/api/v1/local-data/preview.csv?{query}"
+
+
+def _local_data_csv_exports(*, run_id: str = "", dump_id: str = "") -> dict[str, str]:
+    if not (str(run_id or "").strip() or str(dump_id or "").strip()):
+        return {}
+    return {
+        "local_indices_csv": _local_data_csv_export("indices", run_id=run_id, dump_id=dump_id),
+        "local_works_csv": _local_data_csv_export("works", run_id=run_id, dump_id=dump_id),
+        "local_authorships_csv": _local_data_csv_export("authorships", run_id=run_id, dump_id=dump_id),
+        "local_work_topics_csv": _local_data_csv_export("work_topics", run_id=run_id, dump_id=dump_id),
+    }
 
 
 def _safe_id(value: str) -> str:

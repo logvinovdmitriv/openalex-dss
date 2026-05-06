@@ -807,6 +807,16 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(bundle["export_notes"]["scientometrics_findings_csv"], "Contains structured interpretation findings with evidence JSON for the selected scientometric analysis scope.")
         self.assertEqual(bundle["export_notes"]["scientometrics_conclusion_md"], "Contains the deterministic conclusion draft rendered as Markdown for the selected scientometric analysis scope.")
 
+    def test_local_data_report_exports_require_explicit_scope(self) -> None:
+        self.assertEqual(reports._local_data_csv_exports(), {})
+
+        run_exports = reports._local_data_csv_exports(run_id="run_a")
+        self.assertIn("run_id=run_a", run_exports["local_indices_csv"])
+        self.assertIn("kind=work_topics", run_exports["local_work_topics_csv"])
+
+        dump_exports = reports._local_data_csv_exports(dump_id="dump_a")
+        self.assertIn("dump_id=dump_a", dump_exports["local_works_csv"])
+
     def test_empty_cohort_report_has_empty_rank_table(self) -> None:
         cohort_ctx = {
             "cohort": {"cohort_id": "cohort_empty", "checksum": "empty-sha", "n_authors": 0, "source": "manual", "metric": "h", "fraction_mode": "integer"},
@@ -972,9 +982,11 @@ class PipelineIntegrityTests(unittest.TestCase):
         bundle = reports.build_report_bundle(metric="h", fraction_mode="integer", filters={"country_code": "RU"})
         self.assertEqual(bundle["status"], "preview_not_reproducible")
         self.assertEqual(bundle["bundle_version"], "report_bundle_v11")
+        self.assertNotIn("local_indices_csv", bundle.get("exports") or {})
         dump_only = reports.build_report_bundle(metric="h", fraction_mode="integer", dump_id="dump_a")
         self.assertEqual(dump_only["status"], "preview_not_reproducible")
         self.assertEqual(dump_only["bundle_version"], "report_bundle_v11")
+        self.assertNotIn("local_indices_csv", dump_only.get("exports") or {})
 
     def test_report_bundle_json_without_run_does_not_return_cached_latest_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
