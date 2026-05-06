@@ -21,25 +21,38 @@ def create_cohort(payload: dict[str, Any]) -> dict[str, Any]:
     source = str(payload.get("source") or "top_n")
     fraction_mode = str(payload.get("fraction_mode") or "strict_authors_count")
     metric = str(payload.get("metric") or "h")
+    run_id = str(payload.get("run_id") or "").strip()
+    dump_id = str(payload.get("dump_id") or "").strip()
     filters = _filters(payload)
 
     if source == "manual":
         author_ids = [str(item).strip() for item in payload.get("author_ids") or [] if str(item).strip()]
     else:
         top_n = max(1, min(int(payload.get("top_n") or 100), 1000))
-        ranking = warehouse.metric_ranking(fraction_mode, metric, filters, limit=top_n)
+        ranking = warehouse.metric_ranking(fraction_mode, metric, filters, limit=top_n, run_id=run_id, dump_id=dump_id)
         rows = ranking.get("rows") or []
         author_ids = [str(row.get("author_id")) for row in rows if row.get("author_id")]
+        dump_id = dump_id or str(ranking.get("dump_id") or "")
 
     min_publications = int(payload.get("min_publications") or 0)
     min_h = int(payload.get("min_h") or 0)
     if min_publications or min_h:
-        author_ids = _apply_metric_thresholds(author_ids, fraction_mode, filters, min_publications=min_publications, min_h=min_h)
+        author_ids = _apply_metric_thresholds(
+            author_ids,
+            fraction_mode,
+            filters,
+            min_publications=min_publications,
+            min_h=min_h,
+            run_id=run_id,
+            dump_id=dump_id,
+        )
 
     now = _now()
     cohort = {
         "cohort_id": _safe_id(f"cohort_{uuid.uuid4().hex[:10]}"),
         "slice_id": payload.get("slice_id") or "current",
+        "run_id": run_id,
+        "dump_id": dump_id,
         "name": str(payload.get("name") or "Авторская когорта"),
         "source": source,
         "metric": metric,
@@ -50,6 +63,7 @@ def create_cohort(payload: dict[str, Any]) -> dict[str, Any]:
         "min_h": min_h,
         "author_ids": author_ids,
         "n_authors": len(author_ids),
+        "table_scope": _table_scope(run_id, dump_id),
         "created_at_utc": now,
         "checksum": _checksum(author_ids),
     }
@@ -74,8 +88,15 @@ def get_cohort(cohort_id: str) -> dict[str, Any]:
 def cohort_statistics(cohort_id: str) -> dict[str, Any]:
     cohort = get_cohort(cohort_id)
     author_ids = set(cohort.get("author_ids") or [])
+    run_id = str(cohort.get("run_id") or "")
+    dump_id = str(cohort.get("dump_id") or "")
     rows = [
-        row for row in warehouse.filtered_author_indices(str(cohort.get("fraction_mode") or "strict_authors_count"), cohort.get("filters") or {})
+        row for row in warehouse.filtered_author_indices(
+            str(cohort.get("fraction_mode") or "strict_authors_count"),
+            cohort.get("filters") or {},
+            run_id=run_id,
+            dump_id=dump_id,
+        )
         if str(row.get("author_id") or "") in author_ids
     ]
     descriptive = {metric: _describe([_as_float(row.get(metric)) for row in rows]) for metric in COHORT_METRICS}
@@ -89,6 +110,8 @@ def cohort_statistics(cohort_id: str) -> dict[str, Any]:
     }
     return {
         "cohort": cohort,
+        "run_id": run_id,
+        "dump_id": dump_id,
         "n_rows": len(rows),
         "metrics": list(COHORT_METRICS),
         "descriptive": descriptive,
@@ -109,9 +132,11 @@ def _apply_metric_thresholds(
     *,
     min_publications: int,
     min_h: int,
+    run_id: str = "",
+    dump_id: str = "",
 ) -> list[str]:
     allowed = set(author_ids)
-    rows = warehouse.filtered_author_indices(fraction_mode, filters)
+    rows = warehouse.filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     out: list[str] = []
     for row in rows:
         author_id = str(row.get("author_id") or "")
@@ -127,11 +152,36 @@ def _apply_metric_thresholds(
 
 def _filters(payload: dict[str, Any]) -> dict[str, Any]:
     clean: dict[str, Any] = {}
-    for key in ("country_code", "institution_id", "subject_level", "subject_id", "filter_mode"):
+    for key in (
+        "country_code",
+        "institution_id",
+        "subject_level",
+        "subject_id",
+        "filter_mode",
+        "source_id",
+        "source_type",
+        "language",
+        "open_access_is_oa",
+        "has_abstract",
+        "min_cited_by_count",
+        "from_publication_date",
+        "to_publication_date",
+        "work_type",
+    ):
         value = str(payload.get(key) or "").strip()
         if value:
             clean[key] = value
     return clean
+
+
+def _table_scope(run_id: str, dump_id: str) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "indices_table": str(warehouse.resolve_scoped_table_path("indices", run_id=run_id) or ""),
+        "author_work_table": str(warehouse.resolve_scoped_table_path("author_work", run_id=run_id) or ""),
+        "works_table": str(warehouse.resolve_scoped_table_path("works", run_id=run_id, dump_id=dump_id) or ""),
+    }
 
 
 def _describe(values: list[float]) -> dict[str, float]:

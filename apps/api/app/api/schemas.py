@@ -139,6 +139,8 @@ class MaterializationRunRequest(BaseModel):
 
 class AuthorCohortCreateRequest(BaseModel):
     slice_id: str | None = None
+    run_id: str | None = None
+    dump_id: str | None = None
     name: str = "Авторская когорта"
     source: Literal["top_n", "manual", "metric_filter"] = "top_n"
     metric: str = "h"
@@ -151,4 +153,13 @@ class AuthorCohortCreateRequest(BaseModel):
     subject_level: str | None = None
     subject_id: str | None = None
     filter_mode: str | None = None
+    source_id: str | None = None
+    source_type: str | None = None
+    language: str | None = None
+    open_access_is_oa: str | None = None
+    has_abstract: str | None = None
+    min_cited_by_count: int | None = Field(default=None, ge=0)
+    from_publication_date: str | None = None
+    to_publication_date: str | None = None
+    work_type: str | None = None
     author_ids: list[str] = Field(default_factory=list)

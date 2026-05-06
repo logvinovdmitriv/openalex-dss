@@ -252,8 +252,8 @@ def _run_compute(
     run_results.mkdir(parents=True, exist_ok=True)
 
     author_work_csv = run_tables / "author_work.csv"
-    indices_csv = run_tables / "author_indices.csv"
-    ratings_csv = run_tables / "rating_positions.csv"
+    indices_csv = run_tables / "indices.csv"
+    ratings_csv = run_tables / "ratings.csv"
     stats_json = run_results / "stats_summary.json"
     theory_json = run_results / "theory_validation.json"
 
@@ -283,8 +283,8 @@ def _run_compute(
     )
     run_table_outputs = {
         "author_work": author_work_csv,
-        "author_indices": indices_csv,
-        "rating_positions": ratings_csv,
+        "indices": indices_csv,
+        "ratings": ratings_csv,
     }
     run_result_outputs = {
         "stats_summary": stats_json,
@@ -303,7 +303,7 @@ def _run_compute(
         analysis_eligibility=analysis_eligibility,
         input_tables=input_table_manifest,
     )
-    reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100)
+    reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
     return {
         "input_dump_id": dump_id,
         "input_tables": input_table_manifest,
@@ -323,8 +323,8 @@ def _publish_latest_view(input_tables: dict[str, Path], run_tables: dict[str, Pa
 
     table_pairs = {
         "author_work": "author_work",
-        "author_indices": "indices",
-        "rating_positions": "ratings",
+        "indices": "indices",
+        "ratings": "ratings",
     }
     for source_key, table_key in table_pairs.items():
         source_csv = run_tables[source_key]
@@ -430,7 +430,10 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "latest_view_note": "Global normalized/results paths are only the UI latest-view; reproducible artifacts are archived under this run_id and dump_id.",
     }
     write_json(run_dir / "metric_run.json", manifest)
-    write_json(dump_dir / "dump_manifest.json", payload.get("dump_manifest") or manifest)
+    if payload.get("dump_manifest"):
+        write_json(dump_dir / "dump_manifest.json", payload["dump_manifest"])
+    elif not (dump_dir / "dump_manifest.json").exists():
+        write_json(dump_dir / "dump_manifest_recovered.json", manifest)
 
     run_artifacts = {
         **{f"tables/{name}{Path(path).suffix}": path for name, path in TABLE_FILES.items()},

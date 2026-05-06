@@ -14,6 +14,8 @@ router = APIRouter(tags=["analytics"])
 
 @router.get("/analytics")
 def analytics(
+    run_id: str = "",
+    dump_id: str = "",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -51,17 +53,19 @@ def analytics(
         to_publication_date=to_publication_date,
         work_type=work_type,
     )
-    stats = warehouse.read_json_doc("stats") or {}
-    theory = warehouse.read_json_doc("theory") or {}
+    stats = warehouse.read_json_doc("stats", run_id=run_id) or {}
+    theory = warehouse.read_json_doc("theory", run_id=run_id) or {}
     try:
-        distribution = warehouse.metric_distribution(fraction_mode, metric, filters)
-        top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit)
-        metric_lines = warehouse.metric_line_series(fraction_mode, filters, rank_metric=metric, limit=40)
+        distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id)
+        top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id)
+        metric_lines = warehouse.metric_line_series(fraction_mode, filters, rank_metric=metric, limit=40, run_id=run_id, dump_id=dump_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "fraction_mode": fraction_mode,
         "metric": metric,
+        "run_id": run_id,
+        "dump_id": dump_id or top.get("dump_id") or distribution.get("dump_id"),
         "filters": filters,
         "distribution": distribution,
         "metric_summary": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("metrics", {}).get(metric),
@@ -76,6 +80,8 @@ def analytics(
 
 @router.get("/analytics/distribution")
 def distribution(
+    run_id: str = "",
+    dump_id: str = "",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -113,13 +119,15 @@ def distribution(
         work_type=work_type,
     )
     try:
-        return warehouse.metric_distribution(fraction_mode, metric, filters)
+        return warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/analytics/ranking.csv")
 def ranking_csv(
+    run_id: str = "",
+    dump_id: str = "",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -158,7 +166,7 @@ def ranking_csv(
         work_type=work_type,
     )
     try:
-        payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit)
+        payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     output = StringIO()

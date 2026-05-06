@@ -10,7 +10,7 @@ from typing import Any
 
 import duckdb
 
-from app.core.paths import JSON_FILES, PARQUET_TABLE_FILES, SRC, TABLE_FILES, WAREHOUSE
+from app.core.paths import DATA, JSON_FILES, PARQUET_TABLE_FILES, SRC, TABLE_FILES, WAREHOUSE
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -46,6 +46,26 @@ LINE_CHART_METRICS = LEGACY_LINE_CHART_METRICS
 
 FilterSet = dict[str, Any]
 
+DUMP_TABLES = {"works", "authorships", "work_topics"}
+RUN_TABLE_ALIASES = {
+    "author_indices": "indices",
+    "rating_positions": "ratings",
+    "authors_local_metrics": "indices",
+}
+RUN_RESULT_TABLES = {
+    "top1_sensitivity": "theory_top1_sensitivity",
+    "fraction_sensitivity": "theory_fraction_mode_sensitivity",
+}
+RUN_JSON_FILES = {
+    "stats": ("results", "stats_summary.json"),
+    "theory": ("results", "theory_validation.json"),
+    "report_bundle": ("results", "report_bundle.json"),
+    "fetch_meta": ("passports", "fetch_meta.json"),
+    "quality": ("passports", "quality_report.json"),
+    "checksums": ("passports", "checksums.json"),
+    "pipeline": ("passports", "pipeline_summary.json"),
+}
+
 
 def connect() -> duckdb.DuckDBPyConnection:
     WAREHOUSE.parent.mkdir(parents=True, exist_ok=True)
@@ -54,9 +74,16 @@ def connect() -> duckdb.DuckDBPyConnection:
     return conn
 
 
-def register_views(conn: duckdb.DuckDBPyConnection) -> None:
+def connect_scope(*, run_id: str = "", dump_id: str = "") -> duckdb.DuckDBPyConnection:
+    WAREHOUSE.parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(":memory:")
+    register_views(conn, run_id=run_id, dump_id=dump_id)
+    return conn
+
+
+def register_views(conn: duckdb.DuckDBPyConnection, *, run_id: str = "", dump_id: str = "") -> None:
     for name, path in TABLE_FILES.items():
-        table_path = _preferred_table_path(name, path)
+        table_path = resolve_scoped_table_path(name, run_id=run_id, dump_id=dump_id) or _preferred_table_path(name, path)
         if table_path.exists():
             _register_file_view(conn, name, table_path)
 
@@ -73,33 +100,68 @@ def _register_file_view(conn: duckdb.DuckDBPyConnection, name: str, table_path: 
     )
 
 
-def table_exists(name: str) -> bool:
+def resolve_scoped_table_path(
+    table: str,
+    *,
+    run_id: str | None = None,
+    dump_id: str | None = None,
+    latest: bool = False,
+) -> Path | None:
+    if table not in TABLE_FILES:
+        raise ValueError(f"Unknown table: {table}")
+    run_id = str(run_id or "").strip()
+    dump_id = str(dump_id or "").strip()
+
+    if run_id:
+        canonical = _canonical_table_name(table)
+        if canonical in DUMP_TABLES:
+            scoped_dump_id = dump_id or _dump_id_for_run(run_id)
+            if scoped_dump_id:
+                return _dump_table_path(scoped_dump_id, canonical)
+            return None
+        run_path = _run_table_path(run_id, canonical)
+        if run_path:
+            return run_path
+        return None if not latest else _preferred_table_path(table, TABLE_FILES[table])
+
+    if dump_id and _canonical_table_name(table) in DUMP_TABLES:
+        return _dump_table_path(dump_id, _canonical_table_name(table))
+
+    if latest or not (run_id or dump_id):
+        return _preferred_table_path(table, TABLE_FILES[table])
+    return None
+
+
+def table_exists(name: str, *, run_id: str = "", dump_id: str = "") -> bool:
     path = TABLE_FILES.get(name)
-    return bool(path and _preferred_table_path(name, path).exists())
+    if not path:
+        return False
+    table_path = resolve_scoped_table_path(name, run_id=run_id, dump_id=dump_id)
+    return bool(table_path and table_path.exists())
 
 
-def list_tables() -> dict[str, Any]:
+def list_tables(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
     return {
         name: {
-            "path": str(_preferred_table_path(name, path)),
+            "path": str(resolve_scoped_table_path(name, run_id=run_id, dump_id=dump_id) or _preferred_table_path(name, path)),
             "csv_path": str(path),
             "parquet_path": str(PARQUET_TABLE_FILES.get(name, "")),
-            "exists": _preferred_table_path(name, path).exists(),
-            "rows": count_rows(name),
+            "exists": table_exists(name, run_id=run_id, dump_id=dump_id),
+            "rows": count_rows(name, run_id=run_id, dump_id=dump_id),
         }
         for name, path in TABLE_FILES.items()
     }
 
 
-def count_rows(table: str) -> int:
+def count_rows(table: str, *, run_id: str = "", dump_id: str = "") -> int:
     if table not in TABLE_FILES:
         return 0
-    path = _preferred_table_path(table, TABLE_FILES[table])
-    if not path.exists():
+    path = resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id)
+    if not path or not path.exists():
         return 0
     if path.suffix.lower() == ".csv":
         return _count_csv_rows(path)
-    with connect() as conn:
+    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
         return int(conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
 
 
@@ -110,16 +172,18 @@ def _count_csv_rows(path: Path) -> int:
         return max(0, sum(1 for _ in handle) - 1)
 
 
-def table_schema(table: str) -> list[str]:
-    if not table_exists(table):
+def table_schema(table: str, *, run_id: str = "", dump_id: str = "") -> list[str]:
+    if not table_exists(table, run_id=run_id, dump_id=dump_id):
         return []
-    with connect() as conn:
+    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
         return [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
 
 
 def query_table(
     table: str,
     *,
+    run_id: str = "",
+    dump_id: str = "",
     q: str = "",
     fraction_mode: str = "",
     metric: str = "",
@@ -132,11 +196,11 @@ def query_table(
 ) -> dict[str, Any]:
     if table not in TABLE_FILES:
         raise ValueError(f"Unknown table: {table}")
-    fields = table_schema(table)
+    fields = table_schema(table, run_id=run_id, dump_id=dump_id)
     if not fields:
-        return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset}
-    with connect() as conn:
-        return _query_registered_table(
+        return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
+    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
+        payload = _query_registered_table(
             conn,
             table,
             fields,
@@ -150,6 +214,12 @@ def query_table(
             limit=limit,
             offset=offset,
         )
+        payload["run_id"] = run_id
+        payload["dump_id"] = dump_id
+        source_path = resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id)
+        if source_path:
+            payload["source_path"] = str(source_path)
+        return payload
 
 
 def query_table_file(
@@ -246,6 +316,8 @@ def _query_registered_table(
 def export_table(
     table: str,
     *,
+    run_id: str = "",
+    dump_id: str = "",
     q: str = "",
     fraction_mode: str = "",
     metric: str = "",
@@ -258,7 +330,7 @@ def export_table(
 ) -> dict[str, Any]:
     if table not in TABLE_FILES:
         raise ValueError(f"Unknown table: {table}")
-    fields = table_schema(table)
+    fields = table_schema(table, run_id=run_id, dump_id=dump_id)
     if not fields:
         return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset}
 
@@ -288,7 +360,7 @@ def export_table(
     limit = max(1, min(500_000, int(limit)))
     offset = max(0, int(offset))
 
-    with connect() as conn:
+    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
         total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
         rows = _records(
             conn.execute(
@@ -296,7 +368,7 @@ def export_table(
                 [*args, limit, offset],
             )
         )
-    return {"table": table, "fields": fields, "rows": rows, "total": total, "limit": limit, "offset": offset}
+    return {"table": table, "fields": fields, "rows": rows, "total": total, "limit": limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
 
 
 def export_table_csv(table: str, **kwargs: Any) -> str:
@@ -308,16 +380,32 @@ def export_table_csv(table: str, **kwargs: Any) -> str:
     return output.getvalue()
 
 
-def filtered_author_indices(fraction_mode: str, filters: FilterSet | None = None) -> list[dict[str, Any]]:
-    return _filtered_work_author_indices(fraction_mode, filters)
+def filtered_author_indices(
+    fraction_mode: str,
+    filters: FilterSet | None = None,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+) -> list[dict[str, Any]]:
+    return _filtered_work_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
 
 
-def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None = None) -> list[dict[str, Any]]:
-    if not table_exists("author_work") or not table_exists("works") or not table_exists("authorships"):
+def _filtered_work_author_indices(
+    fraction_mode: str,
+    filters: FilterSet | None = None,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+) -> list[dict[str, Any]]:
+    if not (
+        table_exists("author_work", run_id=run_id, dump_id=dump_id)
+        and table_exists("works", run_id=run_id, dump_id=dump_id)
+        and table_exists("authorships", run_id=run_id, dump_id=dump_id)
+    ):
         return []
 
     filters = _clean_filters(filters or {})
-    work_fields = set(table_schema("works"))
+    work_fields = set(table_schema("works", run_id=run_id, dump_id=dump_id))
     where = ["aw.fraction_mode = ?"]
     args: list[Any] = [fraction_mode]
 
@@ -344,7 +432,7 @@ def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None 
     subject_level = filters.get("subject_level")
     if subject_id:
         filter_mode = filters.get("filter_mode")
-        use_topics_any = filter_mode == "topics_any" and table_exists("work_topics")
+        use_topics_any = filter_mode == "topics_any" and table_exists("work_topics", run_id=run_id, dump_id=dump_id)
         if use_topics_any and subject_level == "field":
             where.append("EXISTS (SELECT 1 FROM work_topics wt WHERE wt.work_id = w.work_id AND wt.field_id ILIKE ?)")
             args.append(f"%/{subject_id}")
@@ -428,7 +516,7 @@ def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None 
         )
         args.extend([f"%{q}%"] * 4)
 
-    with connect() as conn:
+    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
         rows = _records(
             conn.execute(
                 f"""
@@ -485,6 +573,8 @@ def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None 
         out.append(
             {
                 "run_id": "filtered",
+                "source_run_id": run_id,
+                "source_dump_id": dump_id or _dump_id_for_run(run_id),
                 "fraction_mode": fraction_mode,
                 "author_id": author_id,
                 "author_display_name": _first_nonempty(row.get("author_display_name") for row in group),
@@ -515,10 +605,18 @@ def _filtered_work_author_indices(fraction_mode: str, filters: FilterSet | None 
     return out
 
 
-def metric_ranking(fraction_mode: str, metric: str, filters: FilterSet | None = None, *, limit: int = 20) -> dict[str, Any]:
+def metric_ranking(
+    fraction_mode: str,
+    metric: str,
+    filters: FilterSet | None = None,
+    *,
+    limit: int = 20,
+    run_id: str = "",
+    dump_id: str = "",
+) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
-    rows = filtered_author_indices(fraction_mode, filters)
+    rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     ranked = []
     visible_metrics = _visible_metrics(rows)
     for row in sort_metric_rows(rows, metric):
@@ -538,6 +636,8 @@ def metric_ranking(fraction_mode: str, metric: str, filters: FilterSet | None = 
         "rank_metric": metric,
         "fraction_mode": fraction_mode,
         "filters": filters or {},
+        "run_id": run_id,
+        "dump_id": dump_id or _dump_id_for_run(run_id),
         "fields": fields,
         "rows": ranked[:limit],
         "total": len(ranked),
@@ -546,12 +646,21 @@ def metric_ranking(fraction_mode: str, metric: str, filters: FilterSet | None = 
     }
 
 
-def metric_distribution(fraction_mode: str, metric: str, filters: FilterSet | None = None) -> dict[str, Any]:
+def metric_distribution(
+    fraction_mode: str,
+    metric: str,
+    filters: FilterSet | None = None,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
-    values = sorted(_as_float(row.get(metric)) for row in filtered_author_indices(fraction_mode, filters))
+    values = sorted(_as_float(row.get(metric)) for row in filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id))
     summary = _describe(values)
     summary["histogram"] = _histogram(values, bins=8)
+    summary["run_id"] = run_id
+    summary["dump_id"] = dump_id or _dump_id_for_run(run_id)
     return summary
 
 
@@ -562,10 +671,12 @@ def metric_line_series(
     metrics: tuple[str, ...] | None = None,
     rank_metric: str = "islv",
     limit: int = 30,
+    run_id: str = "",
+    dump_id: str = "",
 ) -> dict[str, Any]:
     if rank_metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported rank metric: {rank_metric}")
-    rows = filtered_author_indices(fraction_mode, filters)
+    rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     selected_metrics = tuple(metric for metric in (metrics or _visible_metrics(rows)) if metric in INDEX_NUMERIC_FIELDS)
     rows = sort_metric_rows(rows, rank_metric)
 
@@ -593,6 +704,8 @@ def metric_line_series(
     return {
         "rank_metric": rank_metric,
         "fraction_mode": fraction_mode,
+        "run_id": run_id,
+        "dump_id": dump_id or _dump_id_for_run(run_id),
         "normalization": "min_max_0_100_by_current_filtered_slice",
         "metrics": list(selected_metrics),
         "rows": out,
@@ -601,7 +714,12 @@ def metric_line_series(
     }
 
 
-def read_json_doc(name: str) -> dict[str, Any] | None:
+def read_json_doc(name: str, *, run_id: str = "") -> dict[str, Any] | None:
+    if run_id:
+        path = _run_json_path(run_id, name)
+        if path and path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+        return None
     path = JSON_FILES.get(name)
     if not path or not path.exists():
         return None
@@ -802,3 +920,66 @@ def _preferred_table_path(name: str, csv_path: Path) -> Path:
     if parquet_path and parquet_path.exists():
         return parquet_path
     return csv_path
+
+
+def _canonical_table_name(table: str) -> str:
+    return RUN_TABLE_ALIASES.get(table, table)
+
+
+def _safe_id(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "_.-" else "_" for ch in str(value).strip())[:140] or "artifact"
+
+
+def _run_dir(run_id: str) -> Path:
+    return DATA / "runs" / _safe_id(run_id)
+
+
+def _dump_table_path(dump_id: str, table: str) -> Path:
+    return DATA / "tables" / _safe_id(dump_id) / f"{table}.parquet"
+
+
+def _run_table_path(run_id: str, table: str) -> Path | None:
+    run_dir = _run_dir(run_id)
+    canonical = _canonical_table_name(table)
+    candidates: list[Path] = []
+    for suffix in (".parquet", ".csv"):
+        candidates.append(run_dir / "tables" / f"{canonical}{suffix}")
+    if canonical == "indices":
+        for suffix in (".parquet", ".csv"):
+            candidates.append(run_dir / "tables" / f"author_indices{suffix}")
+    if canonical == "ratings":
+        for suffix in (".parquet", ".csv"):
+            candidates.append(run_dir / "tables" / f"rating_positions{suffix}")
+    if canonical in RUN_RESULT_TABLES:
+        stem = RUN_RESULT_TABLES[canonical]
+        for suffix in (".parquet", ".csv"):
+            candidates.append(run_dir / "tables" / f"{canonical}{suffix}")
+            candidates.append(run_dir / "results" / f"{stem}{suffix}")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _run_json_path(run_id: str, name: str) -> Path | None:
+    run_dir = _run_dir(run_id)
+    mapped = RUN_JSON_FILES.get(name)
+    if mapped:
+        path = run_dir / mapped[0] / mapped[1]
+        if path.exists():
+            return path
+    fallback = run_dir / "passports" / f"{name}.json"
+    if fallback.exists():
+        return fallback
+    return None
+
+
+def _dump_id_for_run(run_id: str) -> str:
+    path = _run_dir(run_id) / "metric_run.json"
+    if not path.is_file():
+        return ""
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return str(doc.get("input_dump_id") or doc.get("dump_id") or "")

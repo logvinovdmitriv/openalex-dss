@@ -8,22 +8,38 @@ from app.core.paths import DATA, JSON_FILES
 from app.services import warehouse
 
 
-def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_authors_count", limit: int = 50) -> dict[str, Any]:
+def build_report_bundle(
+    metric: str = "islv",
+    fraction_mode: str = "strict_authors_count",
+    limit: int = 50,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+) -> dict[str, Any]:
     filters: dict[str, str] = {}
-    state = warehouse.read_json_doc("pipeline") or {}
+    state = warehouse.read_json_doc("pipeline", run_id=run_id) or warehouse.read_json_doc("pipeline") or {}
     current_slice = state.get("slice") or state.get("current_slice") or {}
     request = state.get("request") or {}
-    quality = warehouse.read_json_doc("quality") or {}
-    stats = warehouse.read_json_doc("stats") or {}
-    theory = warehouse.read_json_doc("theory") or {}
-    checksums = warehouse.read_json_doc("checksums") or {}
-    slice_passport = _read_json(DATA / "passports/slice_passport.json")
-    calculation_passport = _read_json(DATA / "passports/calculation_passport.json")
+    quality = warehouse.read_json_doc("quality", run_id=run_id) or warehouse.read_json_doc("quality") or {}
+    stats = warehouse.read_json_doc("stats", run_id=run_id) or warehouse.read_json_doc("stats") or {}
+    theory = warehouse.read_json_doc("theory", run_id=run_id) or warehouse.read_json_doc("theory") or {}
+    checksums = warehouse.read_json_doc("checksums", run_id=run_id) or warehouse.read_json_doc("checksums") or {}
+    slice_passport = _read_run_or_latest_json(run_id, "slice_passport.json")
+    calculation_passport = _read_run_or_latest_json(run_id, "calculation_passport.json")
     analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
 
-    top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit)
+    top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id)
+    resolved_dump_id = dump_id or str(top.get("dump_id") or calculation_passport.get("dump_id") or "")
+    scope_params = "".join(
+        [
+            f"&run_id={run_id}" if run_id else "",
+            f"&dump_id={resolved_dump_id}" if resolved_dump_id and not run_id else "",
+        ]
+    )
     report = {
         "bundle_version": "report_bundle_v1",
+        "run_id": run_id,
+        "dump_id": resolved_dump_id,
         "interpretation_policy": {
             "strict_mode": "Математические выводы строятся только по локально пересчитанным works-based индексам.",
             "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения; корпус Works скачивается через OpenAlex CLI.",
@@ -35,7 +51,7 @@ def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_autho
         "current_slice": current_slice,
         "openalex_request": request,
         "quality_report": quality,
-        "funnel": _quality_funnel(quality),
+        "funnel": _quality_funnel(quality, run_id=run_id),
         "rank_table": top,
         "statistics": stats,
         "stability_report": {
@@ -45,11 +61,11 @@ def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_autho
         },
         "checksums": checksums,
         "exports": {
-            "ranking_csv": f"/api/v1/analytics/ranking.csv?fraction_mode={fraction_mode}&metric={metric}",
-            "authors_local_metrics_csv": "/api/v1/exports/authors_local_metrics.csv",
-            "works_csv": "/api/v1/exports/works.csv",
-            "authorships_csv": "/api/v1/exports/authorships.csv",
-            "report_bundle_json": "/api/v1/reports/bundle.json",
+            "ranking_csv": f"/api/v1/analytics/ranking.csv?fraction_mode={fraction_mode}&metric={metric}{scope_params}",
+            "authors_local_metrics_csv": f"/api/v1/exports/authors_local_metrics.csv?run_id={run_id}" if run_id else "/api/v1/exports/authors_local_metrics.csv",
+            "works_csv": f"/api/v1/exports/works.csv?run_id={run_id}" if run_id else "/api/v1/exports/works.csv",
+            "authorships_csv": f"/api/v1/exports/authorships.csv?run_id={run_id}" if run_id else "/api/v1/exports/authorships.csv",
+            "report_bundle_json": f"/api/v1/reports/bundle.json?run_id={run_id}" if run_id else "/api/v1/reports/bundle.json",
             "sha256_manifest": checksums.get("sha256_manifest"),
         },
         "mvp_protocol": {
@@ -61,18 +77,18 @@ def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_autho
             "polyanin_status": "f5/fm5 are operational threshold metrics until a primary source definition is confirmed.",
         },
     }
-    _write_json(JSON_FILES["report_bundle"], report)
+    _write_json(_report_bundle_path(run_id), report)
     return report
 
 
-def report_bundle_json() -> dict[str, Any]:
-    path = JSON_FILES["report_bundle"]
+def report_bundle_json(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    path = _report_bundle_path(run_id)
     if path.exists():
         return _read_json(path)
-    return build_report_bundle()
+    return build_report_bundle(run_id=run_id, dump_id=dump_id)
 
 
-def _quality_funnel(quality: dict[str, Any]) -> list[dict[str, Any]]:
+def _quality_funnel(quality: dict[str, Any], *, run_id: str = "") -> list[dict[str, Any]]:
     counts = quality.get("quality_counts") or {}
     raw_works = int(quality.get("raw_works") or 0)
     works_rows = int(quality.get("works_rows") or 0)
@@ -84,8 +100,26 @@ def _quality_funnel(quality: dict[str, Any]) -> list[dict[str, Any]]:
         {"stage": "Работы после dedupe", "count": works_rows},
         {"stage": "Authorships", "count": authorships},
         {"stage": "Authorships без NULL/deleted", "count": max(0, authorships - null_authors - deleted_authors)},
-        {"stage": "Авторы с локальными индексами", "count": warehouse.count_rows("indices")},
+        {"stage": "Авторы с локальными индексами", "count": warehouse.count_rows("indices", run_id=run_id)},
     ]
+
+
+def _report_bundle_path(run_id: str = "") -> Path:
+    if run_id:
+        return DATA / "runs" / _safe_id(run_id) / "results" / "report_bundle.json"
+    return JSON_FILES["report_bundle"]
+
+
+def _read_run_or_latest_json(run_id: str, filename: str) -> dict[str, Any]:
+    if run_id:
+        path = DATA / "runs" / _safe_id(run_id) / "passports" / filename
+        if path.exists():
+            return _read_json(path)
+    return _read_json(DATA / "passports" / filename)
+
+
+def _safe_id(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "_.-" else "_" for ch in str(value).strip())[:140] or "artifact"
 
 
 def _read_json(path: Path) -> dict[str, Any]:

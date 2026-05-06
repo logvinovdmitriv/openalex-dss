@@ -4,6 +4,7 @@ import sys
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -314,6 +315,60 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(Path(captured["authorships_path"]), dump_a / "authorships.parquet")
         self.assertIn("works", captured["passport_input_tables"])
         self.assertEqual(captured["passport_input_tables"]["works"]["path"], str(dump_a / "works.parquet"))
+
+    def test_jobs_dispatch_passes_current_run_id_to_direct_actions(self) -> None:
+        captured: dict[str, dict[str, object]] = {}
+
+        def fake_recalculate(payload: dict[str, object]) -> dict[str, object]:
+            captured["recalculate"] = payload
+            return {"status": "ok"}
+
+        def fake_import(payload: dict[str, object]) -> dict[str, object]:
+            captured["import_file"] = payload
+            return {"status": "ok"}
+
+        with (
+            patch.object(pipeline, "recalculate", side_effect=fake_recalculate),
+            patch.object(pipeline, "import_local_file", side_effect=fake_import),
+        ):
+            jobs._dispatch("run_scope", "recalculate", {"dump_id": "dump_scope"})
+            jobs._dispatch("run_scope_import", "import_file", {"source_path": "/tmp/works.jsonl.gz"})
+
+        self.assertEqual(captured["recalculate"]["run_id"], "run_scope")
+        self.assertEqual(captured["import_file"]["run_id"], "run_scope_import")
+
+    def test_archive_does_not_overwrite_existing_dump_manifest_on_recalculate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump_dir = root / "dumps" / "dump_keep"
+            dump_dir.mkdir(parents=True)
+            original = {"dump_id": "dump_keep", "source_mode": "openalex_cli", "raw_jsonl_sha256": "original-sha"}
+            (dump_dir / "dump_manifest.json").write_text(json.dumps(original), encoding="utf-8")
+            cfg = SimpleNamespace(slice_name="slice_keep")
+
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "TABLE_FILES", {}),
+                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
+                patch.object(pipeline, "JSON_FILES", {}),
+            ):
+                archive = pipeline._archive_run_artifacts(
+                    cfg,
+                    {
+                        "run_id": "run_recalc",
+                        "dump_id": "dump_keep",
+                        "analysis_eligibility": {"status": "final", "allowed_for_final_analysis": True},
+                        "input_tables": {},
+                        "input_table_checksums": {},
+                    },
+                )
+
+            kept = json.loads((dump_dir / "dump_manifest.json").read_text(encoding="utf-8"))
+            recovered_path = dump_dir / "dump_manifest_recovered.json"
+
+        self.assertEqual(kept, original)
+        self.assertFalse(recovered_path.exists())
+        self.assertEqual(archive["dump_id"], "dump_keep")
 
     def test_pipeline_summary_includes_analysis_eligibility(self) -> None:
         captured: dict[str, object] = {}

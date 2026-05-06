@@ -108,19 +108,9 @@ def table_for_run(
     offset: int = 0,
 ) -> dict[str, Any]:
     get_run(run_id)
-    archived = _run_table_path(run_id, table_name)
-    if archived:
-        return warehouse.query_table_file(
-            table_name,
-            archived,
-            q=q,
-            fraction_mode=fraction_mode,
-            metric=metric,
-            limit=limit,
-            offset=offset,
-        )
     return warehouse.query_table(
         table_name,
+        run_id=run_id,
         q=q,
         fraction_mode=fraction_mode,
         metric=metric,
@@ -191,9 +181,9 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
         })
         return {"fetch": fetched, "build": built, "no_data": False, "analysis_eligibility": analysis_eligibility}
     if action == "import_file":
-        return pipeline.import_local_file(payload)
+        return pipeline.import_local_file({**payload, "run_id": run_id})
     if action == "recalculate":
-        return pipeline.recalculate(payload)
+        return pipeline.recalculate({**payload, "run_id": run_id})
     raise ValueError(f"Unsupported run action: {action}")
 
 

@@ -225,8 +225,8 @@ export function progressForRun(run?: WorkbenchRun | null) {
   return { percent: 0, label: run.status || "Ожидание" };
 }
 
-export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string) {
-  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60 }).toString()}`;
+export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "") {
+  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId }).toString()}`;
 }
 
 function openAlexEntityUrl(level: string, id: string) {

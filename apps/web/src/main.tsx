@@ -155,12 +155,12 @@ function Workbench() {
     enabled: Boolean(selectedCohortId),
   });
   const table = useQuery({
-    queryKey: ["table", tableName, tableQ, metric, fractionMode, topN],
-    queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&limit=${Math.max(1, topN || 1)}`),
+    queryKey: ["table", tableName, tableQ, metric, fractionMode, topN, runId],
+    queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&run_id=${encodeURIComponent(runId)}&limit=${Math.max(1, topN || 1)}`),
   });
   const analytics = useQuery({
-    queryKey: ["analytics", metric, fractionMode],
-    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric)),
+    queryKey: ["analytics", metric, fractionMode, runId],
+    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, runId)),
     enabled: Boolean(filters.subject_id || filters.keyword_id || filters.text_search_query),
   });
   const run = useQuery({
@@ -177,6 +177,7 @@ function Workbench() {
     queryFn: () => getJson<any>(selected?.kind === "author" ? `/authors/${encodeURIComponent(selected.id)}` : `/works/${encodeURIComponent(selected?.id ?? "")}`),
     enabled: Boolean(selected),
   });
+  const activeDumpId = extractDumpId(run.data);
 
   const domainPresets = (registry.data?.domain_presets ?? []) as ResearchAreaPreset[];
   const organizationPresets = (registry.data?.organization_presets ?? []) as OrganizationPreset[];
@@ -280,19 +281,21 @@ function Workbench() {
     },
   });
   const recalculate = useMutation({
-    mutationFn: () => postJson<any>("/runs", { action: "recalculate", payload }),
+    mutationFn: () => postJson<any>("/runs", { action: "recalculate", payload: { ...payload, dump_id: activeDumpId || undefined } }),
     onSuccess: (result) => {
       setRunId(result.run_id);
       navigate("rankings");
     },
   });
   const buildReport = useMutation({
-    mutationFn: () => postJson<any>(`/reports/build?metric=${encodeURIComponent(metric)}&fraction_mode=${encodeURIComponent(fractionMode)}&limit=${Math.max(1, activeTopN || 1)}`, {}),
+    mutationFn: () => postJson<any>(`/reports/build?metric=${encodeURIComponent(metric)}&fraction_mode=${encodeURIComponent(fractionMode)}&run_id=${encodeURIComponent(runId)}&limit=${Math.max(1, activeTopN || 1)}`, {}),
     onSuccess: () => qc.invalidateQueries(),
   });
   const createCohort = useMutation({
     mutationFn: () => postJson<any>("/cohorts", {
       slice_id: sliceDoc?.slice_id ?? "current",
+      run_id: runId || undefined,
+      dump_id: activeDumpId || undefined,
       name: cohortName,
       source: "top_n",
       metric,
@@ -504,7 +507,7 @@ function Workbench() {
         )}
 
         {view === "reports" && (
-          <ReportsPage metric={metric} fractionMode={fractionMode} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
+          <ReportsPage metric={metric} fractionMode={fractionMode} runId={runId} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
         )}
 
         {view === "passports" && (
@@ -1213,8 +1216,10 @@ function StatisticsPage({
   );
 }
 
-function ReportsPage({ metric, fractionMode, topN, onBuild, building }: { metric: string; fractionMode: string; topN: number; onBuild: () => void; building: boolean }) {
-  const rankingUrl = `${API_BASE}/analytics/ranking.csv?fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&limit=${topN}`;
+function ReportsPage({ metric, fractionMode, runId, topN, onBuild, building }: { metric: string; fractionMode: string; runId: string; topN: number; onBuild: () => void; building: boolean }) {
+  const scope = runId ? `&run_id=${encodeURIComponent(runId)}` : "";
+  const rankingUrl = `${API_BASE}/analytics/ranking.csv?fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&limit=${topN}${scope}`;
+  const bundleUrl = `${API_BASE}/reports/bundle.json${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`;
   return (
     <div className="stack">
       <section className="panel">
@@ -1228,7 +1233,7 @@ function ReportsPage({ metric, fractionMode, topN, onBuild, building }: { metric
         </div>
         <div className="download-grid">
           <a href={rankingUrl}>CSV рейтинга</a>
-          <a href={`${API_BASE}/reports/bundle.json`}>JSON-пакет отчета</a>
+          <a href={bundleUrl}>JSON-пакет отчета</a>
           <a href={`${API_BASE}/state`}>JSON состояния</a>
           <a href={`${API_BASE}/catalog`}>Каталог конфигураций</a>
         </div>
@@ -2022,6 +2027,16 @@ function ensureWorkTypeOptions(options: SelectOption[], selected: string[]) {
 
 function splitValues(value: string) {
   return value.split("|").map((item) => item.trim()).filter(Boolean);
+}
+
+function extractDumpId(run: any) {
+  return String(
+    run?.result?.analysis_eligibility?.dump_id
+    ?? run?.result?.build?.archive?.dump_id
+    ?? run?.result?.fetch?.dump?.dump_id
+    ?? run?.result?.archive?.dump_id
+    ?? "",
+  ).trim();
 }
 
 function MetricCard({ label, value }: { label: string; value: string | number }) {
