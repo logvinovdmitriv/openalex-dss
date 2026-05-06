@@ -164,7 +164,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
 
 def run_materialization(materialization_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     plan = get_materialization_plan(materialization_id)
-    run_payload = {**plan["technical_payload"], **(payload or {})}
+    run_payload = {**plan["technical_payload"], "materialization_id": plan["materialization_id"], **(payload or {})}
     run = jobs.create_run("build_from_openalex", run_payload)
     plan["state"] = "materializing"
     plan["run_id"] = run["run_id"]
@@ -201,18 +201,20 @@ def list_dumps(limit: int = 50) -> dict[str, Any]:
     return {"dumps": dumps, "total": len(dumps)}
 
 
-def mark_materialization_run_completed(run_id: str, result: dict[str, Any]) -> None:
+def mark_materialization_run_completed(run_id: str, result: dict[str, Any], *, materialization_id: str = "") -> None:
     _ensure_dirs()
-    no_data = bool(result.get("no_data"))
     fetch = result.get("fetch") if isinstance(result.get("fetch"), dict) else {}
     dump = fetch.get("dump") if isinstance(fetch.get("dump"), dict) else {}
+    if not dump and isinstance(result.get("dump"), dict):
+        dump = result["dump"]
+    no_data = bool(result.get("no_data") or dump.get("no_data"))
     build = result.get("build") if isinstance(result.get("build"), dict) else {}
     target_slice_state = "empty" if no_data else ("analyzed" if build else "ready")
     target_materialization_state = "empty" if no_data else "ready"
 
     for path in MATERIALIZATIONS_DIR.glob("*.json"):
         plan = _read_json(path)
-        if str(plan.get("run_id") or "") != run_id:
+        if not _matches_materialization_run(plan, run_id, materialization_id):
             continue
         plan["state"] = target_materialization_state
         plan["updated_at_utc"] = _now()
@@ -234,11 +236,11 @@ def mark_materialization_run_completed(run_id: str, result: dict[str, Any]) -> N
         return
 
 
-def mark_materialization_run_failed(run_id: str, error: str) -> None:
+def mark_materialization_run_failed(run_id: str, error: str, *, materialization_id: str = "") -> None:
     _ensure_dirs()
     for path in MATERIALIZATIONS_DIR.glob("*.json"):
         plan = _read_json(path)
-        if str(plan.get("run_id") or "") != run_id:
+        if not _matches_materialization_run(plan, run_id, materialization_id):
             continue
         plan["state"] = "failed"
         plan["updated_at_utc"] = _now()
@@ -341,10 +343,18 @@ def _lifecycle(active: str) -> list[dict[str, Any]]:
 
 
 def _advance_state(current: str, target: str) -> str:
+    if current in {"failed", "empty"} and target in {"estimated", "planned", "materializing", "ready", "analyzed", "reported"}:
+        return target
     order = [state["id"] for state in SLICE_STATES]
     if current not in order or target not in order:
         return target
     return target if order.index(target) >= order.index(current) else current
+
+
+def _matches_materialization_run(plan: dict[str, Any], run_id: str, materialization_id: str = "") -> bool:
+    if str(plan.get("run_id") or "") == run_id:
+        return True
+    return bool(materialization_id and str(plan.get("materialization_id") or "") == materialization_id)
 
 
 def _safe_id(value: str) -> str:

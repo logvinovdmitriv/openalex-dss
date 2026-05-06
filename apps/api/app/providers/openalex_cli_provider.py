@@ -84,7 +84,11 @@ def download_works_metadata(
     download_signature_verified = bool(accepted_download_signature and accepted_download_signature == current_download_signature)
 
     if progress_callback:
-        progress_callback({"percent": 30, "stage": "running OpenAlex CLI", "fetched": 0})
+        progress_callback({
+            "percent": 30,
+            "stage": "OpenAlex CLI is downloading files; exact progress is unavailable until packing starts",
+            "fetched": 0,
+        })
 
     completed = subprocess.run(command, cwd=str(base_dir), text=True, capture_output=True, check=False)
     stdout_path.write_text(completed.stdout or "", encoding="utf-8", newline="\n")

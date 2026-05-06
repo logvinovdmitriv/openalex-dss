@@ -115,20 +115,34 @@ def list_entities(entity_type: str, *, limit: int = 8) -> list[dict[str, Any]]:
 
 def record_slice_dump(passport: dict[str, Any]) -> None:
     _ensure_schema()
+    signatures = passport.get("signatures") if isinstance(passport.get("signatures"), dict) else {}
+    request = passport.get("openalex_request") if isinstance(passport.get("openalex_request"), dict) else {}
     with _connect() as conn:
         conn.execute(
             """
             INSERT INTO slice_dumps (
               slice_id, raw_jsonl, records_downloaded, bytes_written, sha256,
-              stop_reason, created_at_utc, payload_json
+              stop_reason, created_at_utc, payload_json, dump_id, source_mode,
+              scientific_completeness, allowed_for_final_analysis, openalex_filter,
+              estimate_signature, download_signature, records_expected,
+              actual_vs_estimate_ratio
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(slice_id, raw_jsonl) DO UPDATE SET
               records_downloaded=excluded.records_downloaded,
               bytes_written=excluded.bytes_written,
               sha256=excluded.sha256,
               stop_reason=excluded.stop_reason,
               created_at_utc=excluded.created_at_utc,
+              dump_id=excluded.dump_id,
+              source_mode=excluded.source_mode,
+              scientific_completeness=excluded.scientific_completeness,
+              allowed_for_final_analysis=excluded.allowed_for_final_analysis,
+              openalex_filter=excluded.openalex_filter,
+              estimate_signature=excluded.estimate_signature,
+              download_signature=excluded.download_signature,
+              records_expected=excluded.records_expected,
+              actual_vs_estimate_ratio=excluded.actual_vs_estimate_ratio,
               payload_json=excluded.payload_json
             """,
             [
@@ -140,6 +154,15 @@ def record_slice_dump(passport: dict[str, Any]) -> None:
                 str(passport.get("stop_reason") or ""),
                 str(passport.get("created_at_utc") or _now()),
                 json.dumps(passport, ensure_ascii=False, sort_keys=True),
+                str(passport.get("dump_id") or ""),
+                str(passport.get("source_mode") or ""),
+                str(passport.get("scientific_completeness") or ""),
+                1 if bool(passport.get("allowed_for_final_analysis")) else 0,
+                str(request.get("filter") or ""),
+                str(signatures.get("estimate_signature") or ""),
+                str(signatures.get("download_signature") or ""),
+                int(passport.get("records_expected")) if passport.get("records_expected") is not None else None,
+                float(passport.get("actual_vs_estimate_ratio")) if passport.get("actual_vs_estimate_ratio") is not None else None,
             ],
         )
 
@@ -173,6 +196,15 @@ def list_slice_dumps(limit: int = 50) -> list[dict[str, Any]]:
                 "sha256": row["sha256"],
                 "stop_reason": row["stop_reason"],
                 "created_at_utc": row["created_at_utc"],
+                "dump_id": row["dump_id"],
+                "source_mode": row["source_mode"],
+                "scientific_completeness": row["scientific_completeness"],
+                "allowed_for_final_analysis": bool(row["allowed_for_final_analysis"]),
+                "openalex_filter": row["openalex_filter"],
+                "estimate_signature": row["estimate_signature"],
+                "download_signature": row["download_signature"],
+                "records_expected": row["records_expected"],
+                "actual_vs_estimate_ratio": row["actual_vs_estimate_ratio"],
             }
         )
     return result
@@ -262,6 +294,24 @@ def _ensure_schema() -> None:
             )
             """
         )
+        _ensure_column(conn, "slice_dumps", "dump_id", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "slice_dumps", "source_mode", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "slice_dumps", "scientific_completeness", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "slice_dumps", "allowed_for_final_analysis", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "slice_dumps", "openalex_filter", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "slice_dumps", "estimate_signature", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "slice_dumps", "download_signature", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "slice_dumps", "records_expected", "INTEGER")
+        _ensure_column(conn, "slice_dumps", "actual_vs_estimate_ratio", "REAL")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_slice_dumps_dump_id ON slice_dumps(dump_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_slice_dumps_final ON slice_dumps(allowed_for_final_analysis)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_slice_dumps_source_mode ON slice_dumps(source_mode)")
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _connect() -> sqlite3.Connection:

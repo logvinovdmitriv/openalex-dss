@@ -41,7 +41,7 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     _write_runtime_config(cfg)
     run_id = str(payload.get("run_id") or cfg.slice_name or "recalculate")
     dump_id = str(payload.get("dump_id") or _dump_id_from_payload(payload) or cfg.slice_name)
-    _run_compute(cfg, run_id=run_id, dump_id=dump_id)
+    _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else None)
     archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id})
     _write_pipeline_summary("recalculate", cfg, payload)
     return {"status": "ok", "mode": "recalculate", "archive": archive}
@@ -128,6 +128,8 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     _write_runtime_config(cfg)
     profile = file_profile(source)
     dump_id = str(payload.get("dump_id") or _dump_id_from_payload({"source_file": profile}) or cfg.slice_name)
+    dump_manifest = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
+    analysis_eligibility = payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else analysis_eligibility_from_dump(dump_manifest)
     if int(profile.get("bytes") or 0) == 0:
         raise ValueError(
             "Локальный дамп пуст: OpenAlex вернул 0 работ для выбранных фильтров. "
@@ -140,7 +142,6 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         DATA / "passports/quality_report.json",
         DATA / "normalized/work_topics_flat.csv",
     )
-    dump_manifest = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
     source_type = "openalex_cli_dump_import" if dump_manifest else "local_file"
     write_json(
         DATA / "passports/fetch_meta.json",
@@ -154,14 +155,15 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             "openalex_filter": ((dump_manifest.get("openalex_request") or {}).get("filter") if dump_manifest else "") or "",
             "accepted_estimate_signature": ((dump_manifest.get("signatures") or {}).get("accepted_estimate_signature") if dump_manifest else None),
             "accepted_download_signature": ((dump_manifest.get("signatures") or {}).get("accepted_download_signature") if dump_manifest else None),
+            "analysis_eligibility": analysis_eligibility,
             "fetched_works": quality.get("raw_works"),
             "total_available": quality.get("raw_works"),
             "filter": "импорт OpenAlex CLI mini-dump" if dump_manifest else "локальный импорт дампа OpenAlex Works",
             "used_api_key": bool(dump_manifest.get("used_api_key")) if dump_manifest else False,
         },
     )
-    _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
-    archive = _archive_run_artifacts(cfg, {**payload, "source_file": profile, "dump_id": dump_id})
+    _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id, analysis_eligibility=analysis_eligibility)
+    archive = _archive_run_artifacts(cfg, {**payload, "source_file": profile, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility})
     _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "archive": archive})
     return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive}
 
@@ -190,7 +192,7 @@ def clear_generated_data() -> dict[str, Any]:
     return {"status": "ok", "mode": "clear_generated_data", "removed": removed}
 
 
-def _run_compute(cfg: Any, *, run_id: str = "base", dump_id: str = "") -> None:
+def _run_compute(cfg: Any, *, run_id: str = "base", dump_id: str = "", analysis_eligibility: dict[str, Any] | None = None) -> None:
     build_author_work_metrics(DATA / "normalized/works_flat.csv", DATA / "normalized/authorships_flat.csv", DATA / "marts/author_work_metrics.csv", cfg.fraction_modes, run_id=run_id)
     compute_indices(
         DATA / "marts/author_work_metrics.csv",
@@ -215,7 +217,7 @@ def _run_compute(cfg: Any, *, run_id: str = "base", dump_id: str = "") -> None:
         cfg.analysis_year,
         cfg.fraction_mode_default,
     )
-    build_passports(cfg, ROOT, DATA / "passports", run_id=run_id, dump_id=dump_id)
+    build_passports(cfg, ROOT, DATA / "passports", run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility)
     reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100)
 
 
@@ -261,6 +263,7 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "slice_id": cfg.slice_name,
         "source_file": payload.get("source_file"),
         "dump_manifest": payload.get("dump_manifest"),
+        "analysis_eligibility": payload.get("analysis_eligibility"),
         "latest_view_note": "Global normalized/results paths are only the UI latest-view; reproducible artifacts are archived under this run_id and dump_id.",
     }
     write_json(run_dir / "metric_run.json", manifest)
@@ -315,6 +318,29 @@ def _dump_id_from_payload(payload: dict[str, Any]) -> str:
     if source.get("sha256"):
         return f"dump_{str(source['sha256'])[:16]}"
     return ""
+
+
+def analysis_eligibility_from_dump(dump: dict[str, Any], *, dev_override: bool = False) -> dict[str, Any]:
+    allowed = bool(dump.get("allowed_for_final_analysis"))
+    signatures = dump.get("signatures") if isinstance(dump.get("signatures"), dict) else {}
+    status = "final" if allowed else ("dev_only_not_for_final_analysis" if dev_override else "blocked_not_for_final_analysis")
+    return {
+        "status": status,
+        "allowed_for_final_analysis": allowed,
+        "dev_override": bool(dev_override),
+        "dump_id": dump.get("dump_id"),
+        "scientific_completeness": dump.get("scientific_completeness") or "",
+        "stop_reason": dump.get("stop_reason") or "",
+        "records_downloaded": int(dump.get("records_downloaded") or 0),
+        "raw_jsonl_sha256": dump.get("raw_jsonl_sha256") or "",
+        "signature_checks": {
+            "estimate_signature_verified": bool(signatures.get("estimate_signature_verified")),
+            "accepted_estimate_signature_verified": bool(signatures.get("accepted_estimate_signature_verified")),
+            "download_signature_verified": bool(signatures.get("download_signature_verified")),
+            "compatible": bool(signatures.get("compatible")),
+        },
+        "warning": "" if allowed else "This analysis is not eligible for final dissertation-grade conclusions.",
+    }
 
 
 def _allow_unchecked_download() -> bool:

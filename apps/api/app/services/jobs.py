@@ -126,10 +126,10 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
         doc.update({"progress_percent": _progress_before_dispatch(action), "progress_stage": _stage_for_action(action)})
         _save(doc)
         result = _dispatch(run_id, action, payload)
-        _mark_dependent_state_completed(run_id, action, result)
+        _mark_dependent_state_completed(run_id, action, result, payload)
         doc.update({"status": "completed", "progress_percent": 100, "progress_stage": "completed", "finished_at": _now(), "result": result, "artifacts": _artifact_links()})
     except Exception as exc:  # pragma: no cover - defensive job boundary
-        _mark_dependent_state_failed(run_id, action, str(exc))
+        _mark_dependent_state_failed(run_id, action, str(exc), payload)
         doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
     _save(doc)
 
@@ -153,6 +153,9 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
         raw_jsonl = str(dump.get("raw_jsonl") or "").strip()
         if not raw_jsonl or dump.get("no_data"):
             return {"fetch": fetched, "build": None, "no_data": True}
+        analysis_eligibility = pipeline.analysis_eligibility_from_dump(dump, dev_override=_allow_unchecked_download())
+        if not analysis_eligibility["allowed_for_final_analysis"] and not _allow_unchecked_download():
+            raise ValueError("Дамп не допущен к финальному анализу. Обновите оценку и скачивание либо используйте явный dev-режим.")
         update_progress(run_id, 96, "normalizing local file", {"source_path": raw_jsonl})
         built = pipeline.import_local_file({
             **payload,
@@ -161,8 +164,9 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
             "run_id": run_id,
             "dump_id": dump.get("dump_id"),
             "dump_manifest": dump,
+            "analysis_eligibility": analysis_eligibility,
         })
-        return {"fetch": fetched, "build": built, "no_data": False}
+        return {"fetch": fetched, "build": built, "no_data": False, "analysis_eligibility": analysis_eligibility}
     if action == "import_file":
         return pipeline.import_local_file(payload)
     if action == "recalculate":
@@ -228,29 +232,31 @@ def _download_progress(run_id: str, progress: dict[str, Any]) -> None:
     total = progress.get("total_available")
     if total:
         stage = f"downloading works: {fetched}/{total}"
-    else:
+    elif fetched:
         stage = f"downloading works: {fetched}"
+    else:
+        stage = str(progress.get("stage") or "OpenAlex CLI is running; exact progress is unavailable until local files are packed")
     update_progress(run_id, bounded, stage, progress)
 
 
-def _mark_dependent_state_completed(run_id: str, action: str, result: dict[str, Any]) -> None:
-    if action != "build_from_openalex":
-        return
-    try:
-        from app.services import slice_workbench
-
-        slice_workbench.mark_materialization_run_completed(run_id, result)
-    except Exception:
-        return
-
-
-def _mark_dependent_state_failed(run_id: str, action: str, error: str) -> None:
+def _mark_dependent_state_completed(run_id: str, action: str, result: dict[str, Any], payload: dict[str, Any]) -> None:
     if action not in {"build_from_openalex", "fetch_slice_dump"}:
         return
     try:
         from app.services import slice_workbench
 
-        slice_workbench.mark_materialization_run_failed(run_id, error)
+        slice_workbench.mark_materialization_run_completed(run_id, result, materialization_id=str(payload.get("materialization_id") or ""))
+    except Exception:
+        return
+
+
+def _mark_dependent_state_failed(run_id: str, action: str, error: str, payload: dict[str, Any]) -> None:
+    if action not in {"build_from_openalex", "fetch_slice_dump"}:
+        return
+    try:
+        from app.services import slice_workbench
+
+        slice_workbench.mark_materialization_run_failed(run_id, error, materialization_id=str(payload.get("materialization_id") or ""))
     except Exception:
         return
 

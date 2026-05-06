@@ -37,6 +37,7 @@ def build_passports(
     *,
     run_id: str = "base",
     dump_id: str = "",
+    analysis_eligibility: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root_path = Path(root)
     data_root = _data_root(root_path)
@@ -173,6 +174,7 @@ def build_passports(
     calculation_passport = {
         "run_id": run_id,
         "dump_id": dump_id,
+        "analysis_eligibility": analysis_eligibility or {"status": "unknown", "allowed_for_final_analysis": False},
         "fraction_modes": list(cfg.fraction_modes),
         "fraction_mode_default": cfg.fraction_mode_default,
         "ranking_rule": {

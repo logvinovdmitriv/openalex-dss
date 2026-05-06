@@ -14,7 +14,7 @@ for path in (API, SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.services import jobs, pipeline  # noqa: E402
+from app.services import jobs, metadata_store, pipeline  # noqa: E402
 
 
 class PipelineIntegrityTests(unittest.TestCase):
@@ -160,6 +160,79 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual(fetch_meta["dump_id"], "dump_ctx")
             self.assertEqual(fetch_meta["openalex_filter"], "primary_topic.subfield.id:1706")
             self.assertEqual(fetch_meta["accepted_download_signature"], "download-ok")
+            self.assertEqual(fetch_meta["analysis_eligibility"]["status"], "blocked_not_for_final_analysis")
+
+    def test_build_blocks_ineligible_dump_without_dev_override(self) -> None:
+        dump = {
+            "dump_id": "dump_bad",
+            "raw_jsonl": "/tmp/works.jsonl.gz",
+            "allowed_for_final_analysis": False,
+            "records_downloaded": 10,
+            "signatures": {},
+        }
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(pipeline, "fetch_slice_dump", return_value={"status": "ok", "dump": dump}),
+        ):
+            with self.assertRaises(ValueError) as raised:
+                jobs._dispatch("run_blocked", "build_from_openalex", {"accepted_estimate_signature": "e", "accepted_download_signature": "d"})
+        self.assertIn("не допущен", str(raised.exception))
+
+    def test_dev_unchecked_build_marks_report_not_final(self) -> None:
+        dump = {
+            "dump_id": "dump_dev",
+            "raw_jsonl": "/tmp/works.jsonl.gz",
+            "allowed_for_final_analysis": False,
+            "records_downloaded": 10,
+            "signatures": {},
+        }
+        captured: dict[str, object] = {}
+
+        def fake_import(payload: dict[str, object]) -> dict[str, object]:
+            captured.update(payload)
+            return {"status": "ok", "mode": "import_local_file"}
+
+        with (
+            patch.dict("os.environ", {"OPENALEX_DSS_ALLOW_UNCHECKED_DOWNLOAD": "1"}, clear=True),
+            patch.object(pipeline, "fetch_slice_dump", return_value={"status": "ok", "dump": dump}),
+            patch.object(pipeline, "import_local_file", side_effect=fake_import),
+            patch.object(jobs, "update_progress", return_value=None),
+        ):
+            result = jobs._dispatch("run_dev", "build_from_openalex", {})
+
+        self.assertEqual(result["analysis_eligibility"]["status"], "dev_only_not_for_final_analysis")
+        self.assertEqual(captured["analysis_eligibility"]["status"], "dev_only_not_for_final_analysis")
+
+    def test_slice_dump_catalog_indexes_final_eligibility_fields(self) -> None:
+        passport = {
+            "slice_id": "slice_catalog",
+            "dump_id": "dump_catalog",
+            "source_mode": "openalex_cli",
+            "scientific_completeness": "complete",
+            "allowed_for_final_analysis": True,
+            "raw_jsonl": "/tmp/catalog.jsonl.gz",
+            "records_expected": 12,
+            "records_downloaded": 12,
+            "bytes_written": 100,
+            "raw_jsonl_sha256": "sha",
+            "actual_vs_estimate_ratio": 1.2,
+            "stop_reason": "cli_completed",
+            "created_at_utc": "2026-01-01T00:00:00Z",
+            "openalex_request": {"filter": "primary_topic.subfield.id:1706"},
+            "signatures": {"estimate_signature": "estimate", "download_signature": "download"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(metadata_store, "DB_PATH", Path(tmp) / "metadata.sqlite"):
+                metadata_store.record_slice_dump(passport)
+                dumps = metadata_store.list_slice_dumps()
+
+        self.assertEqual(dumps[0]["dump_id"], "dump_catalog")
+        self.assertEqual(dumps[0]["source_mode"], "openalex_cli")
+        self.assertEqual(dumps[0]["scientific_completeness"], "complete")
+        self.assertEqual(dumps[0]["allowed_for_final_analysis"], True)
+        self.assertEqual(dumps[0]["openalex_filter"], "primary_topic.subfield.id:1706")
+        self.assertEqual(dumps[0]["estimate_signature"], "estimate")
+        self.assertEqual(dumps[0]["download_signature"], "download")
 
 
 def _work(short_id: str) -> dict[str, object]:

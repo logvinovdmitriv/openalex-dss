@@ -19,6 +19,7 @@ def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_autho
     checksums = warehouse.read_json_doc("checksums") or {}
     slice_passport = _read_json(DATA / "passports/slice_passport.json")
     calculation_passport = _read_json(DATA / "passports/calculation_passport.json")
+    analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
 
     top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit)
     report = {
@@ -30,6 +31,7 @@ def build_report_bundle(metric: str = "islv", fraction_mode: str = "strict_autho
         },
         "slice_passport": slice_passport,
         "calculation_passport": calculation_passport,
+        "analysis_eligibility": analysis_eligibility,
         "current_slice": current_slice,
         "openalex_request": request,
         "quality_report": quality,
