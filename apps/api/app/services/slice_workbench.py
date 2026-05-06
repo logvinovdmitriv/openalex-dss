@@ -389,6 +389,8 @@ def _workbench_workflow(
         active_stage = str(slices[0].get("state") or "slice")
 
     quality_counts = quality.get("quality_counts") or {}
+    allowed_raw = active_context.get("allowed_for_final_analysis")
+    allowed_for_final_analysis = allowed_raw if isinstance(allowed_raw, bool) else None
     return {
         "active_stage": active_stage,
         "active_run_id": active_context.get("active_run_id"),
@@ -402,7 +404,7 @@ def _workbench_workflow(
             "authorships": rows.get("authorships", 0),
             "authors_indexed": rows.get("indices", 0),
             "analysis_eligibility_status": active_context.get("analysis_eligibility_status"),
-            "allowed_for_final_analysis": bool(active_context.get("allowed_for_final_analysis")),
+            "allowed_for_final_analysis": allowed_for_final_analysis,
         },
     }
 

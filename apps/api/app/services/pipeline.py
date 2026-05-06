@@ -476,6 +476,7 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
             copied[f"tables_by_dump/{rel}"] = str(target)
 
     eligibility = payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else {}
+    allowed_for_final_analysis = eligibility.get("allowed_for_final_analysis")
     active_context = artifact_context.write_active_context(
         run_id=run_id,
         dump_id=dump_id,
@@ -486,7 +487,9 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
             "dump_dir": str(dump_dir),
             "tables_dir": str(tables_dir),
             "analysis_eligibility_status": eligibility.get("status"),
-            "allowed_for_final_analysis": bool(eligibility.get("allowed_for_final_analysis")),
+            "allowed_for_final_analysis": (
+                allowed_for_final_analysis if isinstance(allowed_for_final_analysis, bool) else None
+            ),
         },
     )
 

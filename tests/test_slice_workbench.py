@@ -52,6 +52,25 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(summary["workflow"]["quality_summary"]["analysis_eligibility_status"], "final")
         self.assertEqual(summary["workflow"]["quality_summary"]["allowed_for_final_analysis"], True)
 
+    def test_workbench_summary_preserves_nullable_active_context_eligibility(self) -> None:
+        for active_context, expected in (
+            ({}, None),
+            ({"allowed_for_final_analysis": False}, False),
+            ({"allowed_for_final_analysis": True}, True),
+        ):
+            with self.subTest(active_context=active_context):
+                with (
+                    patch.object(slice_workbench.warehouse, "list_tables", return_value={}),
+                    patch.object(slice_workbench.warehouse, "read_json_doc", return_value={}),
+                    patch.object(slice_workbench.artifact_context, "read_active_context", return_value=active_context),
+                    patch.object(slice_workbench, "list_slices", return_value={"slices": [], "total": 0}),
+                    patch.object(slice_workbench, "list_materialization_plans", return_value={"materializations": []}),
+                    patch.object(slice_workbench, "list_dumps", return_value={"dumps": [], "total": 0}),
+                ):
+                    summary = slice_workbench.workbench_summary()
+
+            self.assertIs(summary["workflow"]["quality_summary"]["allowed_for_final_analysis"], expected)
+
     def test_workbench_summary_prioritizes_active_materialization(self) -> None:
         with (
             patch.object(

@@ -157,7 +157,7 @@ export type WorkbenchActiveContext = {
   source?: string;
   updated_at_utc?: string;
   analysis_eligibility_status?: string | null;
-  allowed_for_final_analysis?: boolean;
+  allowed_for_final_analysis?: boolean | null;
   run_dir?: string;
   dump_dir?: string;
   tables_dir?: string;
