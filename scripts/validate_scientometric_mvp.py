@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import shutil
@@ -121,13 +122,37 @@ def main() -> None:
         ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"],
     )
     _write_csv(
+        exports_dir / "largest-rank-shifts.csv",
+        _largest_rank_shift_rows(payload),
+        ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"],
+    )
+    _write_csv(
         exports_dir / "outliers.csv",
         scientometrics.build_outlier_export_rows(**analysis_kwargs),
+        ["metric", "author_id", "author_display_name", "value", "rule", "lower_fence", "upper_fence"],
+    )
+    _write_csv(
+        exports_dir / "top-outliers.csv",
+        _top_outlier_rows(payload),
         ["metric", "author_id", "author_display_name", "value", "rule", "lower_fence", "upper_fence"],
     )
     _write_csv(exports_dir / "findings.csv", _finding_rows(payload), ["id", "type", "metric", "baseline_metric", "severity", "text", "recommendation", "evidence_json"])
     (exports_dir / "conclusion.md").write_text(scientometrics.scientometric_conclusion_markdown(payload), encoding="utf-8", newline="\n")
     _write_json(exports_dir / "report_bundle.json", report)
+    artifacts = {
+        "raw_fixture": str(raw_path),
+        "scientometrics_json": str(exports_dir / "scientometrics.json"),
+        "descriptive_csv": str(exports_dir / "descriptive.csv"),
+        "correlations_csv": str(exports_dir / "correlations.csv"),
+        "rank_shifts_csv": str(exports_dir / "rank-shifts.csv"),
+        "largest_rank_shifts_csv": str(exports_dir / "largest-rank-shifts.csv"),
+        "outliers_csv": str(exports_dir / "outliers.csv"),
+        "top_outliers_csv": str(exports_dir / "top-outliers.csv"),
+        "findings_csv": str(exports_dir / "findings.csv"),
+        "conclusion_md": str(exports_dir / "conclusion.md"),
+        "report_bundle_json": str(exports_dir / "report_bundle.json"),
+        "run_report_bundle": str(data_dir / "runs" / RUN_ID / "reports" / f"report_{report['report_scope']['report_scope_hash']}.json"),
+    }
 
     manifest = {
         "status": "ok",
@@ -150,19 +175,17 @@ def main() -> None:
         "findings_version": payload["finding_summary"]["findings_version"],
         "conclusion_version": payload["conclusion_draft"]["version"],
         "analysis_eligibility": build["analysis_eligibility"],
-        "artifacts": {
-            "raw_fixture": str(raw_path),
-            "scientometrics_json": str(exports_dir / "scientometrics.json"),
-            "descriptive_csv": str(exports_dir / "descriptive.csv"),
-            "correlations_csv": str(exports_dir / "correlations.csv"),
-            "rank_shifts_csv": str(exports_dir / "rank-shifts.csv"),
-            "outliers_csv": str(exports_dir / "outliers.csv"),
-            "findings_csv": str(exports_dir / "findings.csv"),
-            "conclusion_md": str(exports_dir / "conclusion.md"),
-            "report_bundle_json": str(exports_dir / "report_bundle.json"),
-            "run_report_bundle": str(data_dir / "runs" / RUN_ID / "reports" / f"report_{report['report_scope']['report_scope_hash']}.json"),
-        },
+        "artifacts": artifacts,
+        "artifact_checksums": _artifact_checksums(artifacts),
     }
+    _assert_validation_invariants(
+        manifest=manifest,
+        payload=payload,
+        report=report,
+        build=build,
+        cohort=cohort,
+        scientometrics_module=scientometrics,
+    )
     manifest_path = data_dir / "validation" / "mvp_validation_manifest.json"
     _write_json(manifest_path, manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
@@ -309,6 +332,46 @@ def _correlation_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _largest_rank_shift_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for compare_metric, comparison in (payload.get("rank_comparisons") or {}).items():
+        comparison = comparison or {}
+        for row in comparison.get("largest_shifts") or []:
+            rows.append(
+                {
+                    "baseline_metric": comparison.get("baseline_metric") or (payload.get("scope") or {}).get("baseline_metric"),
+                    "compare_metric": compare_metric,
+                    "author_id": row.get("author_id"),
+                    "author_display_name": row.get("author_display_name"),
+                    "baseline_rank": row.get("baseline_rank"),
+                    "metric_rank": row.get("metric_rank"),
+                    "rank_delta": row.get("rank_delta"),
+                    "abs_rank_delta": row.get("abs_rank_delta"),
+                }
+            )
+    return rows
+
+
+def _top_outlier_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    boxplots = payload.get("boxplots") or {}
+    for metric, metric_outliers in (payload.get("outliers") or {}).items():
+        boxplot = boxplots.get(metric) or {}
+        for row in metric_outliers or []:
+            rows.append(
+                {
+                    "metric": metric,
+                    "author_id": row.get("author_id"),
+                    "author_display_name": row.get("author_display_name"),
+                    "value": row.get("value"),
+                    "rule": boxplot.get("outlier_rule") or "iqr_1_5",
+                    "lower_fence": boxplot.get("lower_fence"),
+                    "upper_fence": boxplot.get("upper_fence"),
+                }
+            )
+    return rows
+
+
 def _finding_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for finding in payload.get("findings") or []:
@@ -325,6 +388,74 @@ def _finding_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def _artifact_checksums(artifacts: dict[str, str]) -> dict[str, str]:
+    return {name: _sha256(Path(path)) for name, path in artifacts.items()}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _assert_validation_invariants(
+    *,
+    manifest: dict[str, Any],
+    payload: dict[str, Any],
+    report: dict[str, Any],
+    build: dict[str, Any],
+    cohort: dict[str, Any],
+    scientometrics_module: Any,
+) -> None:
+    scope = payload.get("scope") or {}
+    report_scope = report.get("report_scope") or {}
+    report_analysis_scope = ((report.get("scientometric_analysis") or {}).get("scope") or {})
+    expected_scope = {
+        "run_id": RUN_ID,
+        "dump_id": DUMP_ID,
+        "cohort_id": cohort["cohort_id"],
+        "fraction_mode": FRACTION_MODE,
+        "baseline_metric": BASELINE_METRIC,
+        "rank_top_n": RANK_TOP_N,
+    }
+    for key, expected in expected_scope.items():
+        _require(scope.get(key) == expected, f"scientometrics scope mismatch for {key}: {scope.get(key)!r} != {expected!r}")
+        _require(report_scope.get(key) == expected, f"report scope mismatch for {key}: {report_scope.get(key)!r} != {expected!r}")
+        _require(report_analysis_scope.get(key) == expected, f"report scientometric scope mismatch for {key}: {report_analysis_scope.get(key)!r} != {expected!r}")
+    _require(manifest["status"] == "ok", "manifest status is not ok")
+    _require(manifest["cohort_checksum"] == cohort["checksum"], "manifest cohort checksum does not match cohort checksum")
+    _require(manifest["n_authors"] == payload["n_authors"] == RANK_TOP_N, "validated author count does not match the fixed Top-N cohort")
+    _require(manifest["raw_works"] == len(_fixture_works()), "validated raw work count does not match fixture")
+    _require(manifest["analysis_version"] == scientometrics_module.SCIENTOMETRIC_ANALYSIS_VERSION, "analysis version mismatch")
+    _require(manifest["findings_version"] == scientometrics_module.SCIENTOMETRIC_FINDINGS_VERSION, "findings version mismatch")
+    _require(manifest["conclusion_version"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_VERSION, "conclusion version mismatch")
+    _require(payload["conclusion_draft"]["version"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_VERSION, "payload conclusion version mismatch")
+    _require(build["analysis_eligibility"]["allowed_for_final_analysis"] is False, "validation fixture must not be eligible for final analysis")
+    _require(bool(report["exports"]["scientometrics_conclusion_md"]), "report bundle is missing conclusion Markdown export")
+    for key in (
+        "scientometrics_json",
+        "scientometrics_descriptive_csv",
+        "scientometrics_correlations_csv",
+        "scientometrics_rank_shifts_csv",
+        "scientometrics_largest_rank_shifts_csv",
+        "scientometrics_outliers_csv",
+        "scientometrics_top_outliers_csv",
+        "scientometrics_findings_csv",
+        "scientometrics_conclusion_md",
+    ):
+        _require(bool(report["exports"].get(key)), f"missing report export link: {key}")
+    for name, path in manifest["artifacts"].items():
+        _require(Path(path).is_file(), f"missing validation artifact: {name}={path}")
+        _require(bool(manifest["artifact_checksums"].get(name)), f"missing validation checksum for artifact: {name}")
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
 
 
 if __name__ == "__main__":

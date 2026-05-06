@@ -14,6 +14,8 @@ OpenAlex-like Works fixture
 -> JSON/CSV/Markdown exports
 ```
 
+Документ обновляется по результатам запуска `scripts/validate_scientometric_mvp.py`.
+
 ## Режим проверки
 
 Проверка выполнена на детерминированном локальном fixture, а не на сетевом OpenAlex CLI download. Причина: в текущем окружении нет `OPENALEX_API_KEY`, а установленный `openalex` CLI требует API key для materialization.
@@ -54,6 +56,8 @@ findings: 29
 report_scope_hash: 66b4ae366925c1bd
 ```
 
+`n_authors: 5` - это число авторов в зафиксированной Top-5 cohort, а не полное число авторов raw fixture. В fixture есть шестой автор, который не входит в Top-5 когорту по `h`.
+
 Версии аналитических артефактов:
 
 ```text
@@ -82,7 +86,9 @@ validation/exports/validation_scientometric_mvp/scientometrics.json
 validation/exports/validation_scientometric_mvp/descriptive.csv
 validation/exports/validation_scientometric_mvp/correlations.csv
 validation/exports/validation_scientometric_mvp/rank-shifts.csv
+validation/exports/validation_scientometric_mvp/largest-rank-shifts.csv
 validation/exports/validation_scientometric_mvp/outliers.csv
+validation/exports/validation_scientometric_mvp/top-outliers.csv
 validation/exports/validation_scientometric_mvp/findings.csv
 validation/exports/validation_scientometric_mvp/conclusion.md
 validation/exports/validation_scientometric_mvp/report_bundle.json
@@ -140,12 +146,18 @@ scientometrics_conclusion_md
 descriptive.csv: 8 lines
 correlations.csv: 148 lines
 rank-shifts.csv: 31 lines
+largest-rank-shifts.csv: 31 lines
 outliers.csv: 2 lines
+top-outliers.csv: 2 lines
 findings.csv: 30 lines
 conclusion.md: 55 lines
 scientometrics.json: 4423 lines
 report_bundle.json: 9338 lines
 ```
+
+## Checksums
+
+`validation/mvp_validation_manifest.json` содержит `artifact_checksums` для каждого export и run report artifact. Это фиксирует byte-level содержимое текущего validation-прогона и позволяет сравнивать артефакты между повторными запусками. Некоторые runtime artifacts могут включать системные или форматные метаданные, поэтому главным стабильным инвариантом проверки остается совпадение scope, versions, cohort checksum и report scope hash.
 
 ## Вывод проверки
 
@@ -157,5 +169,6 @@ report_bundle.json: 9338 lines
 4. Scientometric analysis строится по тому же `run_id/dump_id/cohort_id/fraction_mode`.
 5. Report bundle получает тот же scope hash и включает `scientometric_analysis`.
 6. JSON/CSV/Markdown exports создаются и трассируются к одному scope.
+7. Validation script проверяет инварианты scope, наличие report export links, существование файлов и SHA-256 checksums.
 
 Ограничение: это validation fixture, а не финальный OpenAlex scientific slice. Следующий содержательный контроль должен повторить тот же протокол на реальном малом OpenAlex-срезе с `OPENALEX_API_KEY`, подтвержденными planner signatures и финальным dump manifest.
