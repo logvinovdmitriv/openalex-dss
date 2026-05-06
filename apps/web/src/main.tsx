@@ -336,7 +336,22 @@ function Workbench() {
     },
   });
   const recalculate = useMutation({
-    mutationFn: () => postJson<any>("/runs", { action: "recalculate", payload: { ...payload, dump_id: activeDumpId || undefined } }),
+    mutationFn: () => {
+      if (!activeDumpId) {
+        throw new Error("Для пересчета индексов нужен выбранный dump_id.");
+      }
+      return postJson<any>("/runs", {
+        action: "recalculate",
+        payload: {
+          dump_id: activeDumpId,
+          fraction_modes: payload.fraction_modes,
+          fraction_mode_default: payload.fraction_mode_default,
+          lrdi_p0: payload.lrdi_p0,
+          lrdi_lambda: payload.lrdi_lambda,
+          analysis_year: payload.analysis_year,
+        },
+      });
+    },
     onSuccess: (result) => {
       setRunId(result.run_id);
       navigate("rankings");
@@ -549,6 +564,7 @@ function Workbench() {
             chartRows={chartRows}
             onSelect={(next) => setSelected(next)}
             onRecalculate={() => recalculate.mutate()}
+            canRecalculate={Boolean(activeDumpId)}
             recalculating={recalculate.isPending || running}
           />
         )}
@@ -1066,6 +1082,7 @@ function RankingsPage({
   chartRows,
   onSelect,
   onRecalculate,
+  canRecalculate,
   recalculating,
 }: {
   metric: string;
@@ -1081,6 +1098,7 @@ function RankingsPage({
   chartRows: any[];
   onSelect: (value: { kind: "author" | "work"; id: string }) => void;
   onRecalculate: () => void;
+  canRecalculate: boolean;
   recalculating: boolean;
 }) {
   return (
@@ -1092,7 +1110,14 @@ function RankingsPage({
             <h2>Индексы, рейтинги и когорта авторов</h2>
             <p>Top-N здесь является параметром результата и статистической когорты, а не ограничением первичной загрузки работ.</p>
           </div>
-          <button className="primary" onClick={onRecalculate} disabled={recalculating}>{recalculating ? <Loader2 size={16} className="spin" /> : <Sigma size={16} />} Рассчитать</button>
+          <button
+            className="primary"
+            onClick={onRecalculate}
+            disabled={recalculating || !canRecalculate}
+            title={canRecalculate ? undefined : "Сначала материализуйте локальный dump"}
+          >
+            {recalculating ? <Loader2 size={16} className="spin" /> : <Sigma size={16} />} Рассчитать
+          </button>
         </div>
         <div className="toolbar">
           <select value={metric} onChange={(event) => setMetric(event.target.value)}>

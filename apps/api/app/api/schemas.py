@@ -102,7 +102,7 @@ class PipelineRequest(BaseModel):
 
 
 class AnalysisRunRequest(BaseModel):
-    dump_id: str | None = None
+    dump_id: str = Field(min_length=1)
     fraction_modes: list[str] | None = None
     fraction_mode_default: str | None = None
     iupv_n0: float | None = None
@@ -111,10 +111,18 @@ class AnalysisRunRequest(BaseModel):
     lrdi_lambda: float | None = None
     analysis_year: int | None = Field(default=None, ge=1900, le=2100)
 
+    @field_validator("dump_id")
+    @classmethod
+    def validate_dump_id(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("dump_id is required for public recalculate runs")
+        return text
+
 
 class RunRequest(BaseModel):
     action: Literal["recalculate"] = "recalculate"
-    payload: AnalysisRunRequest = Field(default_factory=AnalysisRunRequest)
+    payload: AnalysisRunRequest
 
 
 class SliceCreateRequest(PipelineRequest):

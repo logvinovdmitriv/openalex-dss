@@ -58,8 +58,9 @@ GET  /api/v1/runs/{run_id}/tables/{table_name}
 ```
 
 `POST /runs` is public only for `recalculate`, i.e. recomputing indices from
-an already materialized local dump. OpenAlex downloads are launched through the
-slice/materialization workflow:
+an already materialized local dump. Its payload must include the target
+`dump_id`; it is not a generic job dispatcher. OpenAlex downloads are launched
+through the slice/materialization workflow:
 
 ```text
 POST /api/v1/slices/{slice_id}/materialization-plans

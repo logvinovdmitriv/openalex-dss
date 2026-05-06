@@ -24,6 +24,8 @@ def create_run(request: RunRequest) -> dict[str, Any]:
             ),
         )
     payload = request.payload.model_dump(exclude_none=True)
+    if request.action == "recalculate" and not str(payload.get("dump_id") or "").strip():
+        raise HTTPException(status_code=400, detail="dump_id is required for public recalculate runs")
     try:
         return jobs.create_run(request.action, payload)
     except ValueError as exc:
