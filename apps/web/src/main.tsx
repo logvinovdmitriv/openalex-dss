@@ -24,6 +24,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Scatter, ScatterChar
 import { API_BASE, getJson, postJson, type TableResponse } from "./api";
 import {
   DEFAULT_FILTERS,
+  columnLabel,
   countryLabel,
   filterParams,
   filterSummary,
@@ -50,6 +51,7 @@ import {
   pageTitle,
   progressForRun,
   rankingChartRows,
+  scientometricsUrl,
   sliceSubjectTitle,
   viewFromHash,
   type EntitySuggestion,
@@ -96,6 +98,13 @@ function Workbench() {
   const [metric, setMetric] = useState("h");
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
   const [topN, setTopN] = useState(0);
+  const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "i10", "g", "islv"]);
+  const [baselineMetric, setBaselineMetric] = useState("h");
+  const [rankTopN, setRankTopN] = useState(100);
+  const [distributionMetric, setDistributionMetric] = useState("h");
+  const [distributionScale, setDistributionScale] = useState<"raw" | "log1p">("log1p");
+  const [correlationMethod, setCorrelationMethod] = useState<"spearman" | "pearson_log1p" | "kendall_tau_b">("spearman");
+  const [rankCompareMetric, setRankCompareMetric] = useState("islv");
   const [storageProfileId, setStorageProfileId] = useState("");
   const [sourceStrategy, setSourceStrategy] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -170,6 +179,7 @@ function Workbench() {
   });
   const activeDumpId = extractDumpId(run.data);
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const scientometricMetricKey = useMemo(() => scientometricMetrics.join(","), [scientometricMetrics]);
   const cohortStats = useQuery({
     queryKey: ["cohort-stats", selectedCohortId, fractionMode, runId, activeDumpId, filterKey, cohortFilterPolicy],
     queryFn: () => getJson<any>(cohortStatisticsUrl(selectedCohortId, filters, fractionMode, runId, activeDumpId, cohortFilterPolicy)),
@@ -189,6 +199,21 @@ function Workbench() {
     queryKey: ["analytics-ranking", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, topN, cohortFilterPolicy],
     queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, runId, activeDumpId, Math.max(1, topN || 100), selectedCohortId, cohortFilterPolicy)),
     enabled: hasLocalAnalyticsData,
+  });
+  const scientometrics = useQuery({
+    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, rankTopN, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, cohortFilterPolicy],
+    queryFn: () => getJson<any>(scientometricsUrl({
+      filters,
+      fractionMode,
+      metrics: scientometricMetrics,
+      baselineMetric,
+      rankTopN,
+      runId,
+      dumpId: activeDumpId,
+      cohortId: selectedCohortId,
+      cohortFilterPolicy,
+    })),
+    enabled: hasLocalAnalyticsData && scientometricMetrics.length > 0,
   });
   const detail = useQuery({
     queryKey: ["detail", selected, runId, activeDumpId],
@@ -544,9 +569,24 @@ function Workbench() {
         {view === "statistics" && (
           <StatisticsPage
             analytics={analytics.data}
-            table={ranking.data}
+            scientometrics={scientometrics.data}
+            loadingScientometrics={scientometrics.isFetching}
             metric={metric}
-            chartRows={chartRows}
+            metricOptions={primaryMetricOptions}
+            scientometricMetrics={scientometricMetrics}
+            setScientometricMetrics={setScientometricMetrics}
+            baselineMetric={baselineMetric}
+            setBaselineMetric={setBaselineMetric}
+            rankTopN={rankTopN}
+            setRankTopN={setRankTopN}
+            distributionMetric={distributionMetric}
+            setDistributionMetric={setDistributionMetric}
+            distributionScale={distributionScale}
+            setDistributionScale={setDistributionScale}
+            correlationMethod={correlationMethod}
+            setCorrelationMethod={setCorrelationMethod}
+            rankCompareMetric={rankCompareMetric}
+            setRankCompareMetric={setRankCompareMetric}
             topN={activeTopN}
             cohortStats={cohortStats.data}
             selectedCohortId={selectedCohortId}
@@ -1241,9 +1281,24 @@ function CohortsPage({
 
 function StatisticsPage({
   analytics,
-  table,
+  scientometrics,
+  loadingScientometrics,
   metric,
-  chartRows,
+  metricOptions,
+  scientometricMetrics,
+  setScientometricMetrics,
+  baselineMetric,
+  setBaselineMetric,
+  rankTopN,
+  setRankTopN,
+  distributionMetric,
+  setDistributionMetric,
+  distributionScale,
+  setDistributionScale,
+  correlationMethod,
+  setCorrelationMethod,
+  rankCompareMetric,
+  setRankCompareMetric,
   topN,
   cohortStats,
   selectedCohortId,
@@ -1252,9 +1307,24 @@ function StatisticsPage({
   onOpenCohorts,
 }: {
   analytics: any;
-  table?: TableResponse;
+  scientometrics: any;
+  loadingScientometrics: boolean;
   metric: string;
-  chartRows: any[];
+  metricOptions: SelectOption[];
+  scientometricMetrics: string[];
+  setScientometricMetrics: (value: string[]) => void;
+  baselineMetric: string;
+  setBaselineMetric: (value: string) => void;
+  rankTopN: number;
+  setRankTopN: (value: number) => void;
+  distributionMetric: string;
+  setDistributionMetric: (value: string) => void;
+  distributionScale: "raw" | "log1p";
+  setDistributionScale: (value: "raw" | "log1p") => void;
+  correlationMethod: "spearman" | "pearson_log1p" | "kendall_tau_b";
+  setCorrelationMethod: (value: "spearman" | "pearson_log1p" | "kendall_tau_b") => void;
+  rankCompareMetric: string;
+  setRankCompareMetric: (value: string) => void;
   topN: number;
   cohortStats: any;
   selectedCohortId: string;
@@ -1262,21 +1332,29 @@ function StatisticsPage({
   setCohortFilterPolicy: (value: CohortFilterPolicy) => void;
   onOpenCohorts: () => void;
 }) {
-  const scatter = (table?.rows ?? []).slice(0, 120).map((row: any) => ({
-    x: Number(row.h ?? row.h_raw ?? 0),
-    y: Number(row.c_frac ?? row.c_frac_raw ?? row.score ?? 0),
-    name: row.author_display_name,
-  }));
-  const describe = cohortStats?.descriptive?.[metric] ?? {};
-  const box = cohortStats?.boxplots?.[metric] ?? {};
-  const histogramRows = (cohortStats?.histograms?.[metric]?.raw ?? []).map((row: any, index: number) => ({
-    label: `${fmt(row.bin_start)}-${fmt(row.bin_end)}`,
-    score: Number(row.count ?? 0),
-    author: `bin-${index + 1}`,
-  }));
-  const activeN = cohortStats?.cohort?.n_authors ?? (table?.total ? Math.min(Number(table.total), topN) : 0);
-  const distributionRows = histogramRows.length ? histogramRows : chartRows;
-  const cohortContext = cohortStats?.cohort_context ?? analytics?.cohort;
+  const metrics = (scientometrics?.metrics ?? scientometricMetrics).filter(Boolean);
+  const activeDistributionMetric = metrics.includes(distributionMetric) ? distributionMetric : metrics[0] ?? metric;
+  const comparisonOptions = Object.keys(scientometrics?.rank_comparisons ?? {});
+  const activeRankCompareMetric = comparisonOptions.includes(rankCompareMetric) ? rankCompareMetric : comparisonOptions[0] ?? "";
+  const cohortContext = scientometrics?.cohort_context ?? cohortStats?.cohort_context ?? analytics?.cohort;
+  const warnings = scientometrics?.warnings ?? [];
+
+  useEffect(() => {
+    if (metrics.length && !metrics.includes(distributionMetric)) setDistributionMetric(metrics[0]);
+  }, [metrics.join(","), distributionMetric, setDistributionMetric]);
+
+  useEffect(() => {
+    if (comparisonOptions.length && !comparisonOptions.includes(rankCompareMetric)) setRankCompareMetric(comparisonOptions[0]);
+  }, [comparisonOptions.join(","), rankCompareMetric, setRankCompareMetric]);
+
+  const toggleMetric = (value: string) => {
+    if (scientometricMetrics.includes(value)) {
+      if (scientometricMetrics.length > 1) setScientometricMetrics(scientometricMetrics.filter((item) => item !== value));
+      return;
+    }
+    setScientometricMetrics([...scientometricMetrics, value]);
+  };
+
   return (
     <div className="stack">
       {!selectedCohortId && (
@@ -1286,14 +1364,70 @@ function StatisticsPage({
           <div className="action-row"><button onClick={onOpenCohorts}><GitCompareArrows size={16} /> Перейти к когортам</button></div>
         </section>
       )}
+      <section className="panel">
+        <div className="panel-head split">
+          <div>
+            <span className="step-badge">Scientometrics</span>
+            <h2>Аналитический пакет сравнения индексов</h2>
+            <p>Все блоки ниже строятся из `/analytics/scientometrics` для текущего run/dump/cohort scope. Фильтры OpenAlex здесь не дублируются.</p>
+          </div>
+          {loadingScientometrics && <span className="status-chip"><Loader2 size={14} className="spin" /> Обновление</span>}
+        </div>
+        <div className="form-grid tight">
+          <Field label="Базовый индекс">
+            <select value={baselineMetric} onChange={(event) => setBaselineMetric(event.target.value)}>
+              {ensureCurrentOption(metricOptions, baselineMetric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Top-N для сравнения рангов">
+            <input type="number" min={1} max={1000} value={rankTopN} onChange={(event) => setRankTopN(Math.max(1, Math.min(1000, Number(event.target.value || 1))))} />
+          </Field>
+          <Field label="Метрика распределения">
+            <select value={activeDistributionMetric} onChange={(event) => setDistributionMetric(event.target.value)}>
+              {ensureCurrentOption(metricOptions.filter((item) => metrics.includes(item.value)), activeDistributionMetric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Шкала распределения">
+            <select value={distributionScale} onChange={(event) => setDistributionScale(event.target.value as "raw" | "log1p")}>
+              <option value="log1p">log1p</option>
+              <option value="raw">raw</option>
+            </select>
+          </Field>
+          <Field label="Корреляции">
+            <select value={correlationMethod} onChange={(event) => setCorrelationMethod(event.target.value as "spearman" | "pearson_log1p" | "kendall_tau_b")}>
+              <option value="spearman">Spearman</option>
+              <option value="pearson_log1p">Pearson log1p</option>
+              <option value="kendall_tau_b">Kendall tau-b</option>
+            </select>
+          </Field>
+          <Field label="Сдвиг рангов">
+            <select value={activeRankCompareMetric} onChange={(event) => setRankCompareMetric(event.target.value)}>
+              {comparisonOptions.map((item) => <option key={item} value={item}>{metricLabel(item)}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="choice-grid compact metric-choice-grid" role="group" aria-label="Метрики наукометрического сравнения">
+          {ensureCurrentOptions(metricOptions, scientometricMetrics).map((item) => (
+            <button key={item.value} type="button" className={scientometricMetrics.includes(item.value) ? "choice-pill active" : "choice-pill"} onClick={() => toggleMetric(item.value)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </section>
+      <ScientometricScopePanel payload={scientometrics} fallbackN={topN} />
+      {warnings.length > 0 && (
+        <section className="notice warn">
+          <b>Ограничения интерпретации</b>
+          <ul className="plain-list">
+            {warnings.map((warning: string) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </section>
+      )}
       <section className="metric-grid">
-        <MetricCard label={cohortStats?.cohort?.name ?? `Когорта Top-${topN}`} value={fmt(activeN)} />
-        <MetricCard label="Авторов в распределении" value={fmt(describe.n ?? analytics?.distribution?.n ?? 0)} />
-        <MetricCard label="Среднее" value={fmt(describe.mean ?? analytics?.distribution?.mean ?? 0)} />
-        <MetricCard label="Медиана" value={fmt(describe.median ?? analytics?.distribution?.median ?? 0)} />
-        <MetricCard label="Zero-rate" value={fmt(describe.zero_rate ?? 0)} />
-        <MetricCard label="Tie-rate" value={fmt(describe.tie_rate ?? 0)} />
-        <MetricCard label="Skewness" value={fmt(describe.skewness ?? 0)} />
+        <MetricCard label="Авторов в scope" value={fmt(scientometrics?.n_authors ?? 0)} />
+        <MetricCard label="Baseline" value={metricLabel(scientometrics?.scope?.baseline_metric ?? baselineMetric)} />
+        <MetricCard label="Rank Top-N" value={fmt(scientometrics?.rank_top_n ?? rankTopN)} />
+        <MetricCard label="Метрик" value={fmt(metrics.length)} />
       </section>
       {selectedCohortId && (
         <section className="panel">
@@ -1308,49 +1442,331 @@ function StatisticsPage({
         </section>
       )}
       {cohortContext && <CohortContextPanel context={cohortContext} />}
-      <section className="chart-table-grid">
-        <div className="panel">
-          <h2>Распределение индекса</h2>
-          <div className="chart-box">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={distributionRows}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="score" fill="#167343" name={histogramRows.length ? "Авторов в bin" : metricLabel(metric)} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          {box.n > 0 && (
-            <div className="box-summary">
-              <KeyValue label="Boxplot" value={`min ${fmt(box.min)} · Q1 ${fmt(box.q1)} · median ${fmt(box.median)} · Q3 ${fmt(box.q3)} · max ${fmt(box.max)}`} />
-            </div>
-          )}
-        </div>
-        <div className="panel">
-          <h2>Scatter h vs C_frac</h2>
-          <div className="chart-box">
-            <ResponsiveContainer width="100%" height="100%">
-              <ScatterChart>
-                <CartesianGrid />
-                <XAxis dataKey="x" name="h" />
-                <YAxis dataKey="y" name="C_frac" />
-                <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-                <Scatter data={scatter} fill="#155e75" />
-              </ScatterChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </section>
-      <section className="panel">
-        <h2>Методы доказательной аналитики</h2>
-        <p>Графики и таблицы интерпретируются для текущей авторской когорты. Состав когорты должен фиксироваться в отчете вместе с метрикой сортировки и Top-N.</p>
-        <div className="method-grid">
-          {["Spearman/Kendall корреляции", "Top-N overlap", "Rank-shift", "Remove-top-1 sensitivity", "Tie-rate и zero-rate", "Bootstrap stability"].map((item) => <CheckPill key={item} active label={item} />)}
-        </div>
-      </section>
+      {!scientometrics && <EmptyState title="Нет аналитического пакета" detail="Выберите run/dump и когорту, затем дождитесь загрузки данных наукометрического анализа." />}
+      {scientometrics && (
+        <>
+          <DescriptiveStatsTable descriptive={scientometrics.descriptive ?? {}} metrics={metrics} />
+          <section className="chart-table-grid">
+            <BoxplotPanel boxplots={scientometrics.boxplots ?? {}} metrics={metrics} />
+            <DistributionPanel payload={scientometrics} metric={activeDistributionMetric} scale={distributionScale} />
+          </section>
+          <section className="chart-table-grid">
+            <CorrelationHeatmap payload={scientometrics} method={correlationMethod} metrics={metrics} />
+            <RankShiftPanel payload={scientometrics} baselineMetric={baselineMetric} compareMetric={activeRankCompareMetric} />
+          </section>
+          <section className="chart-table-grid">
+            <TopOverlapPanel payload={scientometrics} baselineMetric={baselineMetric} />
+            <ScorecardTable payload={scientometrics} metrics={metrics} />
+          </section>
+          <InterpretationPanel payload={scientometrics} />
+        </>
+      )}
     </div>
+  );
+}
+
+function ScientometricScopePanel({ payload, fallbackN }: { payload: any; fallbackN: number }) {
+  const scope = payload?.scope ?? {};
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Scope</span>
+        <h2>Паспорт аналитической области</h2>
+      </div>
+      <div className="key-grid">
+        <KeyValue label="Run" value={String(scope.run_id ?? "")} />
+        <KeyValue label="Dump" value={String(scope.dump_id ?? "")} />
+        <KeyValue label="Режим дробления" value={String(scope.fraction_mode ?? "")} />
+        <KeyValue label="Когорта" value={String(scope.cohort_id ?? "")} />
+        <KeyValue label="Политика когорты" value={cohortPolicyLabel(String(scope.cohort_filter_policy ?? "membership"))} />
+        <KeyValue label="Авторов" value={fmt(scope.n_authors ?? payload?.n_authors ?? 0)} />
+        <KeyValue label="Top-N рангов" value={fmt(scope.rank_top_n ?? fallbackN)} />
+        <KeyValue label="Область авторов" value={scope.analysis_author_scope === "all_resolved_authors" ? "все авторы resolved scope" : String(scope.analysis_author_scope ?? "")} />
+      </div>
+    </section>
+  );
+}
+
+function DescriptiveStatsTable({ descriptive, metrics }: { descriptive: any; metrics: string[] }) {
+  const columns = ["n", "median", "q1", "q3", "mean", "stddev", "coefficient_of_variation", "zero_rate", "tie_rate", "outlier_share_iqr", "skewness", "excess_kurtosis"];
+  return (
+    <section className="panel table-panel">
+      <div className="panel-head">
+        <span className="step-badge">Descriptive</span>
+        <h2>Описательная статистика индексов</h2>
+      </div>
+      <div className="table-wrap">
+        <table className="analysis-table">
+          <thead>
+            <tr>
+              <th>Метрика</th>
+              {columns.map((column) => <th key={column}>{columnLabel(column)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {metrics.map((metricName) => {
+              const row = descriptive?.[metricName] ?? {};
+              return (
+                <tr key={metricName}>
+                  <th>{metricLabel(metricName)}</th>
+                  {columns.map((column) => <td key={column}>{formatAnalysisValue(row[column], column.includes("rate") || column.includes("share"))}</td>)}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function BoxplotPanel({ boxplots, metrics }: { boxplots: any; metrics: string[] }) {
+  const rows = metrics.map((metricName) => ({ metricName, ...(boxplots?.[metricName] ?? {}) })).filter((row) => row.q1 !== null && row.q1 !== undefined);
+  const values = rows.flatMap((row: any) => [row.min_whisker, row.q1, row.median, row.q3, row.max_whisker, ...(row.outliers ?? []).map((item: any) => item.value)]).map(Number).filter(Number.isFinite);
+  const min = Math.min(0, ...values);
+  const max = Math.max(1, ...values);
+  const width = 760;
+  const left = 120;
+  const right = 24;
+  const rowHeight = 46;
+  const height = Math.max(120, rows.length * rowHeight + 36);
+  const scale = (value: number) => left + ((value - min) / Math.max(1e-9, max - min)) * (width - left - right);
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Boxplot</span>
+        <h2>Ящики с усами по индексам</h2>
+        <p>Boxplot сейчас строится по raw-значениям. При нулевом IQR выбросы не размечаются.</p>
+      </div>
+      {rows.length === 0 && <EmptyState title="Нет boxplot-данных" detail="Для выбранных метрик нет числовых значений." />}
+      {rows.length > 0 && (
+        <svg className="boxplot-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Boxplot по выбранным индексам">
+          <line x1={left} x2={width - right} y1={height - 24} y2={height - 24} className="axis-line" />
+          <text x={left} y={height - 8} className="axis-label">{fmt(min)}</text>
+          <text x={width - right - 40} y={height - 8} className="axis-label">{fmt(max)}</text>
+          {rows.map((row: any, index) => {
+            const y = 24 + index * rowHeight;
+            const q1 = scale(Number(row.q1));
+            const q3 = scale(Number(row.q3));
+            const median = scale(Number(row.median));
+            const low = scale(Number(row.min_whisker));
+            const high = scale(Number(row.max_whisker));
+            return (
+              <g key={row.metricName}>
+                <text x={0} y={y + 15} className="metric-axis-label">{metricLabel(row.metricName)}</text>
+                <line x1={low} x2={high} y1={y + 10} y2={y + 10} className="boxplot-whisker" />
+                <line x1={low} x2={low} y1={y + 3} y2={y + 17} className="boxplot-whisker" />
+                <line x1={high} x2={high} y1={y + 3} y2={y + 17} className="boxplot-whisker" />
+                <rect x={Math.min(q1, q3)} y={y} width={Math.max(2, Math.abs(q3 - q1))} height={20} className={row.outlier_rule_unstable ? "boxplot-box muted" : "boxplot-box"} />
+                <line x1={median} x2={median} y1={y - 2} y2={y + 22} className="boxplot-median" />
+                {(row.outliers ?? []).slice(0, 8).map((item: any) => <circle key={`${row.metricName}-${item.author_id}-${item.value}`} cx={scale(Number(item.value))} cy={y + 10} r={3} className="boxplot-outlier" />)}
+              </g>
+            );
+          })}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+function DistributionPanel({ payload, metric, scale }: { payload: any; metric: string; scale: "raw" | "log1p" }) {
+  const histogram = (payload?.histograms?.[metric]?.[scale] ?? []).map((row: any, index: number) => ({
+    label: `${fmt(row.lo)}-${fmt(row.hi)}`,
+    count: Number(row.count ?? 0),
+    bin: index + 1,
+  }));
+  const qq = (payload?.normality?.[metric]?.[scale]?.qq ?? []).map((row: any) => ({ x: Number(row.theoretical), y: Number(row.observed) }));
+  const normality = payload?.normality?.[metric]?.[scale] ?? {};
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Distribution</span>
+        <h2>{metricLabel(metric)} · {scale}</h2>
+      </div>
+      <div className="mini-metric-row">
+        <KeyValue label="Jarque-Bera" value={formatAnalysisValue(normality.jarque_bera)} />
+        <KeyValue label="p approx" value={formatAnalysisValue(normality.jarque_bera_p_approx)} />
+        <KeyValue label="Skewness" value={formatAnalysisValue(normality.skewness)} />
+      </div>
+      <div className="chart-box compact-chart">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={histogram}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="bin" />
+            <YAxis />
+            <Tooltip />
+            <Bar dataKey="count" fill="#167343" name="Авторов" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="chart-box compact-chart">
+        <ResponsiveContainer width="100%" height="100%">
+          <ScatterChart>
+            <CartesianGrid />
+            <XAxis dataKey="x" name="normal quantile" />
+            <YAxis dataKey="y" name={metricLabel(metric)} />
+            <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+            <Scatter data={qq} fill="#155e75" />
+          </ScatterChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function CorrelationHeatmap({ payload, method, metrics }: { payload: any; method: "spearman" | "pearson_log1p" | "kendall_tau_b"; metrics: string[] }) {
+  const matrix = method === "kendall_tau_b" ? payload?.correlations?.kendall_tau_b?.matrix ?? {} : payload?.correlations?.[method] ?? {};
+  const skipped = payload?.correlations?.kendall_tau_b?.skipped ?? [];
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Correlation</span>
+        <h2>{correlationLabel(method)}</h2>
+      </div>
+      {method === "kendall_tau_b" && skipped.length > 0 && <div className="notice warn"><b>Kendall tau-b пропущен для части пар</b><span>Для точного расчета слишком много наблюдений; используйте когорту или меньший scope.</span></div>}
+      <div className="heatmap-grid" style={{ gridTemplateColumns: `minmax(86px, 1fr) repeat(${metrics.length}, minmax(58px, 1fr))` }}>
+        <span />
+        {metrics.map((metricName) => <b key={metricName}>{metricShortLabel(metricName)}</b>)}
+        {metrics.map((left) => (
+          <div className="heatmap-row-fragment" key={left}>
+            <b>{metricShortLabel(left)}</b>
+            {metrics.map((right) => {
+              const value = matrix?.[left]?.[right];
+              return <span key={`${left}-${right}`} style={{ background: correlationColor(value) }}>{value === null || value === undefined ? "—" : fmt(value)}</span>;
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RankShiftPanel({ payload, baselineMetric, compareMetric }: { payload: any; baselineMetric: string; compareMetric: string }) {
+  const comparison = payload?.rank_comparisons?.[compareMetric] ?? {};
+  const shifts = comparison?.largest_shifts ?? [];
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Rank shift</span>
+        <h2>{metricLabel(baselineMetric)} → {metricLabel(compareMetric)}</h2>
+      </div>
+      <div className="mini-metric-row">
+        <KeyValue label="Median abs delta" value={formatAnalysisValue(comparison.median_abs_delta)} />
+        <KeyValue label="P90 abs delta" value={formatAnalysisValue(comparison.p90_abs_delta)} />
+        <KeyValue label="Max abs delta" value={formatAnalysisValue(comparison.max_abs_delta)} />
+        <KeyValue label="Jaccard Top-N" value={formatAnalysisValue(comparison.jaccard_top_n_exact, true)} />
+      </div>
+      <div className="table-wrap">
+        <table className="analysis-table">
+          <thead><tr><th>Автор</th><th>Baseline</th><th>Metric</th><th>Delta</th></tr></thead>
+          <tbody>
+            {shifts.slice(0, 10).map((row: any) => (
+              <tr key={row.author_id}>
+                <td>{row.author_display_name || row.author_id}</td>
+                <td>{row.baseline_rank}</td>
+                <td>{row.metric_rank}</td>
+                <td>{row.rank_delta > 0 ? `+${row.rank_delta}` : row.rank_delta}</td>
+              </tr>
+            ))}
+            {shifts.length === 0 && <tr><td colSpan={4}>Нет сдвигов рангов для выбранной пары.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function TopOverlapPanel({ payload, baselineMetric }: { payload: any; baselineMetric: string }) {
+  const topOverlap = payload?.top_overlap ?? {};
+  const cuts = topOverlap.cuts ?? [];
+  const rows = topOverlap.matrix?.[baselineMetric] ?? {};
+  const metrics = Object.keys(rows).filter((metricName) => metricName !== baselineMetric);
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Top-N overlap</span>
+        <h2>Совпадение Top-N с {metricLabel(baselineMetric)}</h2>
+        <p>{topOverlap.mode === "exact_n_by_competition_rank_then_author_id" ? "Используется ровно N авторов после сортировки по rank и author_id." : ""}</p>
+      </div>
+      <div className="table-wrap">
+        <table className="analysis-table">
+          <thead><tr><th>Метрика</th>{cuts.map((cut: number) => <th key={cut}>@{cut}</th>)}</tr></thead>
+          <tbody>
+            {metrics.map((metricName) => (
+              <tr key={metricName}>
+                <th>{metricLabel(metricName)}</th>
+                {cuts.map((cut: number) => {
+                  const cell = rows?.[metricName]?.[String(cut)] ?? {};
+                  return <td key={cut}>{fmt(cell.overlap ?? 0)} / J {formatAnalysisValue(cell.jaccard, true)}</td>;
+                })}
+              </tr>
+            ))}
+            {metrics.length === 0 && <tr><td colSpan={cuts.length + 1}>Нет данных overlap.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ScorecardTable({ payload, metrics }: { payload: any; metrics: string[] }) {
+  const scorecard = payload?.metric_scorecard ?? {};
+  const columns = [
+    ["publication_volume_dependence", "P"],
+    ["citation_volume_dependence", "C"],
+    ["fractional_citation_dependence", "C_frac"],
+    ["top1_dominance_dependence", "Top1"],
+    ["tie_rate", "Tie"],
+    ["zero_rate", "Zero"],
+    ["outlier_share_iqr", "Outliers"],
+  ] as const;
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Scorecard</span>
+        <h2>Зависимости и дискриминирующая способность</h2>
+      </div>
+      <div className="table-wrap">
+        <table className="analysis-table">
+          <thead><tr><th>Метрика</th>{columns.map(([, label]) => <th key={label}>{label}</th>)}</tr></thead>
+          <tbody>
+            {metrics.map((metricName) => {
+              const row = scorecard?.[metricName] ?? {};
+              return (
+                <tr key={metricName}>
+                  <th>{metricLabel(metricName)}</th>
+                  {columns.map(([key]) => <td key={key}>{formatScorecardCell(row[key])}</td>)}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function InterpretationPanel({ payload }: { payload: any }) {
+  const interpretation = payload?.interpretation ?? {};
+  const basis = interpretation.candidate_balanced_metric_basis ?? [];
+  const notes = interpretation.notes ?? [];
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Вывод</span>
+        <h2>Предварительная интерпретация</h2>
+      </div>
+      <div className="key-grid">
+        <KeyValue label="Кандидатный сбалансированный индекс" value={interpretation.candidate_balanced_metric ? metricLabel(interpretation.candidate_balanced_metric) : "не определен"} />
+        <KeyValue label="Baseline" value={metricLabel(interpretation.baseline_metric ?? "")} />
+      </div>
+      {basis.length > 0 && <div className="method-grid">{basis.map((item: string) => <CheckPill key={item} active label={item} />)}</div>}
+      {notes.length > 0 && <ul className="plain-list">{notes.map((item: string) => <li key={item}>{item}</li>)}</ul>}
+      <div className="notice">
+        <b>Описание не является экспертным заключением</b>
+        <span>Автоматический текст только помогает интерпретировать текущую выборку; итоговый вывод должен ссылаться на таблицы, графики и паспорт scope.</span>
+      </div>
+    </section>
   );
 }
 
@@ -2257,6 +2673,60 @@ function extractDumpId(run: any) {
     ?? run?.result?.archive?.dump_id
     ?? "",
   ).trim();
+}
+
+function ensureCurrentOptions(options: SelectOption[], values: string[]) {
+  const missing = values
+    .filter((value) => value && !options.some((item) => item.value === value))
+    .map((value) => ({ value, label: metricLabel(value) }));
+  return [...missing, ...options];
+}
+
+function formatAnalysisValue(value: unknown, rate = false) {
+  if (value === null || value === undefined || value === "") return "—";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  return rate ? `${fmt(numeric * 100)}%` : fmt(numeric);
+}
+
+function formatScorecardCell(value: unknown) {
+  if (value && typeof value === "object" && "abs_spearman_rho" in value) {
+    const payload = value as { abs_spearman_rho?: number | null; spearman_rho?: number | null; direction?: string };
+    if (payload.abs_spearman_rho === null || payload.abs_spearman_rho === undefined) return "—";
+    const arrow = payload.direction === "negative" ? "−" : payload.direction === "positive" ? "+" : "";
+    return `${fmt(payload.abs_spearman_rho)} ${arrow}`;
+  }
+  return formatAnalysisValue(value, true);
+}
+
+function metricShortLabel(value: string) {
+  const labels: Record<string, string> = {
+    p: "P",
+    c: "C",
+    c_frac: "Cfr",
+    h: "h",
+    i10: "i10",
+    g: "g",
+    m_local: "m",
+    top1_share: "top1",
+    iupv: "IUPV",
+    islv: "ISLV",
+    lrdi: "LRDI",
+  };
+  return labels[value] ?? value;
+}
+
+function correlationLabel(method: "spearman" | "pearson_log1p" | "kendall_tau_b") {
+  if (method === "pearson_log1p") return "Pearson log1p";
+  if (method === "kendall_tau_b") return "Kendall tau-b";
+  return "Spearman";
+}
+
+function correlationColor(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "#f3f6f9";
+  const alpha = Math.min(0.42, Math.max(0.08, Math.abs(numeric) * 0.32 + 0.1));
+  return numeric >= 0 ? `rgba(22, 115, 67, ${alpha})` : `rgba(21, 94, 117, ${alpha})`;
 }
 
 function MetricCard({ label, value }: { label: string; value: string | number }) {

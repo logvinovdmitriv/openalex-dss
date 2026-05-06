@@ -249,6 +249,30 @@ export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string
   return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, cohort_id: cohortId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
 }
 
+export function scientometricsUrl(params: {
+  filters: ActiveFilters;
+  fractionMode: string;
+  metrics: string[];
+  baselineMetric: string;
+  rankTopN: number;
+  runId?: string;
+  dumpId?: string;
+  cohortId?: string;
+  cohortFilterPolicy?: CohortFilterPolicy;
+}) {
+  const query = filterParams(params.filters, {
+    fraction_mode: params.fractionMode,
+    metrics: params.metrics.join(","),
+    baseline_metric: params.baselineMetric,
+    top_n: params.rankTopN,
+    run_id: params.runId ?? "",
+    dump_id: params.dumpId ?? "",
+    cohort_id: params.cohortId ?? "",
+    cohort_filter_policy: params.cohortFilterPolicy ?? "membership",
+  });
+  return `/analytics/scientometrics?${query.toString()}`;
+}
+
 export function cohortAuthorMetricsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", format: "csv" | "json" = "csv", cohortFilterPolicy: CohortFilterPolicy = "membership") {
   return `/cohorts/${encodeURIComponent(cohortId)}/author-metrics.${format}?${filterParams(filters, { fraction_mode: fractionMode, metric, run_id: runId, dump_id: dumpId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
 }

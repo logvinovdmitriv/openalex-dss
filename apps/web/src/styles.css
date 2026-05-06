@@ -969,6 +969,121 @@ input[aria-invalid="true"] {
   height: clamp(280px, 42vw, 470px);
 }
 
+.chart-box.compact-chart {
+  height: 250px;
+  margin-top: 10px;
+}
+
+.metric-choice-grid {
+  margin-top: 12px;
+}
+
+.mini-metric-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.analysis-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.analysis-table th,
+.analysis-table td {
+  border-bottom: 1px solid #e5edf5;
+  padding: 8px 9px;
+  text-align: right;
+  vertical-align: top;
+}
+
+.analysis-table th:first-child,
+.analysis-table td:first-child {
+  text-align: left;
+}
+
+.analysis-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  color: #40546a;
+  font-weight: 800;
+}
+
+.boxplot-svg {
+  width: 100%;
+  min-height: 260px;
+  overflow: visible;
+}
+
+.axis-line,
+.boxplot-whisker {
+  stroke: #9badbd;
+  stroke-width: 2;
+}
+
+.axis-label,
+.metric-axis-label {
+  fill: #52677a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.boxplot-box {
+  fill: #d8f0e2;
+  stroke: var(--success);
+  stroke-width: 2;
+}
+
+.boxplot-box.muted {
+  fill: #eef2f6;
+  stroke: #9badbd;
+}
+
+.boxplot-median {
+  stroke: #0e4a5d;
+  stroke-width: 3;
+}
+
+.boxplot-outlier {
+  fill: #9a5b00;
+}
+
+.heatmap-grid {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.heatmap-grid > b,
+.heatmap-grid > span,
+.heatmap-row-fragment > b,
+.heatmap-row-fragment > span {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  color: #172127;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.heatmap-row-fragment {
+  display: contents;
+}
+
+.heatmap-row-fragment > b {
+  background: var(--surface-raised);
+  color: #40546a;
+  text-align: left;
+}
+
 .table-panel {
   min-height: 420px;
 }
