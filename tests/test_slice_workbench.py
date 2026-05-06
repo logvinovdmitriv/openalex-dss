@@ -616,6 +616,38 @@ class SliceWorkbenchTests(unittest.TestCase):
                 self.assertEqual(materialization["accepted_estimate_signature"], "new-estimate")
                 self.assertEqual(materialization["accepted_download_signature"], "new-download")
 
+    def test_materialization_technical_payload_is_normalized_with_signatures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_plan = {
+                "decision": {"status": "can_fetch", "can_execute": True, "reasons": [], "warnings": []},
+                "estimate": {"estimate_count": 10, "estimate_signature": "estimate-ok", "download_signature": "download-ok"},
+                "openalex_filter": "from_publication_date:2020-01-01",
+                "filter_classes": {},
+                "download_policy": {"user_controls_download_after_estimate": True},
+                "limits": {},
+            }
+            with (
+                patch.object(slice_workbench, "SLICES_DIR", tmp_path / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan),
+            ):
+                created = slice_workbench.create_slice(
+                    {
+                        "slice_id": "slice_payload",
+                        "filter_mode": "all",
+                        "accepted_download_signature": "old-download",
+                        "unknown_legacy": "drop-me",
+                    }
+                )
+                materialization = slice_workbench.create_materialization_plan(created["slice_id"])
+
+        technical = materialization["technical_payload"]
+        self.assertEqual(technical["accepted_estimate_signature"], "estimate-ok")
+        self.assertEqual(technical["accepted_download_signature"], "download-ok")
+        self.assertEqual(technical["download_policy"]["user_controls_download_after_estimate"], True)
+        self.assertNotIn("unknown_legacy", technical)
+
 
 if __name__ == "__main__":
     unittest.main()

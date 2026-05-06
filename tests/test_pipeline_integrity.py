@@ -359,11 +359,15 @@ class PipelineIntegrityTests(unittest.TestCase):
             patch.object(pipeline, "recalculate", side_effect=fake_recalculate),
             patch.object(pipeline, "import_local_file", side_effect=fake_import),
         ):
-            jobs._dispatch("run_scope", "recalculate", {"dump_id": "dump_scope"})
-            jobs._dispatch("run_scope_import", "import_file", {"source_path": "/tmp/works.jsonl.gz"})
+            jobs._dispatch("run_scope", "recalculate", {"dump_id": "dump_scope", "unknown_legacy": "drop-me"})
+            jobs._dispatch("run_scope_import", "import_file", {"source_path": "/tmp/works.jsonl.gz", "unknown_legacy": "drop-me"})
 
         self.assertEqual(captured["recalculate"]["run_id"], "run_scope")
+        self.assertEqual(captured["recalculate"]["dump_id"], "dump_scope")
+        self.assertNotIn("unknown_legacy", captured["recalculate"])
         self.assertEqual(captured["import_file"]["run_id"], "run_scope_import")
+        self.assertEqual(captured["import_file"]["source_path"], "/tmp/works.jsonl.gz")
+        self.assertNotIn("unknown_legacy", captured["import_file"])
 
     def test_archive_does_not_overwrite_existing_dump_manifest_on_recalculate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

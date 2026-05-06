@@ -23,7 +23,7 @@ from app.api.routes import runs as runs_routes  # noqa: E402
 from app.api.routes import slices as slices_routes  # noqa: E402
 from app.api import schemas as public_schemas  # noqa: E402
 from app.api.schemas import AnalysisRunRequest, RunRequest, SliceCreateRequest  # noqa: E402
-from app.services.internal_payloads import InternalPipelinePayload  # noqa: E402
+from app.services.internal_payloads import InternalPipelinePayload, normalize_internal_pipeline_payload  # noqa: E402
 
 
 class PublicApiSurfaceTests(unittest.TestCase):
@@ -110,9 +110,38 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertIn("per_page", internal_props)
         self.assertIn("raw_openalex_filter", internal_props)
         self.assertIn("accepted_download_signature", internal_props)
+        self.assertIn("download_policy", internal_props)
+        self.assertIn("dump_manifest", internal_props)
+        self.assertIn("analysis_eligibility", internal_props)
+        self.assertIn("run_id", internal_props)
+        self.assertIn("dump_id", internal_props)
         internal = InternalPipelinePayload(filter_mode="all", api_key="secret", workflow_mode="strict_works", extra_legacy="ignored")
         self.assertEqual(internal.api_key, "secret")
         self.assertEqual(internal.workflow_mode, "strict_works")
+
+    def test_internal_pipeline_payload_normalizer_keeps_service_context_and_drops_unknown_extras(self) -> None:
+        normalized = normalize_internal_pipeline_payload(
+            {
+                "filter_mode": "all",
+                "api_key": "secret",
+                "accepted_download_signature": "download-ok",
+                "download_policy": {"complete_slice_required": True},
+                "run_id": "run_a",
+                "dump_id": "dump_a",
+                "dump_manifest": {"dump_id": "dump_a"},
+                "analysis_eligibility": {"status": "final", "allowed_for_final_analysis": True},
+                "unknown_legacy": "drop-me",
+            }
+        )
+
+        self.assertEqual(normalized["api_key"], "secret")
+        self.assertEqual(normalized["accepted_download_signature"], "download-ok")
+        self.assertEqual(normalized["download_policy"], {"complete_slice_required": True})
+        self.assertEqual(normalized["run_id"], "run_a")
+        self.assertEqual(normalized["dump_id"], "dump_a")
+        self.assertEqual(normalized["dump_manifest"], {"dump_id": "dump_a"})
+        self.assertEqual(normalized["analysis_eligibility"]["status"], "final")
+        self.assertNotIn("unknown_legacy", normalized)
 
     def test_run_request_exposes_only_recalculate_action(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.paths import DATA
+from app.services.internal_payloads import normalize_internal_pipeline_payload
 from app.services import pipeline, query_planner
 
 
@@ -21,6 +22,7 @@ _RUN_EXECUTION_PAYLOADS: dict[str, tuple[str, dict[str, Any]]] = {}
 
 
 def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) -> dict[str, Any]:
+    payload = normalize_internal_pipeline_payload(payload)
     if action in {"build_from_openalex", "fetch_slice_dump"} and not _allow_unchecked_download() and not (
         str(payload.get("accepted_estimate_signature") or "").strip()
         and str(payload.get("accepted_download_signature") or "").strip()
@@ -116,6 +118,7 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
 
 
 def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    payload = normalize_internal_pipeline_payload(payload)
     if action == "plan":
         return query_planner.plan_slice(payload)
     if action == "fetch_slice_dump":
@@ -138,21 +141,25 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
         if not analysis_eligibility["allowed_for_final_analysis"] and not _allow_unchecked_download():
             raise ValueError("Дамп не допущен к финальному анализу. Обновите оценку и скачивание либо используйте явный dev-режим.")
         update_progress(run_id, 96, "normalizing local file", {"source_path": raw_jsonl})
-        built = pipeline.import_local_file({
-            **payload,
-            "source_path": raw_jsonl,
-            "api_key": None,
-            "run_id": run_id,
-            "dump_id": dump.get("dump_id"),
-            "dump_manifest": dump,
-            "analysis_eligibility": analysis_eligibility,
-            "import_mode": "final_reproducible" if analysis_eligibility["allowed_for_final_analysis"] else "exploratory",
-        })
+        built = pipeline.import_local_file(
+            normalize_internal_pipeline_payload(
+                {
+                    **payload,
+                    "source_path": raw_jsonl,
+                    "api_key": None,
+                    "run_id": run_id,
+                    "dump_id": dump.get("dump_id"),
+                    "dump_manifest": dump,
+                    "analysis_eligibility": analysis_eligibility,
+                    "import_mode": "final_reproducible" if analysis_eligibility["allowed_for_final_analysis"] else "exploratory",
+                }
+            )
+        )
         return {"fetch": fetched, "build": built, "no_data": False, "analysis_eligibility": analysis_eligibility}
     if action == "import_file":
-        return pipeline.import_local_file({**payload, "run_id": run_id})
+        return pipeline.import_local_file(normalize_internal_pipeline_payload({**payload, "run_id": run_id}))
     if action == "recalculate":
-        return pipeline.recalculate({**payload, "run_id": run_id})
+        return pipeline.recalculate(normalize_internal_pipeline_payload({**payload, "run_id": run_id}))
     raise ValueError(f"Unsupported run action: {action}")
 
 

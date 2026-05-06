@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.paths import DATA
+from app.services.internal_payloads import normalize_internal_pipeline_payload
 from app.services import author_slice, jobs, metadata_store, query_planner, registry, warehouse
 from openalex_mvp.openalex import cli_download_signature, corpus_request
 
@@ -25,11 +26,11 @@ def list_slices(limit: int = 50) -> dict[str, Any]:
 
 def create_slice(payload: dict[str, Any]) -> dict[str, Any]:
     _ensure_dirs()
-    technical_payload = _technical_payload(payload)
+    technical_payload = normalize_internal_pipeline_payload(_technical_payload(payload))
     cfg = author_slice.config_from_payload({**technical_payload, "workflow_mode": "strict_works"})
     slice_fingerprint = _slice_fingerprint(cfg)
     slice_id = _slice_id(payload, cfg, slice_fingerprint)
-    technical_payload = {**technical_payload, "slice_name": slice_id}
+    technical_payload = normalize_internal_pipeline_payload({**technical_payload, "slice_name": slice_id})
     cfg = author_slice.config_from_payload({**technical_payload, "workflow_mode": "strict_works"})
     now = _now()
     doc = {
@@ -95,11 +96,13 @@ def resolve_slice(slice_id: str) -> dict[str, Any]:
 
 def estimate_slice(slice_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     doc = get_slice(slice_id)
-    merged_payload = {
-        **doc["technical_payload"],
-        "download_policy": _download_policy(payload or {}, fallback=doc.get("download_policy_default")),
-        **_technical_payload(payload or {}),
-    }
+    merged_payload = normalize_internal_pipeline_payload(
+        {
+            **doc["technical_payload"],
+            "download_policy": _download_policy(payload or {}, fallback=doc.get("download_policy_default")),
+            **_technical_payload(payload or {}),
+        }
+    )
     plan = query_planner.plan_slice(merged_payload)
     estimate = {
         "slice_id": slice_id,
@@ -139,6 +142,15 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         storage_profile_id=str(profile["profile_id"]),
         download_policy=download_policy,
     )
+    technical_payload = normalize_internal_pipeline_payload(
+        {
+            **doc["technical_payload"],
+            "source_strategy": source_strategy,
+            "download_policy": download_policy,
+            "accepted_estimate_signature": (estimate.get("estimate") or {}).get("estimate_signature"),
+            "accepted_download_signature": (estimate.get("estimate") or {}).get("download_signature"),
+        }
+    )
     materialization = {
         "materialization_id": plan_id,
         "slice_id": slice_id,
@@ -153,13 +165,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         "estimated": estimate,
         "accepted_estimate_signature": (estimate.get("estimate") or {}).get("estimate_signature"),
         "accepted_download_signature": (estimate.get("estimate") or {}).get("download_signature"),
-        "technical_payload": {
-            **doc["technical_payload"],
-            "source_strategy": source_strategy,
-            "download_policy": download_policy,
-            "accepted_estimate_signature": (estimate.get("estimate") or {}).get("estimate_signature"),
-            "accepted_download_signature": (estimate.get("estimate") or {}).get("download_signature"),
-        },
+        "technical_payload": technical_payload,
         "outputs": [
             "raw/openalex_cli/{slice_id}/works.jsonl.gz",
             "tables/{dump_id}/works.parquet",
@@ -180,7 +186,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
 
 def run_materialization(materialization_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     plan = get_materialization_plan(materialization_id)
-    run_payload = {**plan["technical_payload"], "materialization_id": plan["materialization_id"], **(payload or {})}
+    run_payload = normalize_internal_pipeline_payload({**plan["technical_payload"], "materialization_id": plan["materialization_id"], **(payload or {})})
     run = jobs.create_run("build_from_openalex", run_payload, autostart=False)
     plan["state"] = "materializing"
     plan["run_id"] = run["run_id"]
