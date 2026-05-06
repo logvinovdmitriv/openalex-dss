@@ -517,6 +517,10 @@ class PipelineIntegrityTests(unittest.TestCase):
                         "run_id": "run_active",
                         "dump_id": "dump_active",
                         "active_context_source": "test_archive",
+                        "analysis_eligibility": {
+                            "status": "dev_only_not_for_final_analysis",
+                            "allowed_for_final_analysis": False,
+                        },
                         "input_tables": {},
                         "input_table_checksums": {},
                     },
@@ -528,6 +532,8 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(active["active_dump_id"], "dump_active")
         self.assertEqual(active["source"], "test_archive")
         self.assertEqual(active["run_dir"], str(root / "runs" / "run_active"))
+        self.assertEqual(active["analysis_eligibility_status"], "dev_only_not_for_final_analysis")
+        self.assertEqual(active["allowed_for_final_analysis"], False)
 
     def test_run_scoped_report_does_not_fallback_to_latest_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

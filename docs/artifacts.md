@@ -49,10 +49,14 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   "active_run_id": "run_...",
   "active_dump_id": "dump_...",
   "source": "materialization|recalculate|import_local_file|dev_import_file",
+  "analysis_eligibility_status": "final",
+  "allowed_for_final_analysis": true,
   "updated_at_utc": "2026-05-07T00:00:00Z"
 }
 ```
 
 It can replace large latest-view copies in a later storage cleanup. During the
 transition, latest-view files remain a compatibility layer while scoped
-artifacts remain the source of truth.
+artifacts remain the source of truth. `/workbench` exposes this pointer for UI
+state, but final analytics and reports should still use explicit scope
+parameters.

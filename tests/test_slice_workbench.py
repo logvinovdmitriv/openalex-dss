@@ -19,6 +19,14 @@ from app.services import author_slice, slice_workbench  # noqa: E402
 class SliceWorkbenchTests(unittest.TestCase):
     def test_workbench_summary_carries_quality_and_slice_centric_workflow(self) -> None:
         quality = {"quality_counts": {"works_without_authorships": 2, "authorships_null_author_id": 1}}
+        active_context = {
+            "active_run_id": "run_a",
+            "active_dump_id": "dump_a",
+            "source": "materialization",
+            "updated_at_utc": "2026-05-07T00:00:00Z",
+            "analysis_eligibility_status": "final",
+            "allowed_for_final_analysis": True,
+        }
         with (
             patch.object(
                 slice_workbench.warehouse,
@@ -26,6 +34,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                 return_value={"works": {"rows": 3}, "authorships": {"rows": 4}, "indices": {"rows": 2}},
             ),
             patch.object(slice_workbench.warehouse, "read_json_doc", return_value=quality),
+            patch.object(slice_workbench.artifact_context, "read_active_context", return_value=active_context),
             patch.object(slice_workbench, "list_slices", return_value={"slices": [{"slice_id": "slice_a", "state": "ready"}], "total": 1}),
             patch.object(slice_workbench, "list_materialization_plans", return_value={"materializations": []}),
             patch.object(slice_workbench, "list_dumps", return_value={"dumps": [{"dump_id": "dump_a"}], "total": 1}),
@@ -33,9 +42,15 @@ class SliceWorkbenchTests(unittest.TestCase):
             summary = slice_workbench.workbench_summary()
 
         self.assertEqual(summary["quality"], quality)
+        self.assertEqual(summary["active_context"], active_context)
         self.assertEqual(summary["workflow"]["active_stage"], "analyzed")
+        self.assertEqual(summary["workflow"]["active_run_id"], "run_a")
+        self.assertEqual(summary["workflow"]["active_dump_id"], "dump_a")
+        self.assertEqual(summary["workflow"]["active_context_source"], "materialization")
         self.assertEqual(summary["workflow"]["current_slice"]["slice_id"], "slice_a")
         self.assertEqual(summary["workflow"]["quality_summary"]["quality_flags"], 3)
+        self.assertEqual(summary["workflow"]["quality_summary"]["analysis_eligibility_status"], "final")
+        self.assertEqual(summary["workflow"]["quality_summary"]["allowed_for_final_analysis"], True)
 
     def test_workbench_summary_prioritizes_active_materialization(self) -> None:
         with (
@@ -45,6 +60,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                 return_value={"works": {"rows": 3}, "authorships": {"rows": 4}, "indices": {"rows": 2}},
             ),
             patch.object(slice_workbench.warehouse, "read_json_doc", return_value={}),
+            patch.object(slice_workbench.artifact_context, "read_active_context", return_value={}),
             patch.object(slice_workbench, "list_slices", return_value={"slices": [{"slice_id": "slice_a", "state": "ready"}], "total": 1}),
             patch.object(
                 slice_workbench,

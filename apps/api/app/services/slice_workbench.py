@@ -10,7 +10,7 @@ from typing import Any
 
 from app.core.paths import DATA
 from app.services.internal_payloads import normalize_internal_pipeline_payload
-from app.services import author_slice, jobs, metadata_store, query_planner, registry, warehouse
+from app.services import artifact_context, author_slice, jobs, metadata_store, query_planner, registry, warehouse
 from openalex_mvp.openalex import cli_download_signature, corpus_request
 
 
@@ -288,6 +288,7 @@ def workbench_summary() -> dict[str, Any]:
     materializations = list_materialization_plans(limit=20)
     dumps = list_dumps(limit=20)
     quality = warehouse.read_json_doc("quality") or {}
+    active_context = artifact_context.read_active_context()
     return {
         "states": SLICE_STATES,
         "slices": slices["slices"],
@@ -295,12 +296,14 @@ def workbench_summary() -> dict[str, Any]:
         "dumps": dumps["dumps"],
         "tables": tables,
         "quality": quality,
+        "active_context": active_context,
         "workflow": _workbench_workflow(
             tables=tables,
             slices=slices["slices"],
             materializations=materializations["materializations"],
             dumps=dumps["dumps"],
             quality=quality,
+            active_context=active_context,
         ),
     }
 
@@ -370,6 +373,7 @@ def _workbench_workflow(
     materializations: list[dict[str, Any]],
     dumps: list[dict[str, Any]],
     quality: dict[str, Any],
+    active_context: dict[str, Any],
 ) -> dict[str, Any]:
     rows = {name: int((info or {}).get("rows") or 0) for name, info in tables.items()}
     active_stage = "idle"
@@ -387,12 +391,18 @@ def _workbench_workflow(
     quality_counts = quality.get("quality_counts") or {}
     return {
         "active_stage": active_stage,
+        "active_run_id": active_context.get("active_run_id"),
+        "active_dump_id": active_context.get("active_dump_id"),
+        "active_context_source": active_context.get("source"),
+        "active_context_updated_at_utc": active_context.get("updated_at_utc"),
         "current_slice": slices[0] if slices else {},
         "quality_summary": {
             "quality_flags": sum(int(value or 0) for value in quality_counts.values()),
             "works": rows.get("works", 0),
             "authorships": rows.get("authorships", 0),
             "authors_indexed": rows.get("indices", 0),
+            "analysis_eligibility_status": active_context.get("analysis_eligibility_status"),
+            "allowed_for_final_analysis": bool(active_context.get("allowed_for_final_analysis")),
         },
     }
 

@@ -151,10 +151,33 @@ export type WorkbenchRun = {
   result?: Record<string, unknown> | null;
 };
 
+export type WorkbenchActiveContext = {
+  active_run_id?: string;
+  active_dump_id?: string;
+  source?: string;
+  updated_at_utc?: string;
+  analysis_eligibility_status?: string | null;
+  allowed_for_final_analysis?: boolean;
+  run_dir?: string;
+  dump_dir?: string;
+  tables_dir?: string;
+};
+
+export type WorkbenchWorkflow = {
+  active_stage?: string;
+  active_run_id?: string | null;
+  active_dump_id?: string | null;
+  active_context_source?: string | null;
+  active_context_updated_at_utc?: string | null;
+  current_slice?: Record<string, unknown>;
+  quality_summary?: Record<string, unknown>;
+};
+
 export type WorkbenchState = {
   tables?: Record<string, { rows?: number }>;
-  workflow?: Record<string, unknown>;
+  workflow?: WorkbenchWorkflow;
   quality?: Record<string, unknown>;
+  active_context?: WorkbenchActiveContext;
 };
 
 export type LocalDataSummary = {

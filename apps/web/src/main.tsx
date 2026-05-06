@@ -68,6 +68,7 @@ import {
   type ScientometricFinding,
   type View,
   type WorkbenchRun,
+  type WorkbenchState,
 } from "./workbench";
 import "./styles.css";
 
@@ -166,7 +167,7 @@ function Workbench() {
 
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => getJson<any>("/registry") });
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => getJson<any>("/catalog") });
-  const workbench = useQuery({ queryKey: ["workbench"], queryFn: () => getJson<any>("/workbench") });
+  const workbench = useQuery({ queryKey: ["workbench"], queryFn: () => getJson<WorkbenchState>("/workbench") });
   const dumps = useQuery({ queryKey: ["dumps"], queryFn: () => getJson<any>("/dumps?limit=50") });
   const cohorts = useQuery({ queryKey: ["cohorts"], queryFn: () => getJson<any>("/cohorts?limit=50") });
   const countries = useQuery({ queryKey: ["countries"], queryFn: () => getJson<any>("/openalex/countries?limit=50") });

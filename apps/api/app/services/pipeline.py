@@ -475,12 +475,19 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
             shutil.copy2(source, target)
             copied[f"tables_by_dump/{rel}"] = str(target)
 
+    eligibility = payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else {}
     active_context = artifact_context.write_active_context(
         run_id=run_id,
         dump_id=dump_id,
         source=str(payload.get("active_context_source") or "pipeline"),
         data_dir=DATA,
-        extra={"run_dir": str(run_dir), "dump_dir": str(dump_dir), "tables_dir": str(tables_dir)},
+        extra={
+            "run_dir": str(run_dir),
+            "dump_dir": str(dump_dir),
+            "tables_dir": str(tables_dir),
+            "analysis_eligibility_status": eligibility.get("status"),
+            "allowed_for_final_analysis": bool(eligibility.get("allowed_for_final_analysis")),
+        },
     )
 
     return {
