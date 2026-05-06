@@ -19,7 +19,7 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="openalex-dss-r
 _LOCK = threading.Lock()
 _RUNS: dict[str, dict[str, Any]] = {}
 _RUN_EXECUTION_PAYLOADS: dict[str, tuple[str, dict[str, Any]]] = {}
-SUPPORTED_JOB_ACTIONS = analysis_jobs.ANALYSIS_ACTIONS | materialization_jobs.MATERIALIZATION_ACTIONS
+SUPPORTED_JOB_ACTIONS = analysis_jobs.ANALYSIS_ACTIONS | materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS
 
 
 def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) -> dict[str, Any]:
@@ -124,7 +124,7 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
     payload = normalize_internal_pipeline_payload(payload)
     if action in analysis_jobs.ANALYSIS_ACTIONS:
         return analysis_jobs.recalculate(run_id, payload)
-    if action in materialization_jobs.MATERIALIZATION_ACTIONS:
+    if action in materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS:
         return materialization_jobs.dispatch(
             run_id,
             action,

@@ -7,7 +7,10 @@ from app.services import pipeline
 from app.services.internal_payloads import normalize_internal_pipeline_payload
 
 
-MATERIALIZATION_ACTIONS = {"fetch_slice_dump", "build_from_openalex", "import_file"}
+MATERIALIZATION_ACTIONS = {"fetch_slice_dump", "build_from_openalex"}
+# Retained for deterministic fixture/dev imports; it is not part of the public API.
+DEV_MATERIALIZATION_ACTIONS = {"import_file"}
+SUPPORTED_MATERIALIZATION_ACTIONS = MATERIALIZATION_ACTIONS | DEV_MATERIALIZATION_ACTIONS
 REQUIRES_ACCEPTED_SIGNATURE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
 MATERIALIZATION_LIFECYCLE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
 

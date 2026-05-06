@@ -123,6 +123,21 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(run["payload"]["dump_id"], "dump_a")
         self.assertEqual(run["status"], "queued")
 
+    def test_import_file_job_action_is_dev_supported_without_signatures(self) -> None:
+        self.assertNotIn("import_file", materialization_jobs.MATERIALIZATION_ACTIONS)
+        self.assertIn("import_file", materialization_jobs.DEV_MATERIALIZATION_ACTIONS)
+        self.assertIn("import_file", materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS)
+        self.assertNotIn("import_file", materialization_jobs.REQUIRES_ACCEPTED_SIGNATURE_ACTIONS)
+        self.assertNotIn("import_file", materialization_jobs.MATERIALIZATION_LIFECYCLE_ACTIONS)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(jobs, "RUNS_DIR", Path(tmp) / "runs"):
+                run = jobs.create_run("import_file", {"source_path": "/tmp/works.jsonl.gz"}, autostart=False)
+
+        self.assertEqual(run["action"], "import_file")
+        self.assertEqual(run["payload"]["source_path"], "/tmp/works.jsonl.gz")
+        self.assertEqual(run["status"], "queued")
+
     def test_cli_origin_fetch_meta_keeps_dump_manifest_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
