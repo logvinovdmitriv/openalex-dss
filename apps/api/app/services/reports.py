@@ -7,7 +7,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from app.core.paths import DATA, JSON_FILES
-from app.services import warehouse
+from app.services import cohorts, warehouse
+from app.services.analysis_filters import clean_analysis_filters
 
 
 def build_report_bundle(
@@ -21,14 +22,38 @@ def build_report_bundle(
     cohort_id: str = "",
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
+    cohort: dict[str, Any] = {}
+    cohort_author_ids: set[str] | None = None
+    if cohort_id:
+        cohort_ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        cohort = cohort_ctx["cohort"]
+        cohort_author_ids = cohort_ctx["author_ids"]
+        run_id = cohort_ctx["run_id"]
+        dump_id = cohort_ctx["dump_id"]
+        filters = cohort_ctx["filters"]
     scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
+    if not (run_id or dump_id):
+        report_scope = _report_scope(
+            run_id=run_id,
+            dump_id=dump_id,
+            filters=filters,
+            cohort_id=cohort_id,
+            cohort_checksum=str(cohort.get("checksum") or ""),
+            cohort_n_authors=int(cohort.get("n_authors") or 0),
+            metric=metric,
+            fraction_mode=fraction_mode,
+            limit=limit,
+        )
+        return _preview_report(report_scope)
     report_scope = _report_scope(
         run_id=run_id,
         dump_id=dump_id,
         filters=filters,
         cohort_id=cohort_id,
+        cohort_checksum=str(cohort.get("checksum") or ""),
+        cohort_n_authors=int(cohort.get("n_authors") or 0),
         metric=metric,
         fraction_mode=fraction_mode,
         limit=limit,
@@ -60,8 +85,8 @@ def build_report_bundle(
     request = state.get("request") or {}
     analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
 
-    top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500, run_id=run_id, dump_id=dump_id)
-    distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id)
+    top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500, run_id=run_id, dump_id=dump_id, author_ids=cohort_author_ids)
+    distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id, author_ids=cohort_author_ids)
     resolved_dump_id = dump_id or str(top.get("dump_id") or calculation_passport.get("dump_id") or "")
     report_scope["dump_id"] = resolved_dump_id
     export_query = _query_params(
@@ -95,6 +120,7 @@ def build_report_bundle(
         "report_scope": report_scope,
         "filters": filters,
         "cohort_id": cohort_id,
+        "cohort": _cohort_summary(cohort),
         "interpretation_policy": {
             "strict_mode": "Математические выводы строятся только по локально пересчитанным works-based индексам.",
             "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения; корпус Works скачивается через OpenAlex CLI.",
@@ -148,6 +174,13 @@ def report_bundle_json(
     cohort_id: str = "",
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
+    cohort: dict[str, Any] = {}
+    if cohort_id:
+        cohort_ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        cohort = cohort_ctx["cohort"]
+        run_id = cohort_ctx["run_id"]
+        dump_id = cohort_ctx["dump_id"]
+        filters = cohort_ctx["filters"]
     scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
@@ -156,6 +189,8 @@ def report_bundle_json(
         dump_id=dump_id,
         filters=filters,
         cohort_id=cohort_id,
+        cohort_checksum=str(cohort.get("checksum") or ""),
+        cohort_n_authors=int(cohort.get("n_authors") or 0),
         metric=metric,
         fraction_mode=fraction_mode,
         limit=limit,
@@ -235,7 +270,7 @@ def _incomplete_run_report(*, run_id: str, dump_id: str, missing: list[str], rep
 
 
 def _clean_filters(filters: dict[str, Any]) -> dict[str, str]:
-    return {key: str(value).strip() for key, value in sorted(filters.items()) if str(value or "").strip()}
+    return clean_analysis_filters(filters)
 
 
 def _report_scope(
@@ -244,6 +279,8 @@ def _report_scope(
     dump_id: str,
     filters: dict[str, str],
     cohort_id: str,
+    cohort_checksum: str,
+    cohort_n_authors: int,
     metric: str,
     fraction_mode: str,
     limit: int,
@@ -254,12 +291,40 @@ def _report_scope(
         "dump_id": dump_id,
         "filters": _clean_filters(filters),
         "cohort_id": str(cohort_id or "").strip(),
+        "cohort_checksum": str(cohort_checksum or "").strip(),
+        "cohort_n_authors": int(cohort_n_authors or 0),
         "metric": str(metric or "").strip(),
         "fraction_mode": str(fraction_mode or "").strip(),
         "limit": int(limit or 0),
     }
     blob = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return {**canonical, "report_scope_hash": hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]}
+
+
+def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "bundle_version": "report_bundle_v1",
+        "status": "preview_not_reproducible",
+        "run_id": "",
+        "dump_id": "",
+        "report_scope": report_scope,
+        "message": "Report build requires explicit run_id or dump_id for a reproducible report. Latest-view report mode is reserved for development preview only.",
+        "no_latest_fallback": False,
+    }
+
+
+def _cohort_summary(cohort: dict[str, Any]) -> dict[str, Any] | None:
+    if not cohort:
+        return None
+    return {
+        "cohort_id": cohort.get("cohort_id"),
+        "name": cohort.get("name"),
+        "source": cohort.get("source"),
+        "metric": cohort.get("metric"),
+        "fraction_mode": cohort.get("fraction_mode"),
+        "n_authors": cohort.get("n_authors"),
+        "checksum": cohort.get("checksum"),
+    }
 
 
 def _query_params(params: dict[str, Any]) -> str:

@@ -6,7 +6,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from app.services import warehouse
+from app.services import cohorts, warehouse
+from app.services.analysis_filters import build_analysis_filters
 
 
 router = APIRouter(tags=["analytics"])
@@ -16,6 +17,7 @@ router = APIRouter(tags=["analytics"])
 def analytics(
     run_id: str = "",
     dump_id: str = "",
+    cohort_id: str = "",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -71,11 +73,15 @@ def analytics(
         to_publication_date=to_publication_date,
         work_type=work_type,
     )
-    stats = warehouse.read_json_doc("stats", run_id=run_id) or {}
-    theory = warehouse.read_json_doc("theory", run_id=run_id) or {}
     try:
+        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        run_id = cohort_ctx["run_id"]
+        dump_id = cohort_ctx["dump_id"]
+        filters = cohort_ctx["filters"]
+        stats = warehouse.read_json_doc("stats", run_id=run_id) or {}
+        theory = warehouse.read_json_doc("theory", run_id=run_id) or {}
         filter_warnings = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
-        bundle = warehouse.metric_bundle(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id)
+        bundle = warehouse.metric_bundle(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
         distribution = bundle["distribution"]
         top = bundle["ranking"]
         metric_lines = bundle["line_series"]
@@ -97,6 +103,7 @@ def analytics(
         "percentile_scope": "current filtered author set",
         "metric_params": distribution.get("metric_params") or top.get("metric_params"),
         "filters": filters,
+        "cohort": cohort_ctx["cohort"],
         "filter_warnings": filter_warnings,
         "filtered_distribution": distribution,
         "filtered_top": top,
@@ -117,6 +124,7 @@ def analytics(
 def distribution(
     run_id: str = "",
     dump_id: str = "",
+    cohort_id: str = "",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -172,7 +180,12 @@ def distribution(
         work_type=work_type,
     )
     try:
-        payload = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id)
+        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        run_id = cohort_ctx["run_id"]
+        dump_id = cohort_ctx["dump_id"]
+        filters = cohort_ctx["filters"]
+        payload = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
+        payload["cohort"] = cohort_ctx["cohort"]
         payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
         return payload
     except ValueError as exc:
@@ -183,6 +196,7 @@ def distribution(
 def ranking_json(
     run_id: str = "",
     dump_id: str = "",
+    cohort_id: str = "",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -239,7 +253,12 @@ def ranking_json(
         work_type=work_type,
     )
     try:
-        payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=run_id, dump_id=dump_id)
+        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        run_id = cohort_ctx["run_id"]
+        dump_id = cohort_ctx["dump_id"]
+        filters = cohort_ctx["filters"]
+        payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
+        payload["cohort"] = cohort_ctx["cohort"]
         payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
         return payload
     except ValueError as exc:
@@ -250,6 +269,7 @@ def ranking_json(
 def ranking_csv(
     run_id: str = "",
     dump_id: str = "",
+    cohort_id: str = "",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -284,6 +304,7 @@ def ranking_csv(
         payload = ranking_json(
             run_id=run_id,
             dump_id=dump_id,
+            cohort_id=cohort_id,
             fraction_mode=fraction_mode,
             metric=metric,
             country_code=country_code,
@@ -353,28 +374,48 @@ def _slice_filters(
     to_publication_date: str = "",
     work_type: str = "",
 ) -> dict[str, str]:
+    return build_analysis_filters(
+        country_code=country_code,
+        filter_mode=filter_mode,
+        subject_level=subject_level,
+        subject_id=subject_id,
+        keyword_id=keyword_id,
+        keyword_display_name=keyword_display_name,
+        text_search_query=text_search_query,
+        author_id=author_id,
+        author_orcid=author_orcid,
+        author_display_name=author_display_name,
+        doi=doi,
+        affiliation_mode=affiliation_mode,
+        institution_id=institution_id,
+        source_id=source_id,
+        source_display_name=source_display_name,
+        source_type=source_type,
+        language=language,
+        open_access_is_oa=open_access_is_oa,
+        has_abstract=has_abstract,
+        min_cited_by_count=min_cited_by_count,
+        from_publication_date=from_publication_date,
+        to_publication_date=to_publication_date,
+        work_type=work_type,
+    )
+
+
+def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode: str, filters: dict[str, Any]) -> dict[str, Any]:
+    if not cohort_id:
+        return {"run_id": run_id, "dump_id": dump_id, "filters": filters, "author_ids": None, "cohort": None}
+    ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+    cohort = ctx["cohort"]
     return {
-        "country_code": country_code.strip().upper(),
-        "filter_mode": filter_mode.strip(),
-        "subject_level": subject_level.strip(),
-        "subject_id": subject_id.strip(),
-        "keyword_id": keyword_id.strip(),
-        "keyword_display_name": keyword_display_name.strip(),
-        "text_search_query": text_search_query.strip(),
-        "author_id": author_id.strip(),
-        "author_orcid": author_orcid.strip(),
-        "author_display_name": author_display_name.strip(),
-        "doi": doi.strip(),
-        "affiliation_mode": affiliation_mode.strip(),
-        "institution_id": institution_id.strip(),
-        "source_id": source_id.strip(),
-        "source_display_name": source_display_name.strip(),
-        "source_type": source_type.strip(),
-        "language": language.strip(),
-        "open_access_is_oa": open_access_is_oa.strip(),
-        "has_abstract": has_abstract.strip(),
-        "min_cited_by_count": str(min_cited_by_count) if min_cited_by_count else "",
-        "from_publication_date": from_publication_date.strip(),
-        "to_publication_date": to_publication_date.strip(),
-        "work_type": work_type.strip(),
+        "run_id": ctx["run_id"],
+        "dump_id": ctx["dump_id"],
+        "filters": ctx["filters"],
+        "author_ids": ctx["author_ids"],
+        "cohort": {
+            "cohort_id": cohort.get("cohort_id"),
+            "name": cohort.get("name"),
+            "source": cohort.get("source"),
+            "n_authors": cohort.get("n_authors"),
+            "checksum": cohort.get("checksum"),
+        },
     }

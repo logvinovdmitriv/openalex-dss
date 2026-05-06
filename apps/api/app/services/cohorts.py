@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.paths import DATA
+from app.services.analysis_filters import clean_analysis_filters
 from app.services import warehouse
 
 
@@ -94,6 +95,38 @@ def get_cohort(cohort_id: str) -> dict[str, Any]:
     if not path.exists():
         raise KeyError(cohort_id)
     return _read(path)
+
+
+def resolve_cohort_context(
+    cohort_id: str,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    fraction_mode: str = "",
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    cohort = get_cohort(cohort_id)
+    cohort_run_id = str(cohort.get("run_id") or "")
+    cohort_dump_id = str(cohort.get("dump_id") or "")
+    cohort_fraction_mode = str(cohort.get("fraction_mode") or "")
+    if run_id and cohort_run_id and run_id != cohort_run_id:
+        raise ValueError(f"cohort_id={cohort_id} belongs to run_id={cohort_run_id}, not run_id={run_id}")
+    if dump_id and cohort_dump_id and dump_id != cohort_dump_id:
+        raise ValueError(f"cohort_id={cohort_id} belongs to dump_id={cohort_dump_id}, not dump_id={dump_id}")
+    if fraction_mode and cohort_fraction_mode and fraction_mode != cohort_fraction_mode:
+        raise ValueError(f"cohort_id={cohort_id} uses fraction_mode={cohort_fraction_mode}, not fraction_mode={fraction_mode}")
+    request_filters = clean_analysis_filters(filters or {})
+    cohort_filters = clean_analysis_filters(cohort.get("filters") or {})
+    if request_filters and cohort_filters and request_filters != cohort_filters:
+        raise ValueError("Requested filters are incompatible with the stored cohort filters.")
+    return {
+        "cohort": cohort,
+        "author_ids": {str(author_id) for author_id in cohort.get("author_ids") or [] if str(author_id).strip()},
+        "run_id": run_id or cohort_run_id,
+        "dump_id": dump_id or cohort_dump_id,
+        "fraction_mode": fraction_mode or cohort_fraction_mode,
+        "filters": request_filters or cohort_filters,
+    }
 
 
 def cohort_statistics(cohort_id: str) -> dict[str, Any]:

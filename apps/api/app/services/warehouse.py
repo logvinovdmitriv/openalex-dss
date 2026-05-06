@@ -707,10 +707,12 @@ def metric_ranking(
     max_limit: int = 200,
     run_id: str = "",
     dump_id: str = "",
+    author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
     rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    rows = filter_rows_by_author_ids(rows, author_ids)
     return metric_ranking_from_rows(
         rows,
         fraction_mode,
@@ -776,10 +778,12 @@ def metric_distribution(
     *,
     run_id: str = "",
     dump_id: str = "",
+    author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
     rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    rows = filter_rows_by_author_ids(rows, author_ids)
     return metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id)
 
 
@@ -891,17 +895,26 @@ def metric_bundle(
     limit: int = 20,
     run_id: str = "",
     dump_id: str = "",
+    author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     rows = filtered_author_indices(fraction_mode, filters, run_id=scope["run_id"], dump_id=scope["dump_id"])
+    rows = filter_rows_by_author_ids(rows, author_ids)
     return {
         "rows": rows,
         "distribution": metric_distribution_from_rows(rows, fraction_mode, metric, run_id=scope["run_id"], dump_id=scope["dump_id"]),
         "ranking": metric_ranking_from_rows(rows, fraction_mode, metric, filters, limit=limit, max_limit=200, run_id=scope["run_id"], dump_id=scope["dump_id"]),
         "line_series": metric_line_series_from_rows(rows, fraction_mode, rank_metric=metric, limit=40, run_id=scope["run_id"], dump_id=scope["dump_id"]),
     }
+
+
+def filter_rows_by_author_ids(rows: list[dict[str, Any]], author_ids: set[str] | list[str] | tuple[str, ...] | None) -> list[dict[str, Any]]:
+    if not author_ids:
+        return rows
+    allowed = {str(author_id) for author_id in author_ids if str(author_id).strip()}
+    return [row for row in rows if str(row.get("author_id") or "") in allowed]
 
 
 def read_json_doc(name: str, *, run_id: str = "") -> dict[str, Any] | None:

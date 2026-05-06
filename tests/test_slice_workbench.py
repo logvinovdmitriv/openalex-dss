@@ -141,6 +141,30 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertTrue(second["slice_id"].startswith("manual_slice_"))
         self.assertNotEqual(first["slice_id"], second["slice_id"])
 
+    def test_slice_fingerprint_ignores_sort_but_materialization_fingerprint_uses_sort(self) -> None:
+        fake_plan = {
+            "decision": {"status": "can_fetch", "can_execute": True, "reasons": [], "warnings": []},
+            "estimate": {"estimate_count": 1, "estimate_signature": "estimate", "download_signature": "download"},
+            "openalex_filter": "from_publication_date:2020-01-01",
+            "filter_classes": {},
+            "download_policy": {"user_controls_download_after_estimate": True},
+            "limits": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(slice_workbench, "DATA", Path(tmp)),
+                patch.object(slice_workbench, "SLICES_DIR", Path(tmp) / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", Path(tmp) / "materialization_plans"),
+                patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan),
+            ):
+                first = slice_workbench.create_slice({"slice_name": "sort_a", "filter_mode": "all", "sort": "cited_by_count:desc"})
+                second = slice_workbench.create_slice({"slice_name": "sort_b", "filter_mode": "all", "sort": "publication_date:asc"})
+                first_plan = slice_workbench.create_materialization_plan(first["slice_id"])
+                second_plan = slice_workbench.create_materialization_plan(second["slice_id"])
+
+        self.assertEqual(first["slice_fingerprint"], second["slice_fingerprint"])
+        self.assertNotEqual(first_plan["materialization_fingerprint"], second_plan["materialization_fingerprint"])
+
     def test_slice_estimate_and_materialization_plan_keep_download_policy_separate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

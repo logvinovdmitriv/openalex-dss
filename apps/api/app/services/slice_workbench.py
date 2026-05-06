@@ -131,9 +131,19 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
     plan_id = _safe_id(f"mat_{slice_id}_{profile['profile_id']}_{uuid.uuid4().hex[:8]}")
     estimate = estimate_slice(slice_id, {"download_policy": download_policy})
     doc = get_slice(slice_id)
+    cfg = author_slice.config_from_payload({**doc["technical_payload"], "workflow_mode": "strict_works"})
+    materialization_fingerprint = _materialization_fingerprint(
+        cfg,
+        slice_fingerprint=str(doc.get("slice_fingerprint") or _slice_fingerprint(cfg)),
+        source_strategy=source_strategy,
+        storage_profile_id=str(profile["profile_id"]),
+        download_policy=download_policy,
+    )
     materialization = {
         "materialization_id": plan_id,
         "slice_id": slice_id,
+        "slice_fingerprint": doc.get("slice_fingerprint"),
+        "materialization_fingerprint": materialization_fingerprint,
         "state": "planned",
         "created_at_utc": _now(),
         "storage_profile": profile,
@@ -384,15 +394,37 @@ def _slice_id(payload: dict[str, Any], cfg: Any, fingerprint: str) -> str:
 
 def _slice_fingerprint(cfg: Any) -> str:
     canonical = {
-        "version": "slice_fingerprint_v2",
-        "source_mode": "openalex_cli",
+        "version": "slice_fingerprint_v3",
         "corpus_request": corpus_request(cfg),
-        "download_signature": cli_download_signature(cfg),
-        "sort": cfg.sort,
         "quality_policy": {
             "exclude_retracted": cfg.exclude_retracted,
             "exclude_paratext": cfg.exclude_paratext,
             "include_xpac": cfg.include_xpac,
+        },
+    }
+    blob = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:10]
+
+
+def _materialization_fingerprint(
+    cfg: Any,
+    *,
+    slice_fingerprint: str,
+    source_strategy: str,
+    storage_profile_id: str,
+    download_policy: dict[str, Any],
+) -> str:
+    canonical = {
+        "version": "materialization_fingerprint_v1",
+        "slice_fingerprint": slice_fingerprint,
+        "source_strategy": source_strategy,
+        "storage_profile_id": storage_profile_id,
+        "download_signature": cli_download_signature(cfg),
+        "sort": cfg.sort,
+        "download_policy": {
+            key: value
+            for key, value in sorted(download_policy.items())
+            if key in {"complete_slice_required", "allow_incomplete_preview"}
         },
     }
     blob = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

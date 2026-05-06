@@ -63,7 +63,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         filters = captured["filters"]
         self.assertEqual(captured["fraction_mode"], "integer")
         self.assertEqual(captured["metric"], "h")
-        self.assertEqual(captured["kwargs"], {"limit": 25, "max_limit": 500_000, "run_id": "run_a", "dump_id": "dump_a"})
+        self.assertEqual(captured["kwargs"], {"limit": 25, "max_limit": 500_000, "run_id": "run_a", "dump_id": "dump_a", "author_ids": None})
         self.assertEqual(filters["country_code"], "RU")
         self.assertEqual(filters["filter_mode"], "keyword")
         self.assertEqual(filters["keyword_id"], "https://openalex.org/K1")
@@ -73,6 +73,40 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(filters["affiliation_mode"], "historical")
         self.assertEqual(filters["min_cited_by_count"], "5")
         self.assertEqual(payload["filter_warnings"], ["keyword local match is best-effort"])
+
+    def test_ranking_json_with_cohort_limits_rows_to_cohort_authors(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_ranking(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> dict[str, object]:
+            captured["filters"] = filters
+            captured["kwargs"] = kwargs
+            return {"fields": ["author_id", "score"], "rows": [{"author_id": "https://openalex.org/A2", "score": 2}], "total": 1}
+
+        cohort = {
+            "cohort": {
+                "cohort_id": "cohort_a",
+                "name": "Cohort A",
+                "source": "top_n",
+                "n_authors": 1,
+                "checksum": "sha",
+            },
+            "author_ids": {"https://openalex.org/A2"},
+            "run_id": "run_a",
+            "dump_id": "dump_a",
+            "fraction_mode": "integer",
+            "filters": {"country_code": "RU"},
+        }
+        with (
+            patch.object(analytics_routes.cohorts, "resolve_cohort_context", return_value=cohort),
+            patch.object(analytics_routes.warehouse, "metric_ranking", side_effect=fake_ranking),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            payload = analytics_routes.ranking_json(cohort_id="cohort_a", fraction_mode="integer", metric="h", limit=100)
+
+        self.assertEqual(captured["filters"], {"country_code": "RU"})
+        self.assertEqual(captured["kwargs"]["author_ids"], {"https://openalex.org/A2"})
+        self.assertEqual(captured["kwargs"]["run_id"], "run_a")
+        self.assertEqual(payload["cohort"]["cohort_id"], "cohort_a")
 
 
 if __name__ == "__main__":

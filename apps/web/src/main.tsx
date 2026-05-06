@@ -104,9 +104,11 @@ function Workbench() {
   const [tableName, setTableName] = useState("authors_local_metrics");
   const [tableQ, setTableQ] = useState("");
   const [selectedCohortId, setSelectedCohortId] = useState("");
+  const [cohortSource, setCohortSource] = useState<"top_n" | "metric_filter">("top_n");
   const [cohortName, setCohortName] = useState("Top авторов текущего среза");
   const [minPublications, setMinPublications] = useState(0);
   const [minH, setMinH] = useState(0);
+  const [minMetricValue, setMinMetricValue] = useState(0);
   const navRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
@@ -311,12 +313,13 @@ function Workbench() {
       run_id: runId || undefined,
       dump_id: activeDumpId || undefined,
       name: cohortName,
-      source: "top_n",
+      source: cohortSource,
       metric,
       fraction_mode: fractionMode,
-      top_n: activeTopN,
+      top_n: cohortSource === "top_n" ? activeTopN : undefined,
       min_publications: minPublications || undefined,
       min_h: minH || undefined,
+      min_metric_value: cohortSource === "metric_filter" && minMetricValue ? minMetricValue : undefined,
       country_code: filters.country_code || undefined,
       institution_id: filters.institution_id || undefined,
       subject_level: filters.subject_level || undefined,
@@ -515,12 +518,16 @@ function Workbench() {
             topN={activeTopN}
             setTopN={setTopN}
             topNOptions={topNOptions}
+            cohortSource={cohortSource}
+            setCohortSource={setCohortSource}
             cohortName={cohortName}
             setCohortName={setCohortName}
             minPublications={minPublications}
             setMinPublications={setMinPublications}
             minH={minH}
             setMinH={setMinH}
+            minMetricValue={minMetricValue}
+            setMinMetricValue={setMinMetricValue}
             onCreate={() => createCohort.mutate()}
             creating={createCohort.isPending}
             loadingStats={cohortStats.isFetching}
@@ -1070,12 +1077,16 @@ function CohortsPage({
   topN,
   setTopN,
   topNOptions,
+  cohortSource,
+  setCohortSource,
   cohortName,
   setCohortName,
   minPublications,
   setMinPublications,
   minH,
   setMinH,
+  minMetricValue,
+  setMinMetricValue,
   onCreate,
   creating,
   loadingStats,
@@ -1093,12 +1104,16 @@ function CohortsPage({
   topN: number;
   setTopN: (value: number) => void;
   topNOptions: SelectOption[];
+  cohortSource: "top_n" | "metric_filter";
+  setCohortSource: (value: "top_n" | "metric_filter") => void;
   cohortName: string;
   setCohortName: (value: string) => void;
   minPublications: number;
   setMinPublications: (value: number) => void;
   minH: number;
   setMinH: (value: number) => void;
+  minMetricValue: number;
+  setMinMetricValue: (value: number) => void;
   onCreate: () => void;
   creating: boolean;
   loadingStats: boolean;
@@ -1122,6 +1137,12 @@ function CohortsPage({
           <Field label="Название когорты">
             <input value={cohortName} onChange={(event) => setCohortName(event.target.value)} />
           </Field>
+          <Field label="Источник когорты">
+            <select value={cohortSource} onChange={(event) => setCohortSource(event.target.value as "top_n" | "metric_filter")}>
+              <option value="top_n">Top-N по индексу</option>
+              <option value="metric_filter">Все авторы по порогам</option>
+            </select>
+          </Field>
           <Field label="Метрика сортировки">
             <select value={metric} onChange={(event) => setMetric(event.target.value)}>
               {ensureCurrentOption(metricOptions, metric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
@@ -1132,17 +1153,28 @@ function CohortsPage({
               {ensureCurrentOption(fractionModeOptions, fractionMode).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </Field>
-          <Field label="Размер Top-N">
-            <select value={String(topN)} onChange={(event) => setTopN(Number(event.target.value))}>
-              {topNOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-          </Field>
+          {cohortSource === "top_n" && (
+            <Field label="Размер Top-N">
+              <select value={String(topN)} onChange={(event) => setTopN(Number(event.target.value))}>
+                {topNOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </Field>
+          )}
           <Field label="Минимум публикаций">
             <input type="number" min={0} value={minPublications} onChange={(event) => setMinPublications(Number(event.target.value || 0))} />
           </Field>
           <Field label="Минимум h-index">
             <input type="number" min={0} value={minH} onChange={(event) => setMinH(Number(event.target.value || 0))} />
           </Field>
+          {cohortSource === "metric_filter" && (
+            <Field label={`Минимум ${metricLabel(metric)}`}>
+              <input type="number" min={0} value={minMetricValue} onChange={(event) => setMinMetricValue(Number(event.target.value || 0))} />
+            </Field>
+          )}
+        </div>
+        <div className="notice">
+          <b>{cohortSource === "top_n" ? "Top-N когорта" : "Когорта по порогам"}</b>
+          <span>{cohortSource === "top_n" ? "Сначала выбираются первые N авторов по метрике, затем применяются минимальные пороги." : "Top-N не применяется: в когорту войдут все авторы текущей аналитической выборки, прошедшие пороги."}</span>
         </div>
       </section>
 

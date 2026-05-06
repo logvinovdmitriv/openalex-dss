@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from app.api.routes.analytics import _slice_filters
+from app.services.analysis_filters import build_analysis_filters
 from app.services import reports
 
 
@@ -47,7 +47,7 @@ def build_report(
     cohort_id: str = "",
     limit: int = Query(50, ge=1, le=500),
 ) -> dict[str, Any]:
-    filters = _slice_filters(
+    filters = build_analysis_filters(
         country_code=country_code,
         filter_mode=filter_mode,
         subject_level=subject_level,
@@ -113,7 +113,7 @@ def report_bundle(
     cohort_id: str = "",
     limit: int = Query(50, ge=1, le=500),
 ) -> Response:
-    filters = _slice_filters(
+    filters = build_analysis_filters(
         country_code=country_code,
         filter_mode=filter_mode,
         subject_level=subject_level,

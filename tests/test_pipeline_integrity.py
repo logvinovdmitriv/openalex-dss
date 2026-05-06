@@ -497,9 +497,53 @@ class PipelineIntegrityTests(unittest.TestCase):
                 )
 
         self.assertEqual(captured["filters"], {"country_code": "DE", "filter_mode": "keyword", "keyword_id": "https://openalex.org/K1"})
-        self.assertEqual(captured["kwargs"], {"limit": 25, "max_limit": 500, "run_id": "", "dump_id": "dump_a"})
+        self.assertEqual(captured["kwargs"], {"limit": 25, "max_limit": 500, "run_id": "", "dump_id": "dump_a", "author_ids": None})
         self.assertNotEqual(first["report_scope"]["report_scope_hash"], second["report_scope"]["report_scope_hash"])
         self.assertIn("country_code=RU", first["exports"]["ranking_csv"])
+
+    def test_report_with_cohort_id_limits_rank_table_to_cohort_authors(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_ranking(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> dict[str, object]:
+            captured["filters"] = filters
+            captured["kwargs"] = kwargs
+            return {"fields": ["author_id", "h"], "rows": [{"author_id": "https://openalex.org/A2", "h": 4}], "total": 1, "dump_id": "dump_a"}
+
+        cohort_ctx = {
+            "cohort": {"cohort_id": "cohort_a", "checksum": "sha-a", "n_authors": 1, "source": "top_n", "metric": "h", "fraction_mode": "integer"},
+            "author_ids": {"https://openalex.org/A2"},
+            "run_id": "",
+            "dump_id": "dump_a",
+            "fraction_mode": "integer",
+            "filters": {"country_code": "RU"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                patch.object(reports, "DATA", root),
+                patch.object(warehouse, "DATA", root),
+                patch.object(reports.cohorts, "resolve_cohort_context", return_value=cohort_ctx),
+                patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "", "dump_id": "dump_a"}),
+                patch.object(warehouse, "metric_ranking", side_effect=fake_ranking),
+                patch.object(warehouse, "metric_distribution", return_value={"rows": [], "dump_id": "dump_a"}),
+                patch.object(warehouse, "read_json_doc", return_value={}),
+                patch.object(warehouse, "count_rows", return_value=1),
+            ):
+                bundle = reports.build_report_bundle(metric="h", fraction_mode="integer", dump_id="dump_a", cohort_id="cohort_a")
+
+        self.assertEqual(captured["filters"], {"country_code": "RU"})
+        self.assertEqual(captured["kwargs"]["author_ids"], {"https://openalex.org/A2"})
+        self.assertEqual(bundle["cohort"]["checksum"], "sha-a")
+        self.assertEqual(bundle["report_scope"]["cohort_checksum"], "sha-a")
+
+    def test_report_scope_hash_changes_when_cohort_checksum_changes(self) -> None:
+        first = reports._report_scope(run_id="run_a", dump_id="dump_a", filters={}, cohort_id="cohort_a", cohort_checksum="sha-a", cohort_n_authors=1, metric="h", fraction_mode="integer", limit=50)
+        second = reports._report_scope(run_id="run_a", dump_id="dump_a", filters={}, cohort_id="cohort_a", cohort_checksum="sha-b", cohort_n_authors=1, metric="h", fraction_mode="integer", limit=50)
+        self.assertNotEqual(first["report_scope_hash"], second["report_scope_hash"])
+
+    def test_report_build_requires_explicit_run_or_dump_for_final_report(self) -> None:
+        bundle = reports.build_report_bundle(metric="h", fraction_mode="integer", filters={"country_code": "RU"})
+        self.assertEqual(bundle["status"], "preview_not_reproducible")
 
     def test_manual_cohort_requires_run_scope(self) -> None:
         with self.assertRaises(ValueError) as raised:
