@@ -17,9 +17,10 @@ RUNS_DIR = DATA / "runs"
 _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="openalex-dss-run")
 _LOCK = threading.Lock()
 _RUNS: dict[str, dict[str, Any]] = {}
+_RUN_EXECUTION_PAYLOADS: dict[str, tuple[str, dict[str, Any]]] = {}
 
 
-def create_run(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) -> dict[str, Any]:
     if action in {"build_from_openalex", "fetch_slice_dump"} and not _allow_unchecked_download() and not (
         str(payload.get("accepted_estimate_signature") or "").strip()
         and str(payload.get("accepted_download_signature") or "").strip()
@@ -40,6 +41,25 @@ def create_run(action: str, payload: dict[str, Any]) -> dict[str, Any]:
         "result": None,
         "artifacts": _artifact_links(),
     }
+    _save(doc)
+    with _LOCK:
+        _RUN_EXECUTION_PAYLOADS[run_id] = (action, dict(payload))
+    if autostart:
+        start_run(run_id)
+    return doc
+
+
+def start_run(run_id: str) -> dict[str, Any]:
+    doc = get_run(run_id)
+    if doc.get("status") != "queued":
+        return doc
+    with _LOCK:
+        execution = _RUN_EXECUTION_PAYLOADS.get(run_id)
+    action, payload = execution if execution else (str(doc.get("action") or ""), dict(doc.get("payload") or {}))
+    if not action:
+        raise ValueError(f"Run {run_id} has no executable action")
+    doc["status"] = "running"
+    doc["progress_stage"] = "starting"
     _save(doc)
     _EXECUTOR.submit(_execute, run_id, action, payload)
     return doc
@@ -132,6 +152,8 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
         _mark_dependent_state_failed(run_id, action, str(exc), payload)
         doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
     _save(doc)
+    with _LOCK:
+        _RUN_EXECUTION_PAYLOADS.pop(run_id, None)
 
 
 def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -165,6 +187,7 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
             "dump_id": dump.get("dump_id"),
             "dump_manifest": dump,
             "analysis_eligibility": analysis_eligibility,
+            "import_mode": "final_reproducible" if analysis_eligibility["allowed_for_final_analysis"] else "exploratory",
         })
         return {"fetch": fetched, "build": built, "no_data": False, "analysis_eligibility": analysis_eligibility}
     if action == "import_file":

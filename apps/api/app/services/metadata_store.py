@@ -181,33 +181,24 @@ def list_slice_dumps(limit: int = 50) -> list[dict[str, Any]]:
         ).fetchall()
     result: list[dict[str, Any]] = []
     for row in rows:
-        payload: dict[str, Any] = {}
-        try:
-            payload = json.loads(row["payload_json"] or "{}")
-        except json.JSONDecodeError:
-            payload = {}
-        result.append(
-            {
-                **payload,
-                "slice_id": row["slice_id"],
-                "raw_jsonl": row["raw_jsonl"],
-                "records_downloaded": row["records_downloaded"],
-                "bytes_written": row["bytes_written"],
-                "sha256": row["sha256"],
-                "stop_reason": row["stop_reason"],
-                "created_at_utc": row["created_at_utc"],
-                "dump_id": row["dump_id"],
-                "source_mode": row["source_mode"],
-                "scientific_completeness": row["scientific_completeness"],
-                "allowed_for_final_analysis": bool(row["allowed_for_final_analysis"]),
-                "openalex_filter": row["openalex_filter"],
-                "estimate_signature": row["estimate_signature"],
-                "download_signature": row["download_signature"],
-                "records_expected": row["records_expected"],
-                "actual_vs_estimate_ratio": row["actual_vs_estimate_ratio"],
-            }
-        )
+        result.append(_row_to_slice_dump(row))
     return result
+
+
+def get_slice_dump_by_dump_id(dump_id: str) -> dict[str, Any] | None:
+    _ensure_schema()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM slice_dumps
+            WHERE dump_id = ?
+            ORDER BY created_at_utc DESC
+            LIMIT 1
+            """,
+            [dump_id],
+        ).fetchone()
+    return _row_to_slice_dump(row) if row else None
 
 
 def _entity_row(entity_type: str, item: dict[str, Any], source: str, now: str) -> dict[str, Any]:
@@ -251,6 +242,33 @@ def _row_to_entity(row: sqlite3.Row) -> dict[str, Any]:
         "works_count": row["works_count"],
         "cited_by_count": row["cited_by_count"],
         "source": "metadata_db",
+    }
+
+
+def _row_to_slice_dump(row: sqlite3.Row) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    try:
+        payload = json.loads(row["payload_json"] or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    return {
+        **payload,
+        "slice_id": row["slice_id"],
+        "raw_jsonl": row["raw_jsonl"],
+        "records_downloaded": row["records_downloaded"],
+        "bytes_written": row["bytes_written"],
+        "sha256": row["sha256"],
+        "stop_reason": row["stop_reason"],
+        "created_at_utc": row["created_at_utc"],
+        "dump_id": row["dump_id"],
+        "source_mode": row["source_mode"],
+        "scientific_completeness": row["scientific_completeness"],
+        "allowed_for_final_analysis": bool(row["allowed_for_final_analysis"]),
+        "openalex_filter": row["openalex_filter"],
+        "estimate_signature": row["estimate_signature"],
+        "download_signature": row["download_signature"],
+        "records_expected": row["records_expected"],
+        "actual_vs_estimate_ratio": row["actual_vs_estimate_ratio"],
     }
 
 

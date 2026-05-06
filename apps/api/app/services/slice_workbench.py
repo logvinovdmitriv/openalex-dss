@@ -165,7 +165,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
 def run_materialization(materialization_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     plan = get_materialization_plan(materialization_id)
     run_payload = {**plan["technical_payload"], "materialization_id": plan["materialization_id"], **(payload or {})}
-    run = jobs.create_run("build_from_openalex", run_payload)
+    run = jobs.create_run("build_from_openalex", run_payload, autostart=False)
     plan["state"] = "materializing"
     plan["run_id"] = run["run_id"]
     plan["updated_at_utc"] = _now()
@@ -179,7 +179,8 @@ def run_materialization(materialization_id: str, payload: dict[str, Any] | None 
         _write_slice(doc)
     except KeyError:
         pass
-    return {"materialization": plan, "run": run}
+    jobs.start_run(run["run_id"])
+    return {"materialization": get_materialization_plan(materialization_id), "run": jobs.get_run(run["run_id"])}
 
 
 def get_materialization_plan(materialization_id: str) -> dict[str, Any]:

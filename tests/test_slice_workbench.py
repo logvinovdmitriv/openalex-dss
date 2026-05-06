@@ -210,6 +210,8 @@ class SliceWorkbenchTests(unittest.TestCase):
                 patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
                 patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan),
                 patch.object(slice_workbench.jobs, "create_run", return_value={"run_id": "run_retry", "status": "queued"}) as create_run,
+                patch.object(slice_workbench.jobs, "start_run", return_value={"run_id": "run_retry", "status": "queued"}),
+                patch.object(slice_workbench.jobs, "get_run", return_value={"run_id": "run_retry", "status": "queued"}),
             ):
                 created = slice_workbench.create_slice(payload)
                 materialization = slice_workbench.create_materialization_plan(created["slice_id"])
@@ -222,6 +224,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                 self.assertEqual(retried["materialization"]["state"], "materializing")
                 self.assertEqual(slice_workbench.get_slice(created["slice_id"])["state"], "materializing")
                 self.assertEqual(create_run.call_args.args[1]["materialization_id"], materialization["materialization_id"])
+                self.assertEqual(create_run.call_args.kwargs["autostart"], False)
 
     def test_empty_slice_can_be_reestimated_and_replanned(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -321,6 +324,48 @@ class SliceWorkbenchTests(unittest.TestCase):
 
                 self.assertEqual(slice_workbench.get_slice(created["slice_id"])["state"], "failed")
                 self.assertEqual(slice_workbench.get_materialization_plan(materialization["materialization_id"])["state"], "failed")
+
+    def test_job_completion_before_run_materialization_return_does_not_regress_ready_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload = {
+                "slice_id": "slice_atomic",
+                "entity_level": "subfield",
+                "entity_id_short": "1706",
+                "entity_display_name": "Computer Science Applications",
+            }
+            fake_plan = {
+                "decision": {"status": "can_fetch", "can_execute": True, "reasons": [], "warnings": []},
+                "estimate": {"estimate_count": 10, "estimate_signature": "estimate", "download_signature": "download"},
+                "openalex_filter": "primary_topic.subfield.id:1706",
+                "filter_classes": {},
+                "download_policy": {"user_controls_download_after_estimate": True},
+                "limits": {},
+            }
+
+            with (
+                patch.object(slice_workbench, "SLICES_DIR", tmp_path / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan),
+                patch.object(slice_workbench.jobs, "create_run", return_value={"run_id": "run_fast", "status": "queued"}),
+                patch.object(slice_workbench.jobs, "get_run", return_value={"run_id": "run_fast", "status": "completed"}),
+            ):
+                created = slice_workbench.create_slice(payload)
+                materialization = slice_workbench.create_materialization_plan(created["slice_id"])
+
+                def complete_immediately(run_id: str) -> dict[str, str]:
+                    slice_workbench.mark_materialization_run_completed(
+                        run_id,
+                        {"fetch": {"dump": {"dump_id": "dump_fast"}}, "build": {"status": "ok"}, "no_data": False},
+                        materialization_id=materialization["materialization_id"],
+                    )
+                    return {"run_id": run_id, "status": "completed"}
+
+                with patch.object(slice_workbench.jobs, "start_run", side_effect=complete_immediately):
+                    result = slice_workbench.run_materialization(materialization["materialization_id"])
+
+                self.assertEqual(result["materialization"]["state"], "ready")
+                self.assertEqual(slice_workbench.get_slice(created["slice_id"])["state"], "analyzed")
 
     def test_materialization_plan_recomputes_stale_estimate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

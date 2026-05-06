@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -41,10 +42,11 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     _write_runtime_config(cfg)
     run_id = str(payload.get("run_id") or cfg.slice_name or "recalculate")
     dump_id = str(payload.get("dump_id") or _dump_id_from_payload(payload) or cfg.slice_name)
-    _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else None)
-    archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id})
-    _write_pipeline_summary("recalculate", cfg, payload)
-    return {"status": "ok", "mode": "recalculate", "archive": archive}
+    analysis_eligibility = _recover_analysis_eligibility(payload, dump_id=dump_id, run_id=run_id)
+    _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility)
+    archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility})
+    _write_pipeline_summary("recalculate", cfg, {**payload, "analysis_eligibility": analysis_eligibility})
+    return {"status": "ok", "mode": "recalculate", "archive": archive, "analysis_eligibility": analysis_eligibility}
 
 
 def fetch_slice_dump(
@@ -110,6 +112,7 @@ def fetch_slice_dump(
             os.environ[cfg.api_key_env] = old
     raw_jsonl = passport.get("raw_jsonl")
     summary_payload = {**payload, "dump": passport, "query_plan": plan}
+    summary_payload["analysis_eligibility"] = analysis_eligibility_from_dump(passport)
     if raw_jsonl:
         summary_payload["source_file"] = file_profile(raw_jsonl)
     _write_pipeline_summary("fetch_slice_dump", cfg, summary_payload)
@@ -124,12 +127,16 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     if not (source.name.endswith(".jsonl") or source.name.endswith(".jsonl.gz")):
         raise ValueError("Only OpenAlex JSONL or JSONL.GZ dumps are importable in this pipeline")
 
+    dump_manifest = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
+    analysis_eligibility = payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else analysis_eligibility_from_dump(dump_manifest)
+    import_mode = str(payload.get("import_mode") or "exploratory")
+    if import_mode == "final_reproducible" and not analysis_eligibility.get("allowed_for_final_analysis"):
+        raise ValueError("Финальный импорт требует dump_manifest с allowed_for_final_analysis=true. Используйте exploratory import для чернового просмотра.")
+
     cfg = _cfg(payload)
     _write_runtime_config(cfg)
     profile = file_profile(source)
     dump_id = str(payload.get("dump_id") or _dump_id_from_payload({"source_file": profile}) or cfg.slice_name)
-    dump_manifest = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
-    analysis_eligibility = payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else analysis_eligibility_from_dump(dump_manifest)
     if int(profile.get("bytes") or 0) == 0:
         raise ValueError(
             "Локальный дамп пуст: OpenAlex вернул 0 работ для выбранных фильтров. "
@@ -156,6 +163,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             "accepted_estimate_signature": ((dump_manifest.get("signatures") or {}).get("accepted_estimate_signature") if dump_manifest else None),
             "accepted_download_signature": ((dump_manifest.get("signatures") or {}).get("accepted_download_signature") if dump_manifest else None),
             "analysis_eligibility": analysis_eligibility,
+            "import_mode": import_mode,
             "fetched_works": quality.get("raw_works"),
             "total_available": quality.get("raw_works"),
             "filter": "импорт OpenAlex CLI mini-dump" if dump_manifest else "локальный импорт дампа OpenAlex Works",
@@ -164,8 +172,8 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     )
     _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id, analysis_eligibility=analysis_eligibility)
     archive = _archive_run_artifacts(cfg, {**payload, "source_file": profile, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility})
-    _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "archive": archive})
-    return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive}
+    _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "archive": archive, "analysis_eligibility": analysis_eligibility})
+    return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive, "analysis_eligibility": analysis_eligibility}
 
 
 def preview(payload: dict[str, Any]) -> dict[str, Any]:
@@ -243,6 +251,8 @@ def _write_pipeline_summary(mode: str, cfg: Any, payload: dict[str, Any]) -> Non
         doc["source_file"] = payload["source_file"]
     if payload.get("dump"):
         doc["dump"] = payload["dump"]
+    if payload.get("analysis_eligibility"):
+        doc["analysis_eligibility"] = payload["analysis_eligibility"]
     write_json(JSON_FILES["pipeline"], doc)
 
 
@@ -341,6 +351,44 @@ def analysis_eligibility_from_dump(dump: dict[str, Any], *, dev_override: bool =
         },
         "warning": "" if allowed else "This analysis is not eligible for final dissertation-grade conclusions.",
     }
+
+
+def _recover_analysis_eligibility(payload: dict[str, Any], *, dump_id: str = "", run_id: str = "") -> dict[str, Any]:
+    if isinstance(payload.get("analysis_eligibility"), dict):
+        return payload["analysis_eligibility"]
+    if dump_id:
+        manifest = _read_artifact_json(DATA / "dumps" / _safe_id(dump_id) / "dump_manifest.json")
+        recovered = _analysis_eligibility_from_manifest(manifest)
+        if recovered:
+            return recovered
+        catalog_dump = metadata_store.get_slice_dump_by_dump_id(dump_id)
+        if catalog_dump:
+            return analysis_eligibility_from_dump(catalog_dump)
+    if run_id:
+        metric_run = _read_artifact_json(DATA / "runs" / _safe_id(run_id) / "metric_run.json")
+        recovered = _analysis_eligibility_from_manifest(metric_run)
+        if recovered:
+            return recovered
+    return {"status": "unknown", "allowed_for_final_analysis": False, "warning": "Analysis eligibility could not be recovered from payload, dump manifest, or run manifest."}
+
+
+def _analysis_eligibility_from_manifest(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    if not manifest:
+        return None
+    if isinstance(manifest.get("analysis_eligibility"), dict):
+        return manifest["analysis_eligibility"]
+    if isinstance(manifest.get("dump_manifest"), dict):
+        return analysis_eligibility_from_dump(manifest["dump_manifest"])
+    if "allowed_for_final_analysis" in manifest:
+        return analysis_eligibility_from_dump(manifest)
+    return None
+
+
+def _read_artifact_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def _allow_unchecked_download() -> bool:

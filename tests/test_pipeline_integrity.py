@@ -203,6 +203,91 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(result["analysis_eligibility"]["status"], "dev_only_not_for_final_analysis")
         self.assertEqual(captured["analysis_eligibility"]["status"], "dev_only_not_for_final_analysis")
 
+    def test_recalculate_recovers_analysis_eligibility_from_dump_manifest(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_compute(*args: object, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump_dir = root / "dumps" / "dump_recalc"
+            dump_dir.mkdir(parents=True)
+            (dump_dir / "dump_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "dump_id": "dump_recalc",
+                        "allowed_for_final_analysis": True,
+                        "records_downloaded": 5,
+                        "scientific_completeness": "complete",
+                        "signatures": {
+                            "estimate_signature_verified": True,
+                            "accepted_estimate_signature_verified": True,
+                            "download_signature_verified": True,
+                            "compatible": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
+                patch.object(pipeline, "_archive_run_artifacts", return_value={}),
+                patch.object(pipeline, "_write_pipeline_summary", return_value=None),
+            ):
+                result = pipeline.recalculate(
+                    {
+                        "dump_id": "dump_recalc",
+                        "entity_level": "subfield",
+                        "entity_id_short": "1706",
+                        "entity_display_name": "Computer Science Applications",
+                    }
+                )
+
+        self.assertEqual(captured["analysis_eligibility"]["status"], "final")
+        self.assertEqual(result["analysis_eligibility"]["allowed_for_final_analysis"], True)
+
+    def test_pipeline_summary_includes_analysis_eligibility(self) -> None:
+        captured: dict[str, object] = {}
+        eligibility = {"status": "final", "allowed_for_final_analysis": True}
+
+        def fake_write_json(path: object, doc: dict[str, object]) -> None:
+            captured.update(doc)
+
+        with patch.object(pipeline, "write_json", side_effect=fake_write_json):
+            pipeline._write_pipeline_summary(
+                "recalculate",
+                pipeline._cfg({"entity_level": "subfield", "entity_id_short": "1706", "entity_display_name": "Computer Science Applications"}),
+                {"analysis_eligibility": eligibility},
+            )
+
+        self.assertEqual(captured["analysis_eligibility"], eligibility)
+
+    def test_final_local_import_requires_final_eligible_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "works.jsonl"
+            raw.write_text(json.dumps(_work("W1")) + "\n", encoding="utf-8")
+            profile = {"path": str(raw), "bytes": raw.stat().st_size, "sha256": "raw-sha"}
+
+            with (
+                patch.object(pipeline, "resolve_safe_path", return_value=raw),
+                patch.object(pipeline, "file_profile", return_value=profile),
+            ):
+                with self.assertRaises(ValueError) as raised:
+                    pipeline.import_local_file(
+                        {
+                            "source_path": str(raw),
+                            "import_mode": "final_reproducible",
+                            "entity_level": "subfield",
+                            "entity_id_short": "1706",
+                            "entity_display_name": "Computer Science Applications",
+                        }
+                    )
+
+        self.assertIn("Финальный импорт", str(raised.exception))
+
     def test_slice_dump_catalog_indexes_final_eligibility_fields(self) -> None:
         passport = {
             "slice_id": "slice_catalog",
