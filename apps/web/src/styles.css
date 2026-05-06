@@ -1033,6 +1033,10 @@ input[aria-invalid="true"] {
   font-weight: 700;
 }
 
+.text-end {
+  text-anchor: end;
+}
+
 .boxplot-box {
   fill: #d8f0e2;
   stroke: var(--success);

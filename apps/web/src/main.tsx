@@ -57,6 +57,7 @@ import {
   type EntitySuggestion,
   type CohortFilterPolicy,
   type ResolverTab,
+  type ScientometricAnalysisPayload,
   type View,
   type WorkbenchRun,
 } from "./workbench";
@@ -202,7 +203,7 @@ function Workbench() {
   });
   const scientometrics = useQuery({
     queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, rankTopN, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, cohortFilterPolicy],
-    queryFn: () => getJson<any>(scientometricsUrl({
+    queryFn: () => getJson<ScientometricAnalysisPayload>(scientometricsUrl({
       filters,
       fractionMode,
       metrics: scientometricMetrics,
@@ -258,6 +259,12 @@ function Workbench() {
   useEffect(() => {
     if (!topN && defaultTopN) setTopN(defaultTopN);
   }, [topN, defaultTopN]);
+
+  useEffect(() => {
+    if (baselineMetric && !scientometricMetrics.includes(baselineMetric)) {
+      setScientometricMetrics([baselineMetric, ...scientometricMetrics]);
+    }
+  }, [baselineMetric, scientometricMetrics]);
 
   const createSlice = useMutation({
     mutationFn: (body: any) => postJson<any>("/slices", body),
@@ -571,6 +578,7 @@ function Workbench() {
             analytics={analytics.data}
             scientometrics={scientometrics.data}
             loadingScientometrics={scientometrics.isFetching}
+            scientometricsError={scientometrics.error}
             metric={metric}
             metricOptions={primaryMetricOptions}
             scientometricMetrics={scientometricMetrics}
@@ -1283,6 +1291,7 @@ function StatisticsPage({
   analytics,
   scientometrics,
   loadingScientometrics,
+  scientometricsError,
   metric,
   metricOptions,
   scientometricMetrics,
@@ -1307,8 +1316,9 @@ function StatisticsPage({
   onOpenCohorts,
 }: {
   analytics: any;
-  scientometrics: any;
+  scientometrics?: ScientometricAnalysisPayload;
   loadingScientometrics: boolean;
+  scientometricsError: unknown;
   metric: string;
   metricOptions: SelectOption[];
   scientometricMetrics: string[];
@@ -1338,6 +1348,7 @@ function StatisticsPage({
   const activeRankCompareMetric = comparisonOptions.includes(rankCompareMetric) ? rankCompareMetric : comparisonOptions[0] ?? "";
   const cohortContext = scientometrics?.cohort_context ?? cohortStats?.cohort_context ?? analytics?.cohort;
   const warnings = scientometrics?.warnings ?? [];
+  const displayMetricOptions = ensureCurrentOptions(metricOptions, ["p", "c", "c_frac", "h", "i10", "g", "m_local", "top1_share", "iupv", "islv", "lrdi", ...scientometricMetrics, baselineMetric]);
 
   useEffect(() => {
     if (metrics.length && !metrics.includes(distributionMetric)) setDistributionMetric(metrics[0]);
@@ -1349,6 +1360,7 @@ function StatisticsPage({
 
   const toggleMetric = (value: string) => {
     if (scientometricMetrics.includes(value)) {
+      if (value === baselineMetric) return;
       if (scientometricMetrics.length > 1) setScientometricMetrics(scientometricMetrics.filter((item) => item !== value));
       return;
     }
@@ -1376,7 +1388,7 @@ function StatisticsPage({
         <div className="form-grid tight">
           <Field label="Базовый индекс">
             <select value={baselineMetric} onChange={(event) => setBaselineMetric(event.target.value)}>
-              {ensureCurrentOption(metricOptions, baselineMetric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              {ensureCurrentOption(displayMetricOptions, baselineMetric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </Field>
           <Field label="Top-N для сравнения рангов">
@@ -1384,7 +1396,7 @@ function StatisticsPage({
           </Field>
           <Field label="Метрика распределения">
             <select value={activeDistributionMetric} onChange={(event) => setDistributionMetric(event.target.value)}>
-              {ensureCurrentOption(metricOptions.filter((item) => metrics.includes(item.value)), activeDistributionMetric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              {ensureCurrentOption(displayMetricOptions.filter((item) => metrics.includes(item.value)), activeDistributionMetric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </Field>
           <Field label="Шкала распределения">
@@ -1407,14 +1419,20 @@ function StatisticsPage({
           </Field>
         </div>
         <div className="choice-grid compact metric-choice-grid" role="group" aria-label="Метрики наукометрического сравнения">
-          {ensureCurrentOptions(metricOptions, scientometricMetrics).map((item) => (
+          {displayMetricOptions.map((item) => (
             <button key={item.value} type="button" className={scientometricMetrics.includes(item.value) ? "choice-pill active" : "choice-pill"} onClick={() => toggleMetric(item.value)}>
-              {item.label}
+              {item.label}{item.value === baselineMetric ? " · baseline" : ""}
             </button>
           ))}
         </div>
       </section>
-      <ScientometricScopePanel payload={scientometrics} fallbackN={topN} />
+      <ScientometricScopePanel payload={scientometrics} fallbackN={rankTopN} />
+      {scientometricsError && (
+        <section className="notice error">
+          <b>Не удалось построить аналитический пакет</b>
+          <span>{mutationError(scientometricsError)}</span>
+        </section>
+      )}
       {warnings.length > 0 && (
         <section className="notice warn">
           <b>Ограничения интерпретации</b>
@@ -1425,7 +1443,7 @@ function StatisticsPage({
       )}
       <section className="metric-grid">
         <MetricCard label="Авторов в scope" value={fmt(scientometrics?.n_authors ?? 0)} />
-        <MetricCard label="Baseline" value={metricLabel(scientometrics?.scope?.baseline_metric ?? baselineMetric)} />
+        <MetricCard label="Baseline" value={metricLabel(String(scientometrics?.scope?.baseline_metric ?? baselineMetric))} />
         <MetricCard label="Rank Top-N" value={fmt(scientometrics?.rank_top_n ?? rankTopN)} />
         <MetricCard label="Метрик" value={fmt(metrics.length)} />
       </section>
@@ -1522,30 +1540,27 @@ function DescriptiveStatsTable({ descriptive, metrics }: { descriptive: any; met
 
 function BoxplotPanel({ boxplots, metrics }: { boxplots: any; metrics: string[] }) {
   const rows = metrics.map((metricName) => ({ metricName, ...(boxplots?.[metricName] ?? {}) })).filter((row) => row.q1 !== null && row.q1 !== undefined);
-  const values = rows.flatMap((row: any) => [row.min_whisker, row.q1, row.median, row.q3, row.max_whisker, ...(row.outliers ?? []).map((item: any) => item.value)]).map(Number).filter(Number.isFinite);
-  const min = Math.min(0, ...values);
-  const max = Math.max(1, ...values);
   const width = 760;
   const left = 120;
-  const right = 24;
+  const right = 96;
   const rowHeight = 46;
   const height = Math.max(120, rows.length * rowHeight + 36);
-  const scale = (value: number) => left + ((value - min) / Math.max(1e-9, max - min)) * (width - left - right);
   return (
     <div className="panel">
       <div className="panel-head">
         <span className="step-badge">Boxplot</span>
         <h2>Ящики с усами по индексам</h2>
-        <p>Boxplot сейчас строится по raw-значениям. При нулевом IQR выбросы не размечаются.</p>
+        <p>Каждая строка масштабируется локально, чтобы метрики в разных шкалах не сжимали друг друга. Численные значения проверяйте в таблице.</p>
       </div>
       {rows.length === 0 && <EmptyState title="Нет boxplot-данных" detail="Для выбранных метрик нет числовых значений." />}
       {rows.length > 0 && (
         <svg className="boxplot-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Boxplot по выбранным индексам">
-          <line x1={left} x2={width - right} y1={height - 24} y2={height - 24} className="axis-line" />
-          <text x={left} y={height - 8} className="axis-label">{fmt(min)}</text>
-          <text x={width - right - 40} y={height - 8} className="axis-label">{fmt(max)}</text>
           {rows.map((row: any, index) => {
             const y = 24 + index * rowHeight;
+            const rowValues = [row.min_whisker, row.q1, row.median, row.q3, row.max_whisker, ...(row.outliers ?? []).map((item: any) => item.value)].map(Number).filter(Number.isFinite);
+            const rowMin = Math.min(...rowValues);
+            const rowMax = Math.max(...rowValues);
+            const scale = (value: number) => left + ((value - rowMin) / Math.max(1e-9, rowMax - rowMin)) * (width - left - right);
             const q1 = scale(Number(row.q1));
             const q3 = scale(Number(row.q3));
             const median = scale(Number(row.median));
@@ -1554,6 +1569,8 @@ function BoxplotPanel({ boxplots, metrics }: { boxplots: any; metrics: string[] 
             return (
               <g key={row.metricName}>
                 <text x={0} y={y + 15} className="metric-axis-label">{metricLabel(row.metricName)}</text>
+                <text x={left} y={y + 34} className="axis-label">{fmt(rowMin)}</text>
+                <text x={width - right - 6} y={y + 34} className="axis-label text-end">{fmt(rowMax)}</text>
                 <line x1={low} x2={high} y1={y + 10} y2={y + 10} className="boxplot-whisker" />
                 <line x1={low} x2={low} y1={y + 3} y2={y + 17} className="boxplot-whisker" />
                 <line x1={high} x2={high} y1={y + 3} y2={y + 17} className="boxplot-whisker" />

@@ -4,6 +4,39 @@ export type View = "slices" | "data" | "enrichment" | "rankings" | "cohorts" | "
 export type ResolverTab = "subject" | "organization" | "author" | "source";
 export type CohortFilterPolicy = "membership" | "current" | "none";
 
+export type ScientometricAnalysisPayload = {
+  analysis_version: string;
+  scope: Record<string, unknown>;
+  cohort_context?: Record<string, unknown> | null;
+  metrics: string[];
+  n_authors: number;
+  rank_top_n?: number;
+  warnings: string[];
+  descriptive: Record<string, Record<string, number | null>>;
+  boxplots: Record<string, Record<string, unknown>>;
+  histograms: Record<string, Record<string, Array<Record<string, number>>>>;
+  normality: Record<string, Record<string, Record<string, unknown>>>;
+  correlations: {
+    pearson_log1p?: Record<string, Record<string, number | null>>;
+    spearman?: Record<string, Record<string, number | null>>;
+    kendall_tau_b?: {
+      matrix: Record<string, Record<string, number | null>>;
+      skipped?: Array<Record<string, unknown>>;
+      method?: string;
+      max_exact_n?: number;
+    };
+  };
+  rank_comparisons: Record<string, Record<string, unknown>>;
+  top_overlap: {
+    mode?: string;
+    cuts?: number[];
+    matrix?: Record<string, Record<string, Record<string, Record<string, number | null>>>>;
+  };
+  outliers: Record<string, Array<Record<string, unknown>>>;
+  metric_scorecard: Record<string, Record<string, unknown>>;
+  interpretation: Record<string, unknown>;
+};
+
 export type EntitySuggestion = {
   id: string;
   name: string;
