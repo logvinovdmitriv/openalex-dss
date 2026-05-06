@@ -57,8 +57,17 @@ GET  /api/v1/runs/{run_id}
 GET  /api/v1/runs/{run_id}/tables/{table_name}
 ```
 
-`POST /runs` accepts `plan`, `fetch_slice_dump`, `build_from_openalex`,
-`import_file` and `recalculate`.
+`POST /runs` is public only for `recalculate`, i.e. recomputing indices from
+an already materialized local dump. OpenAlex downloads are launched through the
+slice/materialization workflow:
+
+```text
+POST /api/v1/slices/{slice_id}/materialization-plans
+POST /api/v1/materializations/{materialization_id}/run
+```
+
+Legacy actions such as `plan`, `fetch_slice_dump`, `build_from_openalex` and
+`import_file` are internal orchestration/service paths, not public API actions.
 Jobs execute in one in-process worker and persist status JSON under
 `$OPENALEX_DSS_DATA_DIR/runs/{run_id}/run_status.json`. This gives the UI and
 future Go gateway a stable contract without adding Celery/RQ/Redis before they
@@ -76,7 +85,7 @@ resolve -> estimate -> plan -> fetch works dump through OpenAlex CLI -> normaliz
 The supported estimate endpoint is:
 
 ```text
-POST /api/v1/slices/plan
+POST /api/v1/slices/{slice_id}/estimate
 ```
 
 It sends lightweight `/works` estimate/sample/group_by requests, reads
@@ -87,7 +96,8 @@ The planner also records `estimate_signature` and `download_signature`.
 If the API estimate uses a parameter that the installed OpenAlex CLI cannot
 express, such as `search`, the run is marked `unsupported_cli_filter` instead
 of silently downloading a different corpus.
-The same planner is used by `POST /api/v1/runs` action `plan`.
+The same planner feeds slice estimates and materialization plans; it is not
+exposed as a public `/runs` action.
 
 OpenAlex GET responses are cached under:
 

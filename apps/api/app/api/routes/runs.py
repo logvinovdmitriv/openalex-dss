@@ -9,10 +9,20 @@ from app.services import jobs
 
 
 router = APIRouter(tags=["runs"])
+PUBLIC_RUN_ACTIONS = {"recalculate"}
 
 
 @router.post("/runs", status_code=202)
 def create_run(request: RunRequest) -> dict[str, Any]:
+    if request.action not in PUBLIC_RUN_ACTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported public run action: {request.action}. "
+                "Use the slice/materialization workflow for OpenAlex downloads; "
+                "fixture import and legacy pipeline actions are internal."
+            ),
+        )
     payload = request.payload.model_dump(exclude_none=True)
     try:
         return jobs.create_run(request.action, payload)

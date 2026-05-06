@@ -101,15 +101,20 @@ class PipelineRequest(BaseModel):
         return text
 
 
+class AnalysisRunRequest(BaseModel):
+    dump_id: str | None = None
+    fraction_modes: list[str] | None = None
+    fraction_mode_default: str | None = None
+    iupv_n0: float | None = None
+    iupv_lambda: float | None = None
+    lrdi_p0: float | None = None
+    lrdi_lambda: float | None = None
+    analysis_year: int | None = Field(default=None, ge=1900, le=2100)
+
+
 class RunRequest(BaseModel):
-    action: Literal[
-        "plan",
-        "fetch_slice_dump",
-        "build_from_openalex",
-        "import_file",
-        "recalculate",
-    ] = "build_from_openalex"
-    payload: PipelineRequest = Field(default_factory=PipelineRequest)
+    action: Literal["recalculate"] = "recalculate"
+    payload: AnalysisRunRequest = Field(default_factory=AnalysisRunRequest)
 
 
 class SliceCreateRequest(PipelineRequest):

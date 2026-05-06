@@ -22,7 +22,11 @@ OpenAlex-like Works fixture
 
 Назначение этого прогона - проверить воспроизводимый технический контур, согласованность scope и наличие всех аналитических артефактов. Он не является научным OpenAlex-срезом и не должен использоваться как содержательный результат по предметной области.
 
-Для реального диссертационного прогона нужно выполнить тот же сценарий через `build_from_openalex` или `fetch_slice_dump -> import_file` с подтвержденными planner signatures и `allowed_for_final_analysis=true`.
+Для реального диссертационного прогона нужно выполнить тот же сценарий через
+публичный workflow `slice -> estimate -> materialization plan -> materialization run`
+с подтвержденными planner signatures и `allowed_for_final_analysis=true`.
+Внутренние шаги `build_from_openalex` и `import_file` остаются сервисной
+реализацией, а не публичным способом запуска.
 
 ## Команда
 
