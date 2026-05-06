@@ -442,6 +442,24 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIn("quality", bundle["missing_artifacts"])
         self.assertNotIn("quality_report", bundle)
 
+    def test_cached_report_bundle_rejects_foreign_dump_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "runs" / "run_a"
+            (run_dir / "results").mkdir(parents=True)
+            (run_dir / "metric_run.json").write_text(json.dumps({"run_id": "run_a", "dump_id": "dump_a"}), encoding="utf-8")
+            report_path = run_dir / "results" / "report_bundle.json"
+            report_path.write_text(json.dumps({"status": "ok", "run_id": "run_a", "dump_id": "dump_b"}), encoding="utf-8")
+
+            with (
+                patch.object(reports, "DATA", root),
+                patch.object(warehouse, "DATA", root),
+            ):
+                with self.assertRaises(ValueError) as raised:
+                    reports.report_bundle_json(run_id="run_a")
+
+        self.assertIn("incompatible", str(raised.exception))
+
     def test_manual_cohort_requires_run_scope(self) -> None:
         with self.assertRaises(ValueError) as raised:
             cohorts.create_cohort({"source": "manual", "author_ids": ["https://openalex.org/A1"]})

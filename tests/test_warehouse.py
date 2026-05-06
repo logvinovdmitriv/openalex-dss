@@ -181,6 +181,49 @@ class WarehouseTests(unittest.TestCase):
 
         self.assertIn("incompatible", str(raised.exception))
 
+    def test_list_tables_does_not_show_latest_path_as_scoped_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_run_author_work(root, "run_a", "dump_a", "W_A", "A_A", "Author A", 5)
+            latest_indices = root / "latest" / "indices.parquet"
+            write_parquet_dicts(latest_indices, [{"author_id": "latest", "h": 99}], ["author_id", "h"])
+            parquet_paths = _latest_parquet_paths(root)
+            parquet_paths["indices"] = latest_indices
+            parquet_paths["authors_local_metrics"] = latest_indices
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
+                patch.object(warehouse, "PARQUET_TABLE_FILES", parquet_paths),
+            ):
+                tables = warehouse.list_tables(run_id="run_a")
+
+        self.assertEqual(tables["indices"]["scope"], "run")
+        self.assertEqual(tables["indices"]["path"], "")
+        self.assertEqual(tables["indices"]["resolved_path"], "")
+        self.assertTrue(tables["indices"]["latest_path"].endswith("indices.parquet"))
+        self.assertFalse(tables["indices"]["uses_latest_fallback"])
+        self.assertFalse(tables["indices"]["exists"])
+
+    def test_query_table_returns_resolved_dump_id_for_run_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_dump_tables(root, "dump_a", "W_A", "A_A", "Author A", 5)
+            _write_run_author_work(root, "run_a", "dump_a", "W_A", "A_A", "Author A", 5)
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
+                patch.object(warehouse, "PARQUET_TABLE_FILES", _latest_parquet_paths(root)),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+            ):
+                table = warehouse.query_table("works", run_id="run_a")
+
+        self.assertEqual(table["run_id"], "run_a")
+        self.assertEqual(table["dump_id"], "dump_a")
+        self.assertEqual(table["total"], 1)
+        self.assertTrue(table["source_path"].endswith("tables/dump_a/works.parquet"))
+
     def test_run_metric_params_do_not_fallback_to_latest_when_run_passport_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

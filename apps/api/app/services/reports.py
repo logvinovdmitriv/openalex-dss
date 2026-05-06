@@ -102,9 +102,17 @@ def build_report_bundle(
 
 
 def report_bundle_json(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
     path = _report_bundle_path(run_id)
     if path.exists():
         cached = _read_json(path)
+        cached_dump_id = str(cached.get("dump_id") or "").strip()
+        if run_id and dump_id and cached_dump_id != dump_id:
+            if cached_dump_id:
+                raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
+            return build_report_bundle(run_id=run_id, dump_id=dump_id)
         if not run_id or cached.get("status") != "incomplete_run_artifacts":
             return cached
     return build_report_bundle(run_id=run_id, dump_id=dump_id)

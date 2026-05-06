@@ -151,16 +151,27 @@ def table_exists(name: str, *, run_id: str = "", dump_id: str = "") -> bool:
 
 
 def list_tables(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
-    return {
-        name: {
-            "path": str(resolve_scoped_table_path(name, run_id=run_id, dump_id=dump_id) or _preferred_table_path(name, path)),
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    scoped = bool(scope["run_id"] or scope["dump_id"])
+    tables: dict[str, Any] = {}
+    for name, path in TABLE_FILES.items():
+        resolved_path = resolve_scoped_table_path(name, run_id=scope["run_id"], dump_id=scope["dump_id"])
+        latest_path = _preferred_table_path(name, path)
+        exists = bool(resolved_path and resolved_path.exists())
+        tables[name] = {
+            "path": str(resolved_path or (latest_path if not scoped else "")),
+            "resolved_path": str(resolved_path or ""),
+            "latest_path": str(latest_path),
             "csv_path": str(path),
             "parquet_path": str(PARQUET_TABLE_FILES.get(name, "")),
-            "exists": table_exists(name, run_id=run_id, dump_id=dump_id),
-            "rows": count_rows(name, run_id=run_id, dump_id=dump_id),
+            "uses_latest_fallback": bool(not scoped and resolved_path is None and latest_path.exists()),
+            "scope": "run" if scope["run_id"] else ("dump" if scope["dump_id"] else "latest"),
+            "run_id": scope["run_id"],
+            "dump_id": scope["dump_id"],
+            "exists": exists if scoped else table_exists(name),
+            "rows": count_rows(name, run_id=scope["run_id"], dump_id=scope["dump_id"]) if scoped else count_rows(name),
         }
-        for name, path in TABLE_FILES.items()
-    }
+    return tables
 
 
 def count_rows(table: str, *, run_id: str = "", dump_id: str = "") -> int:
@@ -206,6 +217,9 @@ def query_table(
 ) -> dict[str, Any]:
     if table not in TABLE_FILES:
         raise ValueError(f"Unknown table: {table}")
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
     fields = table_schema(table, run_id=run_id, dump_id=dump_id)
     if not fields:
         return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
@@ -340,9 +354,12 @@ def export_table(
 ) -> dict[str, Any]:
     if table not in TABLE_FILES:
         raise ValueError(f"Unknown table: {table}")
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
     fields = table_schema(table, run_id=run_id, dump_id=dump_id)
     if not fields:
-        return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset}
+        return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
 
     where: list[str] = []
     args: list[Any] = []
@@ -370,6 +387,7 @@ def export_table(
     limit = max(1, min(500_000, int(limit)))
     offset = max(0, int(offset))
 
+    source_path = resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id)
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
         total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
         rows = _records(
@@ -378,7 +396,10 @@ def export_table(
                 [*args, limit, offset],
             )
         )
-    return {"table": table, "fields": fields, "rows": rows, "total": total, "limit": limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
+    payload = {"table": table, "fields": fields, "rows": rows, "total": total, "limit": limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
+    if source_path:
+        payload["source_path"] = str(source_path)
+    return payload
 
 
 def export_table_csv(table: str, **kwargs: Any) -> str:

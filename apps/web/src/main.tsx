@@ -154,15 +154,6 @@ function Workbench() {
     queryFn: () => postJson<any>(`/cohorts/${encodeURIComponent(selectedCohortId)}/statistics`, {}),
     enabled: Boolean(selectedCohortId),
   });
-  const table = useQuery({
-    queryKey: ["table", tableName, tableQ, metric, fractionMode, topN, runId],
-    queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&run_id=${encodeURIComponent(runId)}&limit=${Math.max(1, topN || 1)}`),
-  });
-  const analytics = useQuery({
-    queryKey: ["analytics", metric, fractionMode, runId],
-    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, runId)),
-    enabled: Boolean(filters.subject_id || filters.keyword_id || filters.text_search_query),
-  });
   const run = useQuery({
     queryKey: ["run", runId],
     queryFn: () => getJson<any>(`/runs/${runId}`),
@@ -173,6 +164,17 @@ function Workbench() {
     },
   });
   const activeDumpId = extractDumpId(run.data);
+  const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const hasLocalAnalyticsData = Boolean(runId || activeDumpId || state.data?.tables?.author_work?.rows || state.data?.tables?.indices?.rows);
+  const table = useQuery({
+    queryKey: ["table", tableName, tableQ, metric, fractionMode, topN, runId, activeDumpId],
+    queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}&limit=${Math.max(1, topN || 1)}`),
+  });
+  const analytics = useQuery({
+    queryKey: ["analytics", metric, fractionMode, runId, activeDumpId, filterKey],
+    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, runId, activeDumpId)),
+    enabled: hasLocalAnalyticsData,
+  });
   const detail = useQuery({
     queryKey: ["detail", selected, runId, activeDumpId],
     queryFn: () => getJson<any>(
