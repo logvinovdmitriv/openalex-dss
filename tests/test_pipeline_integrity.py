@@ -316,6 +316,46 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIn("works", captured["passport_input_tables"])
         self.assertEqual(captured["passport_input_tables"]["works"]["path"], str(dump_a / "works.parquet"))
 
+    def test_recalculate_writes_pipeline_summary_before_archive_and_report(self) -> None:
+        events: list[str] = []
+
+        def fake_run_compute(*args: object, **kwargs: object) -> dict[str, object]:
+            events.append("compute")
+            return {"input_tables": {}, "input_table_checksums": {}}
+
+        def fake_summary(*args: object, **kwargs: object) -> None:
+            events.append("summary")
+
+        def fake_archive(*args: object, **kwargs: object) -> dict[str, object]:
+            events.append("archive")
+            self.assertEqual(events, ["compute", "summary", "archive"])
+            return {"run_id": "run_order", "dump_id": "dump_order"}
+
+        def fake_report(*args: object, **kwargs: object) -> dict[str, object]:
+            events.append("report")
+            self.assertEqual(events, ["compute", "summary", "archive", "report"])
+            return {"status": "ok"}
+
+        with (
+            patch.object(pipeline, "resolve_dump_tables", return_value={"works": Path("works.parquet"), "authorships": Path("authorships.parquet"), "work_topics": Path("work_topics.parquet")}),
+            patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
+            patch.object(pipeline, "_write_pipeline_summary", side_effect=fake_summary),
+            patch.object(pipeline, "_archive_run_artifacts", side_effect=fake_archive),
+            patch.object(pipeline.reports, "build_report_bundle", side_effect=fake_report),
+        ):
+            pipeline.recalculate(
+                {
+                    "run_id": "run_order",
+                    "dump_id": "dump_order",
+                    "analysis_eligibility": {"status": "final", "allowed_for_final_analysis": True},
+                    "entity_level": "subfield",
+                    "entity_id_short": "1706",
+                    "entity_display_name": "Computer Science Applications",
+                }
+            )
+
+        self.assertEqual(events, ["compute", "summary", "archive", "report"])
+
     def test_jobs_dispatch_passes_current_run_id_to_direct_actions(self) -> None:
         captured: dict[str, dict[str, object]] = {}
 
@@ -398,6 +438,7 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertEqual(bundle["status"], "incomplete_run_artifacts")
         self.assertEqual(bundle["no_latest_fallback"], True)
+        self.assertIn("pipeline", bundle["missing_artifacts"])
         self.assertIn("quality", bundle["missing_artifacts"])
         self.assertNotIn("quality_report", bundle)
 

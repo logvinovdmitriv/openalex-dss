@@ -35,10 +35,9 @@ INDEX_NUMERIC_FIELDS = {
     "lrdi",
     "mean_authors_per_work",
     "share_single_authored",
-    "two_year_mean_citedness",
 }
 
-NATIVE_LINE_CHART_METRICS = ("p", "c", "h", "i10", "two_year_mean_citedness")
+NATIVE_LINE_CHART_METRICS = ("p", "c", "h", "i10")
 CORE_LINE_CHART_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local")
 LEGACY_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "iupv", "islv", "lrdi")
 LINE_CHART_METRICS = LEGACY_LINE_CHART_METRICS
@@ -83,8 +82,10 @@ def connect_scope(*, run_id: str = "", dump_id: str = "") -> duckdb.DuckDBPyConn
 
 def register_views(conn: duckdb.DuckDBPyConnection, *, run_id: str = "", dump_id: str = "") -> None:
     for name, path in TABLE_FILES.items():
-        table_path = resolve_scoped_table_path(name, run_id=run_id, dump_id=dump_id) or _preferred_table_path(name, path)
-        if table_path.exists():
+        table_path = resolve_scoped_table_path(name, run_id=run_id, dump_id=dump_id)
+        if table_path is None and not (run_id or dump_id):
+            table_path = _preferred_table_path(name, path)
+        if table_path and table_path.exists():
             _register_file_view(conn, name, table_path)
 
 
@@ -109,15 +110,15 @@ def resolve_scoped_table_path(
 ) -> Path | None:
     if table not in TABLE_FILES:
         raise ValueError(f"Unknown table: {table}")
-    run_id = str(run_id or "").strip()
-    dump_id = str(dump_id or "").strip()
+    scope = resolve_analysis_scope(run_id=run_id or "", dump_id=dump_id or "")
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
 
     if run_id:
         canonical = _canonical_table_name(table)
         if canonical in DUMP_TABLES:
-            scoped_dump_id = dump_id or _dump_id_for_run(run_id)
-            if scoped_dump_id:
-                return _dump_table_path(scoped_dump_id, canonical)
+            if dump_id:
+                return _dump_table_path(dump_id, canonical)
             return None
         run_path = _run_table_path(run_id, canonical)
         if run_path:
@@ -130,6 +131,15 @@ def resolve_scoped_table_path(
     if latest or not (run_id or dump_id):
         return _preferred_table_path(table, TABLE_FILES[table])
     return None
+
+
+def resolve_analysis_scope(*, run_id: str = "", dump_id: str = "") -> dict[str, str]:
+    run_id = str(run_id or "").strip()
+    dump_id = str(dump_id or "").strip()
+    expected_dump_id = _dump_id_for_run(run_id) if run_id else ""
+    if run_id and dump_id and expected_dump_id and _safe_id(dump_id) != _safe_id(expected_dump_id):
+        raise ValueError(f"dump_id={dump_id} is incompatible with run_id={run_id}; expected {expected_dump_id}")
+    return {"run_id": run_id, "dump_id": dump_id or expected_dump_id}
 
 
 def table_exists(name: str, *, run_id: str = "", dump_id: str = "") -> bool:
@@ -627,6 +637,32 @@ def metric_ranking(
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
     rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    return metric_ranking_from_rows(
+        rows,
+        fraction_mode,
+        metric,
+        filters,
+        limit=limit,
+        max_limit=max_limit,
+        run_id=run_id,
+        dump_id=dump_id,
+    )
+
+
+def metric_ranking_from_rows(
+    rows: list[dict[str, Any]],
+    fraction_mode: str,
+    metric: str,
+    filters: FilterSet | None = None,
+    *,
+    limit: int = 20,
+    max_limit: int = 200,
+    run_id: str = "",
+    dump_id: str = "",
+) -> dict[str, Any]:
+    if metric not in INDEX_NUMERIC_FIELDS:
+        raise ValueError(f"Unsupported metric: {metric}")
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     ranked = []
     visible_metrics = _visible_metrics(rows)
     for row in sort_metric_rows(rows, metric):
@@ -648,8 +684,9 @@ def metric_ranking(
         "metric_scope": "filtered_recomputed",
         "percentile_scope": "current filtered author set",
         "filters": filters or {},
-        "run_id": run_id,
-        "dump_id": dump_id or _dump_id_for_run(run_id),
+        "metric_params": _run_metric_params(scope["run_id"]),
+        "run_id": scope["run_id"],
+        "dump_id": scope["dump_id"],
         "fields": fields,
         "rows": ranked[:limit],
         "total": len(ranked),
@@ -668,13 +705,30 @@ def metric_distribution(
 ) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
-    values = sorted(_as_float(row.get(metric)) for row in filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id))
+    rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    return metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id)
+
+
+def metric_distribution_from_rows(
+    rows: list[dict[str, Any]],
+    fraction_mode: str,
+    metric: str,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+) -> dict[str, Any]:
+    del fraction_mode
+    if metric not in INDEX_NUMERIC_FIELDS:
+        raise ValueError(f"Unsupported metric: {metric}")
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    values = sorted(_as_float(row.get(metric)) for row in rows)
     summary = _describe(values)
     summary["histogram"] = _histogram(values, bins=8)
-    summary["run_id"] = run_id
-    summary["dump_id"] = dump_id or _dump_id_for_run(run_id)
+    summary["run_id"] = scope["run_id"]
+    summary["dump_id"] = scope["dump_id"]
     summary["metric_scope"] = "filtered_recomputed"
     summary["percentile_scope"] = "current filtered author set"
+    summary["metric_params"] = _run_metric_params(scope["run_id"])
     return summary
 
 
@@ -691,6 +745,30 @@ def metric_line_series(
     if rank_metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported rank metric: {rank_metric}")
     rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    return metric_line_series_from_rows(
+        rows,
+        fraction_mode,
+        metrics=metrics,
+        rank_metric=rank_metric,
+        limit=limit,
+        run_id=run_id,
+        dump_id=dump_id,
+    )
+
+
+def metric_line_series_from_rows(
+    rows: list[dict[str, Any]],
+    fraction_mode: str,
+    *,
+    metrics: tuple[str, ...] | None = None,
+    rank_metric: str = "islv",
+    limit: int = 30,
+    run_id: str = "",
+    dump_id: str = "",
+) -> dict[str, Any]:
+    if rank_metric not in INDEX_NUMERIC_FIELDS:
+        raise ValueError(f"Unsupported rank metric: {rank_metric}")
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     selected_metrics = tuple(metric for metric in (metrics or _visible_metrics(rows)) if metric in INDEX_NUMERIC_FIELDS)
     rows = sort_metric_rows(rows, rank_metric)
 
@@ -718,15 +796,37 @@ def metric_line_series(
     return {
         "rank_metric": rank_metric,
         "fraction_mode": fraction_mode,
-        "run_id": run_id,
-        "dump_id": dump_id or _dump_id_for_run(run_id),
+        "run_id": scope["run_id"],
+        "dump_id": scope["dump_id"],
         "metric_scope": "filtered_recomputed",
         "percentile_scope": "current filtered author set",
+        "metric_params": _run_metric_params(scope["run_id"]),
         "normalization": "min_max_0_100_by_current_filtered_slice",
         "metrics": list(selected_metrics),
         "rows": out,
         "total": len(rows),
         "limit": limit,
+    }
+
+
+def metric_bundle(
+    fraction_mode: str,
+    metric: str,
+    filters: FilterSet | None = None,
+    *,
+    limit: int = 20,
+    run_id: str = "",
+    dump_id: str = "",
+) -> dict[str, Any]:
+    if metric not in INDEX_NUMERIC_FIELDS:
+        raise ValueError(f"Unsupported metric: {metric}")
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    rows = filtered_author_indices(fraction_mode, filters, run_id=scope["run_id"], dump_id=scope["dump_id"])
+    return {
+        "rows": rows,
+        "distribution": metric_distribution_from_rows(rows, fraction_mode, metric, run_id=scope["run_id"], dump_id=scope["dump_id"]),
+        "ranking": metric_ranking_from_rows(rows, fraction_mode, metric, filters, limit=limit, max_limit=200, run_id=scope["run_id"], dump_id=scope["dump_id"]),
+        "line_series": metric_line_series_from_rows(rows, fraction_mode, rank_metric=metric, limit=40, run_id=scope["run_id"], dump_id=scope["dump_id"]),
     }
 
 
@@ -1006,12 +1106,13 @@ def _run_json_path(run_id: str, name: str) -> Path | None:
 
 
 def _run_metric_params(run_id: str) -> dict[str, Any]:
-    defaults = {"analysis_year": 2026, "lrdi_p0": 5.0, "lrdi_lambda": 0.15}
-    candidates: list[Path] = []
+    defaults = {"analysis_year": 2026, "lrdi_p0": 5.0, "lrdi_lambda": 0.15, "source": "defaults"}
+    candidates: list[tuple[Path, str]] = []
     if run_id:
-        candidates.append(_run_dir(run_id) / "passports" / "calculation_passport.json")
-    candidates.append(DATA / "passports" / "calculation_passport.json")
-    for path in candidates:
+        candidates.append((_run_dir(run_id) / "passports" / "calculation_passport.json", "run_calculation_passport"))
+    else:
+        candidates.append((DATA / "passports" / "calculation_passport.json", "latest_calculation_passport"))
+    for path, source in candidates:
         if not path.is_file():
             continue
         try:
@@ -1025,7 +1126,10 @@ def _run_metric_params(run_id: str) -> dict[str, Any]:
             "analysis_year": _as_int(lrdi_doc.get("analysis_year") or doc.get("analysis_year") or defaults["analysis_year"]),
             "lrdi_p0": _as_float(lrdi_doc.get("p0") or doc.get("lrdi_p0") or defaults["lrdi_p0"]),
             "lrdi_lambda": _as_float(lrdi_doc.get("lambda") or doc.get("lrdi_lambda") or defaults["lrdi_lambda"]),
+            "source": source,
         }
+    if run_id:
+        defaults["source"] = "defaults_missing_run_calculation_passport"
     return defaults
 
 

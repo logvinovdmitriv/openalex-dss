@@ -168,6 +168,37 @@ class WarehouseTests(unittest.TestCase):
             self.assertEqual(ranking["rows"][0]["h"], 1)
             self.assertEqual(ranking["metric_scope"], "filtered_recomputed")
 
+    def test_analysis_scope_rejects_foreign_dump_for_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "runs" / "run_a"
+            run_dir.mkdir(parents=True)
+            (run_dir / "metric_run.json").write_text(json.dumps({"run_id": "run_a", "dump_id": "dump_a"}), encoding="utf-8")
+
+            with patch.object(warehouse, "DATA", root):
+                with self.assertRaises(ValueError) as raised:
+                    warehouse.resolve_analysis_scope(run_id="run_a", dump_id="dump_b")
+
+        self.assertIn("incompatible", str(raised.exception))
+
+    def test_run_metric_params_do_not_fallback_to_latest_when_run_passport_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            latest = root / "passports" / "calculation_passport.json"
+            latest.parent.mkdir(parents=True)
+            latest.write_text(json.dumps({"lrdi": {"p0": 99, "lambda": 0.99, "analysis_year": 1999}}), encoding="utf-8")
+
+            with patch.object(warehouse, "DATA", root):
+                params = warehouse._run_metric_params("run_without_passport")
+
+        self.assertEqual(params["source"], "defaults_missing_run_calculation_passport")
+        self.assertEqual(params["analysis_year"], 2026)
+        self.assertEqual(params["lrdi_p0"], 5.0)
+
+    def test_two_year_mean_citedness_metric_is_not_supported_until_defined(self) -> None:
+        with self.assertRaises(ValueError):
+            warehouse.metric_ranking("integer", "two_year_mean_citedness")
+
     def test_metric_ranking_allows_export_scale_limit_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

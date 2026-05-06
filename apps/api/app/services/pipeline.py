@@ -45,9 +45,9 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     input_tables = resolve_dump_tables(dump_id, required=True)
     analysis_eligibility = _recover_analysis_eligibility(payload, dump_id=dump_id, run_id=run_id)
     compute = _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
+    _write_pipeline_summary("recalculate", cfg, {**payload, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, **compute})
     report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
-    _write_pipeline_summary("recalculate", cfg, {**payload, "analysis_eligibility": analysis_eligibility})
     return {"status": "ok", "mode": "recalculate", "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
 
 
@@ -174,9 +174,9 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         },
     )
     compute = _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
+    _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(cfg, {**payload, "source_file": profile, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, **compute})
     report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
-    _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "archive": archive, "analysis_eligibility": analysis_eligibility})
     return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
 
 

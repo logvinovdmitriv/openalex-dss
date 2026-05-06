@@ -56,9 +56,10 @@ def analytics(
     stats = warehouse.read_json_doc("stats", run_id=run_id) or {}
     theory = warehouse.read_json_doc("theory", run_id=run_id) or {}
     try:
-        distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id)
-        top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=200, run_id=run_id, dump_id=dump_id)
-        metric_lines = warehouse.metric_line_series(fraction_mode, filters, rank_metric=metric, limit=40, run_id=run_id, dump_id=dump_id)
+        bundle = warehouse.metric_bundle(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id)
+        distribution = bundle["distribution"]
+        top = bundle["ranking"]
+        metric_lines = bundle["line_series"]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     run_global_stats = {
@@ -75,6 +76,7 @@ def analytics(
         "dump_id": dump_id or top.get("dump_id") or distribution.get("dump_id"),
         "metric_scope": "filtered_recomputed",
         "percentile_scope": "current filtered author set",
+        "metric_params": distribution.get("metric_params") or top.get("metric_params"),
         "filters": filters,
         "filtered_distribution": distribution,
         "filtered_top": top,

@@ -17,9 +17,12 @@ def build_report_bundle(
     dump_id: str = "",
 ) -> dict[str, Any]:
     filters: dict[str, str] = {}
+    scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
     if run_id:
         docs = _run_report_artifacts(run_id)
-        missing = [name for name, value in docs.items() if name != "pipeline" and not value]
+        missing = [name for name, value in docs.items() if not value]
         if missing:
             report = _incomplete_run_report(run_id=run_id, dump_id=dump_id, missing=missing)
             _write_json(_report_bundle_path(run_id), report)

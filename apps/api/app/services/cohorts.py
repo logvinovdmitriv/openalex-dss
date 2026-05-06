@@ -21,8 +21,9 @@ def create_cohort(payload: dict[str, Any]) -> dict[str, Any]:
     source = str(payload.get("source") or "top_n")
     fraction_mode = str(payload.get("fraction_mode") or "strict_authors_count")
     metric = str(payload.get("metric") or "h")
-    run_id = str(payload.get("run_id") or "").strip()
-    dump_id = str(payload.get("dump_id") or "").strip()
+    scope = warehouse.resolve_analysis_scope(run_id=str(payload.get("run_id") or ""), dump_id=str(payload.get("dump_id") or ""))
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
     filters = _filters(payload)
 
     if source == "manual":

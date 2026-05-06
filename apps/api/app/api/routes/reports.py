@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.services import reports
 
@@ -19,12 +19,18 @@ def build_report(
     dump_id: str = "",
     limit: int = Query(50, ge=1, le=500),
 ) -> dict[str, Any]:
-    return reports.build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id)
+    try:
+        return reports.build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/reports/bundle.json")
 def report_bundle(run_id: str = "", dump_id: str = "") -> Response:
-    payload = reports.report_bundle_json(run_id=run_id, dump_id=dump_id)
+    try:
+        payload = reports.report_bundle_json(run_id=run_id, dump_id=dump_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(
         content=json.dumps(payload, ensure_ascii=False, indent=2),
         media_type="application/json; charset=utf-8",
