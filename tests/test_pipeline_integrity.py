@@ -193,6 +193,33 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(result["analysis_eligibility"]["status"], "dev_only_not_for_final_analysis")
         self.assertEqual(captured["analysis_eligibility"]["status"], "dev_only_not_for_final_analysis")
 
+    def test_jobs_dispatch_delegates_analysis_actions_to_analysis_jobs(self) -> None:
+        with patch.object(jobs.analysis_jobs, "recalculate", return_value={"status": "ok"}) as recalculate:
+            result = jobs._dispatch("run_analysis", "recalculate", {"dump_id": "dump_a", "unknown_legacy": "drop-me"})
+
+        self.assertEqual(result, {"status": "ok"})
+        recalculate.assert_called_once()
+        self.assertEqual(recalculate.call_args.args[0], "run_analysis")
+        self.assertEqual(recalculate.call_args.args[1]["dump_id"], "dump_a")
+        self.assertNotIn("unknown_legacy", recalculate.call_args.args[1])
+
+    def test_jobs_dispatch_delegates_materialization_actions_to_materialization_jobs(self) -> None:
+        with patch.object(jobs.materialization_jobs, "dispatch", return_value={"status": "ok"}) as dispatch:
+            result = jobs._dispatch(
+                "run_materialization",
+                "build_from_openalex",
+                {"accepted_estimate_signature": "estimate", "accepted_download_signature": "download", "unknown_legacy": "drop-me"},
+            )
+
+        self.assertEqual(result, {"status": "ok"})
+        dispatch.assert_called_once()
+        self.assertEqual(dispatch.call_args.args[0], "run_materialization")
+        self.assertEqual(dispatch.call_args.args[1], "build_from_openalex")
+        self.assertEqual(dispatch.call_args.args[2]["accepted_download_signature"], "download")
+        self.assertNotIn("unknown_legacy", dispatch.call_args.args[2])
+        self.assertIn("download_progress_callback", dispatch.call_args.kwargs)
+        self.assertIn("update_progress_callback", dispatch.call_args.kwargs)
+
     def test_recalculate_recovers_analysis_eligibility_from_dump_manifest(self) -> None:
         captured: dict[str, object] = {}
 

@@ -11,7 +11,7 @@ from typing import Any
 
 from app.core.paths import DATA
 from app.services.internal_payloads import normalize_internal_pipeline_payload
-from app.services import pipeline, query_planner
+from app.services import analysis_jobs, materialization_jobs
 
 
 RUNS_DIR = DATA / "runs"
@@ -23,7 +23,7 @@ _RUN_EXECUTION_PAYLOADS: dict[str, tuple[str, dict[str, Any]]] = {}
 
 def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) -> dict[str, Any]:
     payload = normalize_internal_pipeline_payload(payload)
-    if action in {"build_from_openalex", "fetch_slice_dump"} and not _allow_unchecked_download() and not (
+    if action in materialization_jobs.REQUIRES_ACCEPTED_SIGNATURE_ACTIONS and not _allow_unchecked_download() and not (
         str(payload.get("accepted_estimate_signature") or "").strip()
         and str(payload.get("accepted_download_signature") or "").strip()
     ):
@@ -119,47 +119,17 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
 
 def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
     payload = normalize_internal_pipeline_payload(payload)
-    if action == "plan":
-        return query_planner.plan_slice(payload)
-    if action == "fetch_slice_dump":
-        return pipeline.fetch_slice_dump(
+    if action in analysis_jobs.ANALYSIS_ACTIONS:
+        return analysis_jobs.recalculate(run_id, payload)
+    if action in materialization_jobs.MATERIALIZATION_ACTIONS:
+        return materialization_jobs.dispatch(
+            run_id,
+            action,
             payload,
-            progress_callback=lambda progress: _download_progress(run_id, progress),
-            require_accepted_signatures=not _allow_unchecked_download(),
+            download_progress_callback=lambda progress: _download_progress(run_id, progress),
+            update_progress_callback=lambda percent, stage, extra=None: update_progress(run_id, percent, stage, extra),
+            allow_unchecked_download=_allow_unchecked_download(),
         )
-    if action == "build_from_openalex":
-        fetched = pipeline.fetch_slice_dump(
-            payload,
-            progress_callback=lambda progress: _download_progress(run_id, progress),
-            require_accepted_signatures=not _allow_unchecked_download(),
-        )
-        dump = fetched.get("dump") or {}
-        raw_jsonl = str(dump.get("raw_jsonl") or "").strip()
-        if not raw_jsonl or dump.get("no_data"):
-            return {"fetch": fetched, "build": None, "no_data": True}
-        analysis_eligibility = pipeline.analysis_eligibility_from_dump(dump, dev_override=_allow_unchecked_download())
-        if not analysis_eligibility["allowed_for_final_analysis"] and not _allow_unchecked_download():
-            raise ValueError("Дамп не допущен к финальному анализу. Обновите оценку и скачивание либо используйте явный dev-режим.")
-        update_progress(run_id, 96, "normalizing local file", {"source_path": raw_jsonl})
-        built = pipeline.import_local_file(
-            normalize_internal_pipeline_payload(
-                {
-                    **payload,
-                    "source_path": raw_jsonl,
-                    "api_key": None,
-                    "run_id": run_id,
-                    "dump_id": dump.get("dump_id"),
-                    "dump_manifest": dump,
-                    "analysis_eligibility": analysis_eligibility,
-                    "import_mode": "final_reproducible" if analysis_eligibility["allowed_for_final_analysis"] else "exploratory",
-                }
-            )
-        )
-        return {"fetch": fetched, "build": built, "no_data": False, "analysis_eligibility": analysis_eligibility}
-    if action == "import_file":
-        return pipeline.import_local_file(normalize_internal_pipeline_payload({**payload, "run_id": run_id}))
-    if action == "recalculate":
-        return pipeline.recalculate(normalize_internal_pipeline_payload({**payload, "run_id": run_id}))
     raise ValueError(f"Unsupported run action: {action}")
 
 
