@@ -65,7 +65,7 @@ report_scope_hash: 66b4ae366925c1bd
 Версии аналитических артефактов:
 
 ```text
-report_bundle_version: report_bundle_v9
+report_bundle_version: report_bundle_v10
 analysis_version: scientometrics_v4
 findings_version: scientometric_findings_v2
 conclusion_version: scientometric_conclusion_v3

@@ -43,29 +43,3 @@ def get_run(run_id: str) -> dict[str, Any]:
         return jobs.get_run(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run not found") from exc
-
-
-@router.get("/runs/{run_id}/tables/{table_name}")
-def run_table(
-    run_id: str,
-    table_name: str,
-    q: str = "",
-    fraction_mode: str = "",
-    metric: str = "",
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-) -> dict[str, Any]:
-    try:
-        return jobs.table_for_run(
-            run_id,
-            table_name,
-            q=q,
-            fraction_mode=fraction_mode,
-            metric=metric,
-            limit=limit,
-            offset=offset,
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run not found") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc

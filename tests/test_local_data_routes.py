@@ -28,9 +28,11 @@ class LocalDataRouteTests(unittest.TestCase):
         ):
             payload = local_data.local_data_summary(run_id="run_a")
 
-        self.assertEqual(set(payload["tables"]), {"works", "authorships", "author_work", "indices", "ratings"})
+        self.assertEqual(set(payload["tables"]), {"works", "authorships", "work_topics", "author_work", "indices", "ratings"})
         self.assertNotIn("top1_sensitivity", payload["tables"])
         self.assertEqual(payload["tables"]["works"]["label"], "Работы")
+        self.assertEqual(payload["tables"]["authorships"]["rows"], 0)
+        self.assertEqual(payload["tables"]["authorships"]["exists"], False)
         self.assertEqual(payload["run_id"], "run_a")
         self.assertEqual(payload["dump_id"], "dump_a")
 

@@ -16,7 +16,6 @@ from app.api.routes import (
     runs,
     slices,
     sources,
-    tables,
 )
 
 
@@ -41,7 +40,6 @@ for router in (
     catalog.router,
     sources.router,
     local_data.router,
-    tables.router,
     entities.router,
     cohorts.router,
     analytics.router,

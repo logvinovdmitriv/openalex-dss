@@ -47,6 +47,14 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertIn("/api/v1/local-data/preview", route_paths)
         self.assertIn("/api/v1/local-data/preview.csv", route_paths)
 
+    def test_generic_table_browser_routes_are_not_public(self) -> None:
+        route_paths = {getattr(route, "path", "") for route in app.routes}
+
+        self.assertNotIn("/api/v1/tables/{table}", route_paths)
+        self.assertNotIn("/api/v1/exports/{table}.csv", route_paths)
+        self.assertNotIn("/api/v1/exports/{table}.json", route_paths)
+        self.assertNotIn("/api/v1/runs/{run_id}/tables/{table_name}", route_paths)
+
     def test_run_request_exposes_only_recalculate_action(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")
         self.assertEqual(RunRequest(action="recalculate", payload={"dump_id": "dump_a"}).action, "recalculate")

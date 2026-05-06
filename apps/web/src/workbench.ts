@@ -3,7 +3,7 @@ import { FRACTION_MODES, type ActiveFilters, countryLabel, filterParams, fmt } f
 export type View = "slices" | "data" | "enrichment" | "rankings" | "cohorts" | "statistics" | "reports" | "passports";
 export type ResolverTab = "subject" | "organization" | "author" | "source";
 export type CohortFilterPolicy = "membership" | "current" | "none";
-export type LocalDataKind = "works" | "authorships" | "author_work" | "indices" | "ratings";
+export type LocalDataKind = "works" | "authorships" | "work_topics" | "author_work" | "indices" | "ratings";
 export type ScientometricFindingSeverity = "high" | "medium" | "low" | "informational";
 
 export type ScientometricFinding = {
@@ -167,6 +167,7 @@ export type LocalDataSummary = {
 export const LOCAL_DATA_KIND_OPTIONS: Array<{ value: LocalDataKind; label: string }> = [
   { value: "works", label: "Работы" },
   { value: "authorships", label: "Авторства" },
+  { value: "work_topics", label: "Темы работ" },
   { value: "author_work", label: "Автор-работа" },
   { value: "indices", label: "Индексы авторов" },
   { value: "ratings", label: "Позиции рейтингов" },
@@ -354,6 +355,15 @@ export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; r
   if (params.dumpId) query.set("dump_id", params.dumpId);
   if (params.limit) query.set("limit", String(params.limit));
   return `/local-data/preview?${query.toString()}`;
+}
+
+export function localDataPreviewCsvUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number } = {}) {
+  const query = new URLSearchParams({ kind });
+  if (params.q?.trim()) query.set("q", params.q.trim());
+  if (params.runId) query.set("run_id", params.runId);
+  if (params.dumpId) query.set("dump_id", params.dumpId);
+  if (params.limit) query.set("limit", String(params.limit));
+  return `/local-data/preview.csv?${query.toString()}`;
 }
 
 export function scientometricsUrl(params: {

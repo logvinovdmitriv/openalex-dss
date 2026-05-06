@@ -15,7 +15,7 @@ OPENALEX_DSS_DATA_DIR/* -> external lakehouse and warehouse layer
 `apps/web` is a React + TypeScript application with Vite, TanStack Query,
 Recharts, Framer Motion and Lucide icons. The first screen is a Russian
 workspace: choose a slice, create or import a fixed dump, inspect author
-ratings, compare metric lines, drill into flat tables, and export reproducible
+ratings, compare metric lines, inspect whitelisted local data previews, and export reproducible
 tables, passports and report bundles.
 
 The UI intentionally hides unsupported or noisy filters. It exposes only
@@ -31,13 +31,12 @@ mode and ranking metric.
 
 - OpenAlex ID/autocomplete/enrichment access;
 - compact OpenAlex Works dump creation;
-- OpenAlex snapshot manifest inspection;
 - local OpenAlex Works JSONL/JSONL.GZ import;
 - filesystem/lakehouse source catalog;
 - normalization into works/authorships/author-work tables;
 - author index calculation and statistics;
 - report bundle assembly with passports, quality funnel and stability sections;
-- filtered table/rating exports.
+- domain exports for rankings, cohorts, local data previews and scientometric reports.
 
 HTTP/REST is the primary UI-backend protocol. WebSocket or SSE should be added
 later for long-running progress events. gRPC is reserved for future
@@ -54,7 +53,6 @@ Supported run contract:
 POST /api/v1/runs
 GET  /api/v1/runs
 GET  /api/v1/runs/{run_id}
-GET  /api/v1/runs/{run_id}/tables/{table_name}
 ```
 
 `POST /runs` is public only for `recalculate`, i.e. recomputing indices from
@@ -69,6 +67,8 @@ POST /api/v1/materializations/{materialization_id}/run
 
 Legacy actions such as `plan`, `fetch_slice_dump`, `build_from_openalex` and
 `import_file` are internal orchestration/service paths, not public API actions.
+Generic table browser endpoints are not public; local data inspection goes through
+whitelisted `/api/v1/local-data/*` previews.
 Jobs execute in one in-process worker and persist status JSON under
 `$OPENALEX_DSS_DATA_DIR/runs/{run_id}/run_status.json`. This gives the UI and
 future Go gateway a stable contract without adding Celery/RQ/Redis before they

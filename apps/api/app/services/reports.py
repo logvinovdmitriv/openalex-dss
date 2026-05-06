@@ -11,7 +11,7 @@ from app.services import cohorts, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
-REPORT_BUNDLE_VERSION = "report_bundle_v9"
+REPORT_BUNDLE_VERSION = "report_bundle_v10"
 DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "islv")
 
 
@@ -211,9 +211,9 @@ def build_report_bundle(
             "scientometrics_top_outliers_csv": f"/api/v1/analytics/scientometrics/top-outliers.csv?{scientometric_query}",
             "scientometrics_findings_csv": f"/api/v1/analytics/scientometrics/findings.csv?{scientometric_query}",
             "scientometrics_conclusion_md": f"/api/v1/analytics/scientometrics/conclusion.md?{scientometric_query}",
-            "authors_local_metrics_csv": f"/api/v1/exports/authors_local_metrics.csv?run_id={run_id}" if run_id else "/api/v1/exports/authors_local_metrics.csv",
-            "works_csv": f"/api/v1/exports/works.csv?run_id={run_id}" if run_id else "/api/v1/exports/works.csv",
-            "authorships_csv": f"/api/v1/exports/authorships.csv?run_id={run_id}" if run_id else "/api/v1/exports/authorships.csv",
+            "authors_local_metrics_csv": _local_data_csv_export("indices", run_id=run_id, dump_id=resolved_dump_id),
+            "works_csv": _local_data_csv_export("works", run_id=run_id, dump_id=resolved_dump_id),
+            "authorships_csv": _local_data_csv_export("authorships", run_id=run_id, dump_id=resolved_dump_id),
             "report_bundle_json": f"/api/v1/reports/bundle.json?{bundle_query}" if bundle_query else "/api/v1/reports/bundle.json",
             "sha256_manifest": checksums.get("sha256_manifest"),
         },
@@ -386,7 +386,7 @@ def _report_scope(
     membership_filters = _clean_filters(cohort_membership_filters or {})
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     canonical = {
-        "version": "report_scope_v9",
+        "version": "report_scope_v10",
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),
@@ -490,6 +490,11 @@ def _scientometric_metrics(metrics: list[str] | tuple[str, ...] | str | None) ->
 def _query_params(params: dict[str, Any]) -> str:
     clean = {key: value for key, value in params.items() if str(value or "").strip()}
     return urlencode(clean)
+
+
+def _local_data_csv_export(kind: str, *, run_id: str = "", dump_id: str = "") -> str:
+    query = _query_params({"kind": kind, "run_id": run_id, "dump_id": dump_id})
+    return f"/api/v1/local-data/preview.csv?{query}"
 
 
 def _safe_id(value: str) -> str:

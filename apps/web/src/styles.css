@@ -67,6 +67,19 @@ button {
   transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 120ms ease;
 }
 
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 650;
+}
+
 button:hover {
   border-color: var(--border-strong);
 }

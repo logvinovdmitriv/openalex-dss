@@ -12,6 +12,7 @@ router = APIRouter(tags=["local-data"])
 LOCAL_DATA_KINDS: dict[str, str] = {
     "works": "Работы",
     "authorships": "Авторства",
+    "work_topics": "Темы работ",
     "author_work": "Автор-работа",
     "indices": "Индексы авторов",
     "ratings": "Позиции рейтингов",
@@ -25,14 +26,7 @@ def local_data_summary(run_id: str = "", dump_id: str = "") -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    scoped_tables = {
-        kind: {
-            **(tables.get(kind) or {}),
-            "kind": kind,
-            "label": label,
-        }
-        for kind, label in LOCAL_DATA_KINDS.items()
-    }
+    scoped_tables = {kind: _summary_entry(kind, label, tables.get(kind) or {}) for kind, label in LOCAL_DATA_KINDS.items()}
     return {
         "kinds": [{"kind": kind, "label": label} for kind, label in LOCAL_DATA_KINDS.items()],
         "tables": scoped_tables,
@@ -134,3 +128,13 @@ def _first_table_value(tables: dict[str, dict[str, Any]], key: str) -> str:
         if value:
             return value
     return ""
+
+
+def _summary_entry(kind: str, label: str, raw: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **raw,
+        "kind": kind,
+        "label": label,
+        "exists": bool(raw.get("exists")),
+        "rows": int(raw.get("rows") or 0),
+    }

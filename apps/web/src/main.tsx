@@ -47,6 +47,7 @@ import {
   cohortStatisticsUrl,
   humanSliceTitle,
   LOCAL_DATA_KIND_OPTIONS,
+  localDataPreviewCsvUrl,
   localDataPreviewUrl,
   localDataSummaryUrl,
   mutationError,
@@ -541,6 +542,7 @@ function Workbench() {
             tableQ={tableQ}
             setTableQ={setTableQ}
             table={table.data}
+            csvUrl={`${API_BASE}${localDataPreviewCsvUrl(localDataKind, { q: tableQ, runId, dumpId: activeDumpId, limit: 100_000 })}`}
             run={run.data}
             running={running}
             onRefresh={() => qc.invalidateQueries()}
@@ -889,6 +891,7 @@ function LocalDataPage({
   tableQ,
   setTableQ,
   table,
+  csvUrl,
   run,
   running,
   onRefresh,
@@ -903,6 +906,7 @@ function LocalDataPage({
   tableQ: string;
   setTableQ: (value: string) => void;
   table?: TableResponse;
+  csvUrl: string;
   run: any;
   running: boolean;
   onRefresh: () => void;
@@ -915,7 +919,7 @@ function LocalDataPage({
       <section className="metric-grid">
         <MetricCard label="Локальных дампов" value={fmt(dumpRows.length)} />
         <MetricCard label="Raw на диске" value={`${fmt(totalRawMb)} МБ`} />
-        <MetricCard label="Локальных витрин" value={fmt(["works", "authorships", "author_work", "indices", "ratings"].filter((name) => tables?.[name]?.exists).length)} />
+        <MetricCard label="Локальных витрин" value={fmt(["works", "authorships", "work_topics", "author_work", "indices", "ratings"].filter((name) => tables?.[name]?.exists).length)} />
         <MetricCard label="Индексов авторов" value={fmt(tables?.indices?.rows ?? 0)} />
       </section>
       <section className="panel">
@@ -966,6 +970,7 @@ function LocalDataPage({
             {ensureCurrentOption(localDataKindOptions, localDataKind).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <input value={tableQ} onChange={(event) => setTableQ(event.target.value)} placeholder="Поиск по локальной витрине" />
+          <a className="button-link" href={csvUrl}>CSV текущей витрины</a>
         </div>
         <DataGrid data={table} onSelect={onSelect} hiddenFields={["slice_id"]} />
       </section>
