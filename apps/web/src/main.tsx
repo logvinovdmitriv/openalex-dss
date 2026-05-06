@@ -58,6 +58,7 @@ import {
   type CohortFilterPolicy,
   type ResolverTab,
   type ScientometricAnalysisPayload,
+  type ScientometricFinding,
   type View,
   type WorkbenchRun,
 } from "./workbench";
@@ -2840,7 +2841,7 @@ function findingNoticeClass(severity: string) {
   return "notice";
 }
 
-function findingTitle(finding: Record<string, unknown>) {
+function findingTitle(finding: ScientometricFinding) {
   const metric = finding.metric ? metricLabel(String(finding.metric)) : "scope";
   const baseline = finding.baseline_metric ? `${metricLabel(String(finding.baseline_metric))} → ` : "";
   return `${findingSeverityLabel(String(finding.severity ?? ""))} · ${baseline}${metric} · ${findingTypeLabel(String(finding.type ?? ""))}`;
@@ -2867,6 +2868,8 @@ function findingTypeLabel(value: string) {
     rank_instability: "сдвиг рангов",
     rank_agreement: "согласованность рангов",
     balanced_candidate_metric: "кандидатный индекс",
+    productivity_metric: "продуктивность",
+    citation_volume_metric: "объем цитирования",
   };
   return labels[value] ?? value;
 }

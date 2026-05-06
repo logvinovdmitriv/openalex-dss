@@ -3,6 +3,30 @@ import { FRACTION_MODES, type ActiveFilters, countryLabel, filterParams, fmt } f
 export type View = "slices" | "data" | "enrichment" | "rankings" | "cohorts" | "statistics" | "reports" | "passports";
 export type ResolverTab = "subject" | "organization" | "author" | "source";
 export type CohortFilterPolicy = "membership" | "current" | "none";
+export type ScientometricFindingSeverity = "high" | "medium" | "low" | "informational";
+
+export type ScientometricFinding = {
+  id: string;
+  type: string;
+  metric?: string | null;
+  baseline_metric?: string | null;
+  severity: ScientometricFindingSeverity;
+  evidence: Record<string, unknown>;
+  text: string;
+  recommendation?: string;
+};
+
+export type ScientometricFindingSummary = {
+  findings_version?: string;
+  n_findings?: number;
+  high_count?: number;
+  medium_count?: number;
+  candidate_metric?: string | null;
+  candidate_metric_claim?: string | null;
+  primary_limitations?: Array<Record<string, unknown>>;
+  recommended_discussion_points?: string[];
+  notes?: string[];
+};
 
 export type ScientometricAnalysisPayload = {
   analysis_version: string;
@@ -35,8 +59,9 @@ export type ScientometricAnalysisPayload = {
   outliers: Record<string, Array<Record<string, unknown>>>;
   metric_scorecard: Record<string, Record<string, unknown>>;
   interpretation: Record<string, unknown>;
-  findings?: Array<Record<string, unknown>>;
-  finding_summary?: Record<string, unknown>;
+  findings?: ScientometricFinding[];
+  finding_summary?: ScientometricFindingSummary;
+  finding_thresholds?: Record<string, number>;
 };
 
 export type EntitySuggestion = {

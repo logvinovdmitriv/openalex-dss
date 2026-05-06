@@ -22,7 +22,7 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
     "lrdi",
 )
 SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v2"
-SCIENTOMETRIC_FINDINGS_VERSION = "scientometric_findings_v1"
+SCIENTOMETRIC_FINDINGS_VERSION = "scientometric_findings_v2"
 FINDING_THRESHOLDS = {
     "heavy_tail_skewness_medium": 1.0,
     "heavy_tail_skewness_high": 2.0,
@@ -138,6 +138,7 @@ def build_scientometric_analysis(
         "interpretation": _interpretation(rows, selected_metrics, baseline_metric, scorecard, warnings),
         "findings": findings,
         "finding_summary": finding_summary(findings, metrics=selected_metrics, baseline_metric=baseline_metric),
+        "finding_thresholds": FINDING_THRESHOLDS,
         "warnings": warnings,
     }
 
@@ -358,15 +359,19 @@ def interpretation_findings(
     metric_scorecard: dict[str, Any],
     rank_top_n: int = 100,
 ) -> list[dict[str, Any]]:
+    if n_authors <= 0:
+        return []
     findings: list[dict[str, Any]] = []
     findings.extend(_distribution_findings(metrics, descriptive, normality))
     findings.extend(_scorecard_findings(metrics, metric_scorecard))
+    findings.extend(_metric_identity_findings(metrics))
     findings.extend(_rank_findings(metrics, baseline_metric, n_authors, correlations, rank_comparisons, rank_top_n=rank_top_n))
-    findings.extend(_candidate_metric_findings(metrics, metric_scorecard))
+    findings.extend(_candidate_metric_findings(metrics, metric_scorecard, n_authors=n_authors))
     return sorted(findings, key=_finding_sort_key)
 
 
 def finding_summary(findings: list[dict[str, Any]], *, metrics: list[str], baseline_metric: str) -> dict[str, Any]:
+    has_candidate = any(finding.get("type") == "balanced_candidate_metric" for finding in findings)
     limitations = [
         {
             "id": finding.get("id"),
@@ -387,15 +392,15 @@ def finding_summary(findings: list[dict[str, Any]], *, metrics: list[str], basel
         discussion_points.append("Проверить влияние одной сверхцитируемой работы через top1_share.")
     if any(finding.get("type") == "rank_instability" for finding in findings):
         discussion_points.append(f"Разобрать крупнейшие сдвиги рангов относительно {baseline_metric}.")
-    if "islv" in metrics:
+    if has_candidate:
         discussion_points.append("Описывать ISLV как кандидатную сбалансированную модификацию, а не как автоматически лучший индекс.")
     return {
         "findings_version": SCIENTOMETRIC_FINDINGS_VERSION,
         "n_findings": len(findings),
         "high_count": sum(1 for finding in findings if finding.get("severity") == "high"),
         "medium_count": sum(1 for finding in findings if finding.get("severity") == "medium"),
-        "candidate_metric": "islv" if any(finding.get("type") == "balanced_candidate_metric" for finding in findings) else None,
-        "candidate_metric_claim": "balanced_candidate_not_proven_best" if "islv" in metrics else None,
+        "candidate_metric": "islv" if has_candidate else None,
+        "candidate_metric_claim": "balanced_candidate_not_proven_best" if has_candidate else None,
         "primary_limitations": limitations,
         "recommended_discussion_points": discussion_points,
         "notes": [
@@ -509,6 +514,12 @@ def _scorecard_findings(metrics: list[str], metric_scorecard: dict[str, Any]) ->
             abs_rho = _number(dependency.get("abs_spearman_rho"))
             if abs_rho is None or abs_rho < threshold:
                 continue
+            direction = str(dependency.get("direction") or "").strip().lower()
+            finding_text = text
+            finding_recommendation = recommendation
+            if dependency_key == "top1_dominance_dependence" and direction == "negative":
+                finding_text = "Индекс обратно связан с top1_share; это указывает на корректирующее действие штрафа концентрации, а не на завышение авторов одной сверхцитируемой работой."
+                finding_recommendation = "Использовать как корректирующий показатель и проверять rank shifts относительно C и h."
             findings.append(
                 _finding(
                     id=f"{finding_type}:{metric}",
@@ -521,10 +532,39 @@ def _scorecard_findings(metrics: list[str], metric_scorecard: dict[str, Any]) ->
                         "direction": dependency.get("direction"),
                         "threshold": threshold,
                     },
-                    text=f"Метрика {metric}: {text}",
-                    recommendation=recommendation,
+                    text=f"Метрика {metric}: {finding_text}",
+                    recommendation=finding_recommendation,
                 )
             )
+    return findings
+
+
+def _metric_identity_findings(metrics: list[str]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    if "p" in metrics:
+        findings.append(
+            _finding(
+                id="metric_identity:p",
+                type="productivity_metric",
+                metric="p",
+                severity="informational",
+                evidence={"metric_role": "publication_volume", "measures_publication_count": True},
+                text="P отражает публикационную продуктивность и не является самостоятельной мерой цитатного влияния.",
+                recommendation="Использовать P как контекст объема публикаций, а не как единственный показатель научного влияния.",
+            )
+        )
+    if "c" in metrics:
+        findings.append(
+            _finding(
+                id="metric_identity:c",
+                type="citation_volume_metric",
+                metric="c",
+                severity="informational",
+                evidence={"metric_role": "citation_volume", "requires_heavy_tail_and_top1_checks": True},
+                text="C отражает общий объем цитирования и легко интерпретируется, но требует проверки heavy-tail диагностики и top1_share.",
+                recommendation="Сопоставлять C с C_frac, h/g и показателями концентрации цитирований.",
+            )
+        )
     return findings
 
 
@@ -607,8 +647,8 @@ def _rank_findings(
     return findings
 
 
-def _candidate_metric_findings(metrics: list[str], metric_scorecard: dict[str, Any]) -> list[dict[str, Any]]:
-    if "islv" not in metrics:
+def _candidate_metric_findings(metrics: list[str], metric_scorecard: dict[str, Any], *, n_authors: int) -> list[dict[str, Any]]:
+    if n_authors <= 0 or "islv" not in metrics:
         return []
     scorecard = metric_scorecard.get("islv") or {}
     return [

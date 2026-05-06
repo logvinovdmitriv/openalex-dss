@@ -211,6 +211,32 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(by_type_metric[("citation_volume_dependence", "g")]["severity"], "high")
         self.assertIn(("rank_instability", "islv"), by_type_metric)
         self.assertIn(("rank_agreement", "g"), by_type_metric)
+        self.assertIn(("productivity_metric", "p"), by_type_metric)
+        self.assertIn(("citation_volume_metric", "c"), by_type_metric)
+
+    def test_negative_top1_dependence_is_described_as_correction(self) -> None:
+        findings = scientometrics.interpretation_findings(
+            metrics=["islv"],
+            baseline_metric="h",
+            n_authors=20,
+            descriptive={},
+            normality={},
+            correlations={"spearman": {}},
+            rank_comparisons={},
+            metric_scorecard={
+                "islv": {
+                    "top1_dominance_dependence": {
+                        "abs_spearman_rho": 0.65,
+                        "spearman_rho": -0.65,
+                        "direction": "negative",
+                    }
+                }
+            },
+        )
+        top1 = next(finding for finding in findings if finding["type"] == "top1_dominance_dependence")
+
+        self.assertIn("корректирующее", top1["text"])
+        self.assertIn("negative", top1["evidence"]["direction"])
 
     def test_islv_finding_is_candidate_not_best_metric_claim(self) -> None:
         findings = scientometrics.interpretation_findings(
@@ -229,6 +255,23 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(candidate["evidence"]["uses_fractional_citations"], True)
         self.assertNotIn("best metric", str(candidate["text"]).lower())
         self.assertNotIn("best metric", str(candidate["recommendation"]).lower())
+
+    def test_empty_analysis_does_not_produce_candidate_finding_or_claim(self) -> None:
+        findings = scientometrics.interpretation_findings(
+            metrics=["h", "islv"],
+            baseline_metric="h",
+            n_authors=0,
+            descriptive={},
+            normality={},
+            correlations={"spearman": {}},
+            rank_comparisons={},
+            metric_scorecard={"islv": {}},
+        )
+        summary = scientometrics.finding_summary(findings, metrics=["h", "islv"], baseline_metric="h")
+
+        self.assertEqual(findings, [])
+        self.assertIsNone(summary["candidate_metric"])
+        self.assertIsNone(summary["candidate_metric_claim"])
 
     def test_build_analysis_applies_cohort_scope_and_policy(self) -> None:
         captured: dict[str, object] = {}
@@ -299,7 +342,8 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(payload["n_authors"], 0)
         self.assertEqual(payload["analysis_version"], "scientometrics_v2")
         self.assertEqual(payload["descriptive"]["h"]["n"], 0)
-        self.assertEqual(payload["finding_summary"]["findings_version"], "scientometric_findings_v1")
+        self.assertEqual(payload["finding_summary"]["findings_version"], "scientometric_findings_v2")
+        self.assertEqual(payload["finding_thresholds"]["tie_rate"], 0.30)
         self.assertTrue(payload["warnings"])
         self.assertIsNone(payload["interpretation"]["candidate_balanced_metric"])
         self.assertNotIn("best_balanced_metric", payload["interpretation"])
