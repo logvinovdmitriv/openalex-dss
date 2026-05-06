@@ -21,7 +21,9 @@ for path in (API, SRC):
 from app.main import app  # noqa: E402
 from app.api.routes import runs as runs_routes  # noqa: E402
 from app.api.routes import slices as slices_routes  # noqa: E402
+from app.api import schemas as public_schemas  # noqa: E402
 from app.api.schemas import AnalysisRunRequest, RunRequest, SliceCreateRequest  # noqa: E402
+from app.services.internal_payloads import InternalPipelinePayload  # noqa: E402
 
 
 class PublicApiSurfaceTests(unittest.TestCase):
@@ -92,6 +94,15 @@ class PublicApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(annotation_name, "SliceCreateRequest")
         self.assertIs(annotation, SliceCreateRequest)
+
+    def test_internal_pipeline_payload_is_not_a_public_schema(self) -> None:
+        public_exports = set(vars(public_schemas))
+        internal_props = InternalPipelinePayload.model_json_schema()["properties"]
+
+        self.assertNotIn("PipelineRequest", public_exports)
+        self.assertIn("raw_openalex_filter", internal_props)
+        self.assertIn("accepted_download_signature", internal_props)
+        self.assertEqual(InternalPipelinePayload(filter_mode="all", api_key="secret", extra_legacy="ignored").api_key, "secret")
 
     def test_run_request_exposes_only_recalculate_action(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")
