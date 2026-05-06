@@ -121,14 +121,28 @@ def _clean_updates(payload: dict[str, Any], *, base: SliceConfig) -> dict[str, A
     if filter_mode not in FILTER_MODES:
         raise ValueError("filter_mode must be one of: all, primary_topic, topics_any, keyword, search")
     updates["filter_mode"] = filter_mode
+    if filter_mode in {"all", "keyword", "search"} and "entity_level" not in updates and "entity_id_short" not in updates:
+        level = ""
+        subject_id = ""
+        subject_name = ""
     if filter_mode == "all":
         level = ""
         subject_id = ""
         subject_name = ""
-    else:
+    elif filter_mode in {"primary_topic", "topics_any"}:
         if level not in SUBJECT_LEVELS:
             raise ValueError("entity_level must be one of: field, subfield, topic")
         _validate_subject_id(level, subject_id)
+    else:
+        has_subject = bool(level or subject_id)
+        if has_subject:
+            if level not in SUBJECT_LEVELS:
+                raise ValueError("entity_level must be one of: field, subfield, topic")
+            _validate_subject_id(level, subject_id)
+        else:
+            level = ""
+            subject_id = ""
+            subject_name = ""
 
     updates["entity_level"] = level
     updates["entity_id_short"] = subject_id

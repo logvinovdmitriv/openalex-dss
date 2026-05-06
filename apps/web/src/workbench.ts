@@ -169,18 +169,33 @@ export function buildDownloadPolicy(): DownloadPolicy {
 
 export function sliceName(filters: ActiveFilters) {
   return [
+    filters.filter_mode || "all",
     filters.subject_level || "all_subjects",
     filters.subject_id || "all",
+    shortToken(filters.keyword_id) || shortToken(filters.text_search_query) || "all_keywords",
     filters.country_code || "all",
-    filters.institution_id ? "org" : "all_orgs",
+    shortToken(filters.institution_id) || "all_orgs",
+    shortToken(filters.author_id) || "all_authors",
+    shortToken(filters.source_id) || "all_sources",
     filters.from_publication_date.slice(0, 4),
     filters.to_publication_date.slice(0, 4),
     filters.work_type || "all_types",
+    filters.language || "all_lang",
+    filters.open_access_is_oa || "all_oa",
+    filters.has_abstract || "all_abs",
+    filters.min_cited_by_count || "all_cites",
+    shortToken(filters.doi) || "all_doi",
   ].join("_").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 120);
 }
 
 export function humanSliceTitle(filters: ActiveFilters) {
-  return `${filters.subject_name || "все направления"} / ${filters.institution_name || (filters.country_code ? countryLabel(filters.country_code) : "все страны")} / ${filters.from_publication_date.slice(0, 4)}-${filters.to_publication_date.slice(0, 4)}`;
+  return `${sliceSubjectTitle(filters)} / ${filters.institution_name || (filters.country_code ? countryLabel(filters.country_code) : "все страны")} / ${filters.from_publication_date.slice(0, 4)}-${filters.to_publication_date.slice(0, 4)}`;
+}
+
+export function sliceSubjectTitle(filters: ActiveFilters) {
+  if (filters.filter_mode === "keyword") return filters.keyword_name || filters.keyword_id || "ключевое слово";
+  if (filters.filter_mode === "search") return filters.text_search_query || "поисковый запрос";
+  return filters.subject_name || "все направления";
 }
 
 export function rankingChartRows(rows: Record<string, unknown>[], metric: string) {
@@ -229,9 +244,17 @@ export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metri
   return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId }).toString()}`;
 }
 
+export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100) {
+  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId }).toString()}`;
+}
+
 function openAlexEntityUrl(level: string, id: string) {
   if (!level || !id) return "";
   return level === "topic" ? `https://openalex.org/${id}` : `https://openalex.org/${level}s/${id}`;
+}
+
+function shortToken(value: string) {
+  return String(value || "").trim().replace(/^https?:\/\/[^/]+\//, "").replace(/^doi:/i, "").slice(-24);
 }
 
 function clampProgress(value: number) {

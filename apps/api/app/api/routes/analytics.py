@@ -179,6 +179,73 @@ def distribution(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/analytics/ranking")
+def ranking_json(
+    run_id: str = "",
+    dump_id: str = "",
+    fraction_mode: str = "strict_authors_count",
+    metric: str = "islv",
+    country_code: str = "",
+    filter_mode: str = "",
+    subject_level: str = "",
+    subject_id: str = "",
+    keyword_id: str = "",
+    keyword_display_name: str = "",
+    keyword_name: str = "",
+    text_search_query: str = "",
+    author_id: str = "",
+    author_orcid: str = "",
+    author_display_name: str = "",
+    author_name: str = "",
+    doi: str = "",
+    affiliation_mode: str = "",
+    institution_id: str = "",
+    source_id: str = "",
+    source_display_name: str = "",
+    source_name: str = "",
+    source_type: str = "",
+    language: str = "",
+    open_access_is_oa: str = "",
+    has_abstract: str = "",
+    min_cited_by_count: int = 0,
+    from_publication_date: str = "",
+    to_publication_date: str = "",
+    work_type: str = "",
+    limit: int = Query(100, ge=1, le=500_000),
+) -> dict[str, Any]:
+    filters = _slice_filters(
+        country_code=country_code,
+        filter_mode=filter_mode,
+        subject_level=subject_level,
+        subject_id=subject_id,
+        keyword_id=keyword_id,
+        keyword_display_name=keyword_display_name or keyword_name,
+        text_search_query=text_search_query,
+        author_id=author_id,
+        author_orcid=author_orcid,
+        author_display_name=author_display_name or author_name,
+        doi=doi,
+        affiliation_mode=affiliation_mode,
+        institution_id=institution_id,
+        source_id=source_id,
+        source_display_name=source_display_name or source_name,
+        source_type=source_type,
+        language=language,
+        open_access_is_oa=open_access_is_oa,
+        has_abstract=has_abstract,
+        min_cited_by_count=min_cited_by_count,
+        from_publication_date=from_publication_date,
+        to_publication_date=to_publication_date,
+        work_type=work_type,
+    )
+    try:
+        payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=run_id, dump_id=dump_id)
+        payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
+        return payload
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/analytics/ranking.csv")
 def ranking_csv(
     run_id: str = "",
@@ -213,35 +280,42 @@ def ranking_csv(
     work_type: str = "",
     limit: int = Query(100_000, ge=1, le=500_000),
 ) -> Response:
-    filters = _slice_filters(
-        country_code=country_code,
-        filter_mode=filter_mode,
-        subject_level=subject_level,
-        subject_id=subject_id,
-        keyword_id=keyword_id,
-        keyword_display_name=keyword_display_name or keyword_name,
-        text_search_query=text_search_query,
-        author_id=author_id,
-        author_orcid=author_orcid,
-        author_display_name=author_display_name or author_name,
-        doi=doi,
-        affiliation_mode=affiliation_mode,
-        institution_id=institution_id,
-        source_id=source_id,
-        source_display_name=source_display_name or source_name,
-        source_type=source_type,
-        language=language,
-        open_access_is_oa=open_access_is_oa,
-        has_abstract=has_abstract,
-        min_cited_by_count=min_cited_by_count,
-        from_publication_date=from_publication_date,
-        to_publication_date=to_publication_date,
-        work_type=work_type,
-    )
     try:
-        payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=run_id, dump_id=dump_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        payload = ranking_json(
+            run_id=run_id,
+            dump_id=dump_id,
+            fraction_mode=fraction_mode,
+            metric=metric,
+            country_code=country_code,
+            filter_mode=filter_mode,
+            subject_level=subject_level,
+            subject_id=subject_id,
+            keyword_id=keyword_id,
+            keyword_display_name=keyword_display_name,
+            keyword_name=keyword_name,
+            text_search_query=text_search_query,
+            author_id=author_id,
+            author_orcid=author_orcid,
+            author_display_name=author_display_name,
+            author_name=author_name,
+            doi=doi,
+            affiliation_mode=affiliation_mode,
+            institution_id=institution_id,
+            source_id=source_id,
+            source_display_name=source_display_name,
+            source_name=source_name,
+            source_type=source_type,
+            language=language,
+            open_access_is_oa=open_access_is_oa,
+            has_abstract=has_abstract,
+            min_cited_by_count=min_cited_by_count,
+            from_publication_date=from_publication_date,
+            to_publication_date=to_publication_date,
+            work_type=work_type,
+            limit=limit,
+        )
+    except HTTPException:
+        raise
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=payload["fields"], extrasaction="ignore")
     writer.writeheader()

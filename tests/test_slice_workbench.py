@@ -13,10 +13,68 @@ for path in (API, SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.services import slice_workbench  # noqa: E402
+from app.services import author_slice, slice_workbench  # noqa: E402
 
 
 class SliceWorkbenchTests(unittest.TestCase):
+    def test_keyword_and_search_modes_do_not_require_subject(self) -> None:
+        keyword_cfg = author_slice.config_from_payload(
+            {
+                "filter_mode": "keyword",
+                "keyword_id": "https://openalex.org/K123",
+                "keyword_display_name": "decision support",
+            }
+        )
+        search_cfg = author_slice.config_from_payload(
+            {
+                "filter_mode": "search",
+                "text_search_query": "ergodesign",
+            }
+        )
+
+        self.assertEqual(keyword_cfg.entity_level, "")
+        self.assertEqual(keyword_cfg.entity_id_short, "")
+        self.assertEqual(search_cfg.entity_level, "")
+        self.assertEqual(search_cfg.entity_id_short, "")
+
+    def test_slice_id_hash_distinguishes_same_human_name_with_different_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(slice_workbench, "DATA", Path(tmp)),
+                patch.object(slice_workbench, "SLICES_DIR", Path(tmp) / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", Path(tmp) / "materialization_plans"),
+            ):
+                first = slice_workbench.create_slice(
+                    {
+                        "slice_name": "same_human_name",
+                        "filter_mode": "keyword",
+                        "keyword_id": "https://openalex.org/K1",
+                        "keyword_display_name": "decision support",
+                    }
+                )
+                second = slice_workbench.create_slice(
+                    {
+                        "slice_name": "same_human_name",
+                        "filter_mode": "keyword",
+                        "keyword_id": "https://openalex.org/K2",
+                        "keyword_display_name": "ergodesign",
+                    }
+                )
+                titled = slice_workbench.create_slice(
+                    {
+                        "slice_name": "same_human_name",
+                        "title": "Custom human title",
+                        "filter_mode": "keyword",
+                        "keyword_id": "https://openalex.org/K1",
+                        "keyword_display_name": "decision support",
+                    }
+                )
+
+        self.assertNotEqual(first["slice_id"], second["slice_id"])
+        self.assertEqual(first["slice_id"], titled["slice_id"])
+        self.assertTrue(first["slice_id"].startswith("same_human_name_"))
+        self.assertEqual(len(first["slice_fingerprint"]), 10)
+
     def test_slice_estimate_and_materialization_plan_keep_download_policy_separate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

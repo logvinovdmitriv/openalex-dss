@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,10 +26,14 @@ def create_slice(payload: dict[str, Any]) -> dict[str, Any]:
     _ensure_dirs()
     technical_payload = _technical_payload(payload)
     cfg = author_slice.config_from_payload({**technical_payload, "workflow_mode": "strict_works"})
+    slice_fingerprint = _slice_fingerprint(technical_payload)
+    slice_id = _slice_id(payload, cfg, slice_fingerprint)
+    technical_payload = {**technical_payload, "slice_name": slice_id}
+    cfg = author_slice.config_from_payload({**technical_payload, "workflow_mode": "strict_works"})
     now = _now()
-    slice_id = _safe_id(str(payload.get("slice_id") or cfg.slice_name or f"slice_{uuid.uuid4().hex[:8]}"))
     doc = {
         "slice_id": slice_id,
+        "slice_fingerprint": slice_fingerprint,
         "title": str(payload.get("title") or _slice_title(cfg)),
         "state": "draft",
         "created_at_utc": now,
@@ -290,7 +295,11 @@ SLICE_STATES = [
 
 def _technical_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw = payload.get("technical_payload") if isinstance(payload.get("technical_payload"), dict) else payload
-    return {key: value for key, value in raw.items() if key not in {"api_key", "download_policy", "storage_profile_id", "profile_id", "materialization_profile"}}
+    return {
+        key: value
+        for key, value in raw.items()
+        if key not in {"api_key", "download_policy", "storage_profile_id", "profile_id", "materialization_profile", "slice_id", "title"}
+    }
 
 
 def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -329,8 +338,9 @@ def _storage_profiles() -> dict[str, dict[str, Any]]:
 
 
 def _slice_title(cfg: Any) -> str:
+    subject = cfg.entity_display_name or cfg.keyword_display_name or cfg.text_search_query or "все направления"
     territory = cfg.institution_display_name or cfg.country_code or "все страны"
-    return f"{cfg.entity_display_name} / {territory} / {cfg.from_publication_date[:4]}-{cfg.to_publication_date[:4]}"
+    return f"{subject} / {territory} / {cfg.from_publication_date[:4]}-{cfg.to_publication_date[:4]}"
 
 
 def _lifecycle(active: str) -> list[dict[str, Any]]:
@@ -361,6 +371,27 @@ def _matches_materialization_run(plan: dict[str, Any], run_id: str, materializat
 def _safe_id(value: str) -> str:
     text = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
     return text.strip("_.-")[:140] or f"slice_{uuid.uuid4().hex[:8]}"
+
+
+def _slice_id(payload: dict[str, Any], cfg: Any, fingerprint: str) -> str:
+    explicit = str(payload.get("slice_id") or "").strip()
+    if explicit:
+        return _safe_id(explicit)
+    base = _safe_id(str(cfg.slice_name or "openalex_slice"))
+    suffix = f"_{fingerprint}"
+    prefix = base[: max(1, 140 - len(suffix))].strip("_.-") or "openalex_slice"
+    return _safe_id(f"{prefix}{suffix}")
+
+
+def _slice_fingerprint(technical_payload: dict[str, Any]) -> str:
+    ignored = {"slice_name", "workflow_mode", "slice_id", "title"}
+    canonical = {
+        key: value
+        for key, value in _public_payload(technical_payload).items()
+        if key not in ignored and value not in (None, "", [], {})
+    }
+    blob = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:10]
 
 
 def _ensure_dirs() -> None:

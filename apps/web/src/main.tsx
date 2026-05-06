@@ -35,6 +35,7 @@ import {
 } from "./domain";
 import { DataGrid, DetailDrawer, EmptyState } from "./components/ui";
 import {
+  analyticsRankingUrl,
   analyticsUrl,
   buildDownloadPolicy,
   buildSlicePayload,
@@ -45,6 +46,7 @@ import {
   pageTitle,
   progressForRun,
   rankingChartRows,
+  sliceSubjectTitle,
   viewFromHash,
   type EntitySuggestion,
   type ResolverTab,
@@ -167,12 +169,17 @@ function Workbench() {
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
   const hasLocalAnalyticsData = Boolean(runId || activeDumpId || state.data?.tables?.author_work?.rows || state.data?.tables?.indices?.rows);
   const table = useQuery({
-    queryKey: ["table", tableName, tableQ, metric, fractionMode, topN, runId, activeDumpId],
-    queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}&limit=${Math.max(1, topN || 1)}`),
+    queryKey: ["table", tableName, tableQ, topN, runId, activeDumpId],
+    queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}&limit=${Math.max(1, topN || 1)}`),
   });
   const analytics = useQuery({
     queryKey: ["analytics", metric, fractionMode, runId, activeDumpId, filterKey],
     queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, runId, activeDumpId)),
+    enabled: hasLocalAnalyticsData,
+  });
+  const ranking = useQuery({
+    queryKey: ["analytics-ranking", metric, fractionMode, runId, activeDumpId, filterKey, topN],
+    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, runId, activeDumpId, Math.max(1, topN || 100))),
     enabled: hasLocalAnalyticsData,
   });
   const detail = useQuery({
@@ -349,8 +356,8 @@ function Workbench() {
   const running = run.data?.status === "queued" || run.data?.status === "running";
   const tables = state.data?.tables ?? {};
   const qualityCounts = state.data?.quality?.quality_counts ?? {};
-  const tableRows = table.data?.rows ?? [];
-  const chartRows = useMemo(() => rankingChartRows(tableRows, metric), [tableRows, metric]);
+  const rankingRows = ranking.data?.rows ?? [];
+  const chartRows = useMemo(() => rankingChartRows(rankingRows, metric), [rankingRows, metric]);
   const errors = [
     mutationError(createSlice.error),
     mutationError(estimateSlice.error),
@@ -451,9 +458,16 @@ function Workbench() {
             workbench={workbench.data}
             dumps={dumps.data}
             tables={tables}
+            tableName={tableName}
+            setTableName={setTableName}
+            tableOptions={tableOptions}
+            tableQ={tableQ}
+            setTableQ={setTableQ}
+            table={table.data}
             run={run.data}
             running={running}
             onRefresh={() => qc.invalidateQueries()}
+            onSelect={(next) => setSelected(next)}
           />
         )}
 
@@ -474,15 +488,10 @@ function Workbench() {
             fractionMode={fractionMode}
             setFractionMode={setFractionMode}
             fractionModeOptions={fractionModeOptions}
-            tableName={tableName}
-            setTableName={setTableName}
-            tableOptions={tableOptions}
-            tableQ={tableQ}
-            setTableQ={setTableQ}
             topN={activeTopN}
             setTopN={setTopN}
             topNOptions={topNOptions}
-            table={table.data}
+            ranking={ranking.data}
             chartRows={chartRows}
             onSelect={(next) => setSelected(next)}
             onRecalculate={() => recalculate.mutate()}
@@ -520,7 +529,7 @@ function Workbench() {
         {view === "statistics" && (
           <StatisticsPage
             analytics={analytics.data}
-            table={table.data}
+            table={ranking.data}
             metric={metric}
             chartRows={chartRows}
             topN={activeTopN}
@@ -691,7 +700,7 @@ function SlicesPage({
         <aside className="panel context-panel">
           <span className="step-badge">Текущий срез</span>
           <h2>{humanSliceTitle(filters)}</h2>
-          <KeyValue label="Направление" value={filters.subject_name || "не выбрано"} />
+          <KeyValue label="Направление" value={sliceSubjectTitle(filters)} />
           <KeyValue label="Территория" value={filters.country_code ? countryDisplay(filters.country_code, countryOptions) : "Все страны"} />
           <KeyValue label="Организация" value={filters.institution_name || "Любая организация"} />
           <KeyValue label="Период" value={`${filters.from_publication_date} — ${filters.to_publication_date}`} />
@@ -768,7 +777,35 @@ function SlicesPage({
   );
 }
 
-function LocalDataPage({ workbench, dumps, tables, run, running, onRefresh }: { workbench: any; dumps: any; tables: any; run: any; running: boolean; onRefresh: () => void }) {
+function LocalDataPage({
+  workbench,
+  dumps,
+  tables,
+  tableName,
+  setTableName,
+  tableOptions,
+  tableQ,
+  setTableQ,
+  table,
+  run,
+  running,
+  onRefresh,
+  onSelect,
+}: {
+  workbench: any;
+  dumps: any;
+  tables: any;
+  tableName: string;
+  setTableName: (value: string) => void;
+  tableOptions: SelectOption[];
+  tableQ: string;
+  setTableQ: (value: string) => void;
+  table?: TableResponse;
+  run: any;
+  running: boolean;
+  onRefresh: () => void;
+  onSelect: (value: { kind: "author" | "work"; id: string }) => void;
+}) {
   const dumpRows = dumps?.dumps ?? workbench?.dumps ?? [];
   const totalRawMb = dumpRows.reduce((sum: number, dump: any) => sum + bytesToMb(Number(dump.bytes_written ?? dump.raw_size_bytes ?? 0)), 0);
   return (
@@ -808,6 +845,7 @@ function LocalDataPage({ workbench, dumps, tables, run, running, onRefresh }: { 
         <div className="panel-head">
           <span className="step-badge">Local Data Lake</span>
           <h2>Готовность локальных таблиц</h2>
+          <p>Это физические таблицы выбранного run/dump. Фильтры аналитической выборки применяются во вкладке “Индексы”.</p>
         </div>
         <div className="metric-grid">
           <MetricCard label="Works" value={fmt(tables?.works?.rows ?? 0)} />
@@ -815,6 +853,19 @@ function LocalDataPage({ workbench, dumps, tables, run, running, onRefresh }: { 
           <MetricCard label="Author-work mart" value={fmt(tables?.author_work?.rows ?? 0)} />
           <MetricCard label="Author indices" value={fmt(tables?.indices?.rows ?? 0)} />
         </div>
+      </section>
+      <section className="panel table-panel">
+        <div className="panel-head">
+          <span className="step-badge">Physical table</span>
+          <h2>Просмотр локальной таблицы</h2>
+        </div>
+        <div className="toolbar">
+          <select value={tableName} onChange={(event) => setTableName(event.target.value)}>
+            {ensureCurrentOption(tableOptions, tableName).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+          <input value={tableQ} onChange={(event) => setTableQ(event.target.value)} placeholder="Поиск по физической таблице" />
+        </div>
+        <DataGrid data={table} onSelect={onSelect} hiddenFields={["slice_id"]} />
       </section>
     </div>
   );
@@ -930,15 +981,10 @@ function RankingsPage({
   fractionMode,
   setFractionMode,
   fractionModeOptions,
-  tableName,
-  setTableName,
-  tableOptions,
-  tableQ,
-  setTableQ,
   topN,
   setTopN,
   topNOptions,
-  table,
+  ranking,
   chartRows,
   onSelect,
   onRecalculate,
@@ -950,15 +996,10 @@ function RankingsPage({
   fractionMode: string;
   setFractionMode: (value: string) => void;
   fractionModeOptions: SelectOption[];
-  tableName: string;
-  setTableName: (value: string) => void;
-  tableOptions: SelectOption[];
-  tableQ: string;
-  setTableQ: (value: string) => void;
   topN: number;
   setTopN: (value: number) => void;
   topNOptions: SelectOption[];
-  table?: TableResponse;
+  ranking?: TableResponse;
   chartRows: any[];
   onSelect: (value: { kind: "author" | "work"; id: string }) => void;
   onRecalculate: () => void;
@@ -982,13 +1023,13 @@ function RankingsPage({
           <select value={fractionMode} onChange={(event) => setFractionMode(event.target.value)}>
             {ensureCurrentOption(fractionModeOptions, fractionMode).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
-          <select value={tableName} onChange={(event) => setTableName(event.target.value)}>
-            {ensureCurrentOption(tableOptions, tableName).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </select>
           <select value={String(topN)} onChange={(event) => setTopN(Number(event.target.value))}>
             {topNOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
-          <input value={tableQ} onChange={(event) => setTableQ(event.target.value)} placeholder="Поиск по таблице" />
+        </div>
+        <div className="notice">
+          <b>Текущая аналитическая выборка</b>
+          <span>Этот рейтинг пересчитывается поверх выбранного dump/run с учетом активных фильтров. Физические таблицы без аналитической фильтрации находятся во вкладке “Данные”.</span>
         </div>
       </section>
       <section className="chart-table-grid">
@@ -1007,7 +1048,7 @@ function RankingsPage({
           </div>
         </div>
         <div className="panel table-panel">
-          <DataGrid data={table} onSelect={onSelect} hiddenFields={["slice_id", "run_id", "fraction_mode"]} />
+          <DataGrid data={ranking} onSelect={onSelect} hiddenFields={["slice_id", "run_id", "fraction_mode"]} />
         </div>
       </section>
     </div>
