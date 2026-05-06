@@ -19,9 +19,12 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="openalex-dss-r
 _LOCK = threading.Lock()
 _RUNS: dict[str, dict[str, Any]] = {}
 _RUN_EXECUTION_PAYLOADS: dict[str, tuple[str, dict[str, Any]]] = {}
+SUPPORTED_JOB_ACTIONS = analysis_jobs.ANALYSIS_ACTIONS | materialization_jobs.MATERIALIZATION_ACTIONS
 
 
 def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) -> dict[str, Any]:
+    if action not in SUPPORTED_JOB_ACTIONS:
+        raise ValueError(f"Unsupported run action: {action}")
     payload = normalize_internal_pipeline_payload(payload)
     if action in materialization_jobs.REQUIRES_ACCEPTED_SIGNATURE_ACTIONS and not _allow_unchecked_download() and not (
         str(payload.get("accepted_estimate_signature") or "").strip()

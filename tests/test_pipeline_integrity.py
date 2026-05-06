@@ -107,6 +107,22 @@ class PipelineIntegrityTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 jobs.create_run("fetch_slice_dump", {})
 
+    def test_create_run_rejects_unsupported_actions_before_queueing(self) -> None:
+        for action in ("plan", "unknown"):
+            with self.assertRaises(ValueError) as raised:
+                jobs.create_run(action, {"filter_mode": "all"}, autostart=False)
+
+            self.assertIn(f"Unsupported run action: {action}", str(raised.exception))
+
+    def test_create_run_accepts_supported_analysis_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(jobs, "RUNS_DIR", Path(tmp) / "runs"):
+                run = jobs.create_run("recalculate", {"dump_id": "dump_a"}, autostart=False)
+
+        self.assertEqual(run["action"], "recalculate")
+        self.assertEqual(run["payload"]["dump_id"], "dump_a")
+        self.assertEqual(run["status"], "queued")
+
     def test_cli_origin_fetch_meta_keeps_dump_manifest_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
