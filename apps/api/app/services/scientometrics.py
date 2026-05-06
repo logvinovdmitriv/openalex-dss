@@ -21,9 +21,9 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
     "islv",
     "lrdi",
 )
-SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v3"
+SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v4"
 SCIENTOMETRIC_FINDINGS_VERSION = "scientometric_findings_v2"
-SCIENTOMETRIC_CONCLUSION_VERSION = "scientometric_conclusion_v1"
+SCIENTOMETRIC_CONCLUSION_VERSION = "scientometric_conclusion_v2"
 FINDING_THRESHOLDS = {
     "heavy_tail_skewness_medium": 1.0,
     "heavy_tail_skewness_high": 2.0,
@@ -439,8 +439,19 @@ def conclusion_draft(
                 f"режим дробления {scope.get('fraction_mode') or 'не указан'}, baseline {baseline_metric}. "
                 "Все показатели являются локальными и рассчитаны по выбранному срезу, а не по глобальному профилю автора."
             ),
+            "evidence_finding_ids": [],
+            "evidence_metrics": [],
         }
     ]
+    if n_authors <= 0:
+        paragraphs.append(
+            {
+                "role": "no_data",
+                "text": "В текущем аналитическом scope нет авторов; содержательные статистические выводы не формируются.",
+                "evidence_finding_ids": [],
+                "evidence_metrics": [],
+            }
+        )
 
     heavy_tail_metrics = _finding_metrics(findings, "heavy_tail_distribution")
     if heavy_tail_metrics:
@@ -451,6 +462,8 @@ def conclusion_draft(
                     f"В выборке выявлены тяжелохвостые или асимметричные распределения по метрикам {_metric_list_text(heavy_tail_metrics)}. "
                     "Это ограничивает интерпретацию средних значений и прямого raw-ранжирования; для сравнения предпочтительны ранговые показатели и log1p-визуализация."
                 ),
+                "evidence_finding_ids": _finding_ids(findings, "heavy_tail_distribution"),
+                "evidence_metrics": heavy_tail_metrics,
             }
         )
 
@@ -465,14 +478,31 @@ def conclusion_draft(
                     f"Для метрик {_metric_list_text(weak_differentiation)} обнаружена высокая доля одинаковых или нулевых значений. "
                     "Такие показатели полезны как простые и устойчивые индикаторы, но хуже различают авторов внутри близких групп."
                 ),
+                "evidence_finding_ids": [
+                    *_finding_ids(findings, "high_tie_rate"),
+                    *_finding_ids(findings, "zero_inflation"),
+                ],
+                "evidence_metrics": weak_differentiation,
             }
         )
 
+    positive_top1 = [
+        finding
+        for finding in findings
+        if finding.get("type") == "top1_dominance_dependence"
+        and str((finding.get("evidence") or {}).get("direction") or "").strip().lower() != "negative"
+    ]
+    negative_top1 = [
+        finding
+        for finding in findings
+        if finding.get("type") == "top1_dominance_dependence"
+        and str((finding.get("evidence") or {}).get("direction") or "").strip().lower() == "negative"
+    ]
     dependence_metrics = _unique_preserve_order(
         [
             *_finding_metrics(findings, "publication_volume_dependence"),
             *_finding_metrics(findings, "citation_volume_dependence"),
-            *_finding_metrics(findings, "top1_dominance_dependence"),
+            *[str(finding.get("metric") or "") for finding in positive_top1],
         ]
     )
     if dependence_metrics:
@@ -483,6 +513,26 @@ def conclusion_draft(
                     f"Для метрик {_metric_list_text(dependence_metrics)} выявлена существенная связь с числом публикаций, общим цитированием или концентрацией цитирований в одной работе. "
                     "Это показывает, что отдельный индекс не должен использоваться как единственный критерий сравнения."
                 ),
+                "evidence_finding_ids": [
+                    *_finding_ids(findings, "publication_volume_dependence"),
+                    *_finding_ids(findings, "citation_volume_dependence"),
+                    *[str(finding.get("id") or "") for finding in positive_top1 if finding.get("id")],
+                ],
+                "evidence_metrics": dependence_metrics,
+            }
+        )
+
+    correction_metrics = _unique_preserve_order([str(finding.get("metric") or "") for finding in negative_top1])
+    if correction_metrics:
+        paragraphs.append(
+            {
+                "role": "correction_effects",
+                "text": (
+                    f"Для метрик {_metric_list_text(correction_metrics)} выявлена обратная связь с top1_share. "
+                    "Для индексов со встроенным штрафом концентрации это может указывать на корректирующий эффект; результат следует проверять через rank-shifts относительно C и h."
+                ),
+                "evidence_finding_ids": [str(finding.get("id") or "") for finding in negative_top1 if finding.get("id")],
+                "evidence_metrics": correction_metrics,
             }
         )
 
@@ -502,6 +552,11 @@ def conclusion_draft(
                     + "; ".join(details)
                     + ". Для метрик с крупными сдвигами требуется анализ rank-shifts.csv и largest-rank-shifts.csv."
                 ),
+                "evidence_finding_ids": [
+                    *_finding_ids(findings, "rank_instability"),
+                    *_finding_ids(findings, "rank_agreement"),
+                ],
+                "evidence_metrics": _unique_preserve_order([*unstable, *agreement]),
             }
         )
 
@@ -513,6 +568,8 @@ def conclusion_draft(
                     "ISLV может рассматриваться как кандидатная сбалансированная модификация, поскольку объединяет процентильные компоненты, дробное цитирование и штраф концентрации top1_share. "
                     "Его преимущество следует формулировать только в пределах текущего среза и по указанным критериям, а не как универсальное превосходство."
                 ),
+                "evidence_finding_ids": _finding_ids(findings, "balanced_candidate_metric"),
+                "evidence_metrics": _finding_metrics(findings, "balanced_candidate_metric"),
             }
         )
 
@@ -520,6 +577,8 @@ def conclusion_draft(
         {
             "role": "final_caution",
             "text": "Полученные выводы являются описательными и не заменяют экспертную оценку исследователей.",
+            "evidence_finding_ids": [],
+            "evidence_metrics": [],
         }
     )
 
@@ -533,7 +592,9 @@ def conclusion_draft(
             "OpenAlex-метаданные могут содержать ошибки авторской дизамбигуации и неполноту.",
         ],
         "source": {
+            "analysis_version": SCIENTOMETRIC_ANALYSIS_VERSION,
             "findings_version": finding_summary.get("findings_version"),
+            "conclusion_version": SCIENTOMETRIC_CONCLUSION_VERSION,
             "n_findings": finding_summary.get("n_findings", len(findings)),
             "baseline_metric": baseline_metric,
             "metrics": metrics,
@@ -705,6 +766,12 @@ def _finding_metrics(findings: list[dict[str, Any]], finding_type: str) -> list[
     )
 
 
+def _finding_ids(findings: list[dict[str, Any]], finding_type: str) -> list[str]:
+    return _unique_preserve_order(
+        [str(finding.get("id") or "").strip() for finding in findings if finding.get("type") == finding_type and finding.get("id")]
+    )
+
+
 def _unique_preserve_order(values: list[str]) -> list[str]:
     out: list[str] = []
     for value in values:
@@ -716,11 +783,29 @@ def _unique_preserve_order(values: list[str]) -> list[str]:
 def _metric_list_text(metrics: list[str]) -> str:
     if not metrics:
         return "нет"
-    if len(metrics) == 1:
-        return metrics[0]
-    if len(metrics) == 2:
-        return f"{metrics[0]} и {metrics[1]}"
-    return ", ".join(metrics[:-1]) + f" и {metrics[-1]}"
+    labels = [_metric_label(metric) for metric in metrics]
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} и {labels[1]}"
+    return ", ".join(labels[:-1]) + f" и {labels[-1]}"
+
+
+def _metric_label(metric: str) -> str:
+    labels = {
+        "p": "P",
+        "c": "C",
+        "c_frac": "C_frac",
+        "h": "h-index",
+        "i10": "i10",
+        "g": "g-index",
+        "m_local": "m_local",
+        "top1_share": "top1_share",
+        "iupv": "IUPV",
+        "islv": "ISLV",
+        "lrdi": "LRDI",
+    }
+    return labels.get(metric, metric)
 
 
 def _rank_findings(

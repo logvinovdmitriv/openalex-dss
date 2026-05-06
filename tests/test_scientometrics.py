@@ -315,13 +315,57 @@ class ScientometricServiceTests(unittest.TestCase):
         )
         roles = [paragraph["role"] for paragraph in draft["paragraphs"]]
         text = " ".join(paragraph["text"] for paragraph in draft["paragraphs"])
+        distribution = next(paragraph for paragraph in draft["paragraphs"] if paragraph["role"] == "distribution_limits")
+        candidate = next(paragraph for paragraph in draft["paragraphs"] if paragraph["role"] == "candidate_metric")
 
-        self.assertEqual(draft["version"], "scientometric_conclusion_v1")
+        self.assertEqual(draft["version"], "scientometric_conclusion_v2")
         self.assertIn("distribution_limits", roles)
         self.assertIn("index_limitations", roles)
         self.assertIn("candidate_metric", roles)
+        self.assertEqual(distribution["evidence_finding_ids"], ["heavy_tail:c"])
+        self.assertEqual(distribution["evidence_metrics"], ["c"])
+        self.assertEqual(candidate["evidence_finding_ids"], ["balanced_candidate:islv"])
+        self.assertIn("C", distribution["text"])
         self.assertNotIn("лучший индекс", text.lower())
         self.assertIn("не заменяют экспертную оценку", " ".join(draft["limitations"]).lower())
+
+    def test_conclusion_draft_traces_rank_and_correction_evidence(self) -> None:
+        findings = [
+            {
+                "id": "top1_dominance:islv",
+                "type": "top1_dominance_dependence",
+                "metric": "islv",
+                "severity": "medium",
+                "evidence": {"direction": "negative"},
+                "text": "",
+                "recommendation": "",
+            },
+            {
+                "id": "rank_instability:h:islv",
+                "type": "rank_instability",
+                "metric": "islv",
+                "baseline_metric": "h",
+                "severity": "medium",
+                "evidence": {},
+                "text": "",
+                "recommendation": "",
+            },
+        ]
+        summary = scientometrics.finding_summary(findings, metrics=["h", "islv"], baseline_metric="h")
+
+        draft = scientometrics.conclusion_draft(
+            findings=findings,
+            finding_summary=summary,
+            metrics=["h", "islv"],
+            baseline_metric="h",
+            n_authors=25,
+            scope={"fraction_mode": "integer"},
+        )
+        by_role = {paragraph["role"]: paragraph for paragraph in draft["paragraphs"]}
+
+        self.assertIn("correction_effects", by_role)
+        self.assertEqual(by_role["correction_effects"]["evidence_finding_ids"], ["top1_dominance:islv"])
+        self.assertEqual(by_role["rank_comparison"]["evidence_finding_ids"], ["rank_instability:h:islv"])
 
     def test_conclusion_draft_for_empty_findings_keeps_scope_and_limitations(self) -> None:
         draft = scientometrics.conclusion_draft(
@@ -333,7 +377,7 @@ class ScientometricServiceTests(unittest.TestCase):
             scope={"fraction_mode": "integer"},
         )
 
-        self.assertEqual([paragraph["role"] for paragraph in draft["paragraphs"]], ["scope", "final_caution"])
+        self.assertEqual([paragraph["role"] for paragraph in draft["paragraphs"]], ["scope", "no_data", "final_caution"])
         self.assertTrue(draft["limitations"])
 
     def test_build_analysis_applies_cohort_scope_and_policy(self) -> None:
@@ -403,10 +447,10 @@ class ScientometricServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["n_authors"], 0)
-        self.assertEqual(payload["analysis_version"], "scientometrics_v3")
+        self.assertEqual(payload["analysis_version"], "scientometrics_v4")
         self.assertEqual(payload["descriptive"]["h"]["n"], 0)
         self.assertEqual(payload["finding_summary"]["findings_version"], "scientometric_findings_v2")
-        self.assertEqual(payload["conclusion_draft"]["version"], "scientometric_conclusion_v1")
+        self.assertEqual(payload["conclusion_draft"]["version"], "scientometric_conclusion_v2")
         self.assertEqual(payload["finding_thresholds"]["tie_rate"], 0.30)
         self.assertTrue(payload["warnings"])
         self.assertIsNone(payload["interpretation"]["candidate_balanced_metric"])

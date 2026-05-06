@@ -1866,6 +1866,9 @@ function ConclusionDraftPanel({ payload }: { payload: ScientometricAnalysisPaylo
           <div key={`${paragraph.role ?? "paragraph"}:${index}`} className="notice">
             <b>{conclusionRoleLabel(String(paragraph.role ?? ""))}</b>
             <span>{paragraph.text ?? ""}</span>
+            {(paragraph.evidence_finding_ids ?? []).length > 0 && (
+              <small>Основания: {(paragraph.evidence_finding_ids ?? []).join(", ")}</small>
+            )}
           </div>
         ))}
       </div>
@@ -2912,8 +2915,10 @@ function conclusionRoleLabel(value: string) {
     distribution_limits: "Распределения",
     index_limitations: "Различающая способность",
     dependence_limits: "Зависимости индексов",
+    correction_effects: "Корректирующие эффекты",
     rank_comparison: "Сравнение рангов",
     candidate_metric: "Кандидатная формула",
+    no_data: "Нет данных",
     final_caution: "Ограничение интерпретации",
   };
   return labels[value] ?? value;

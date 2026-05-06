@@ -11,7 +11,7 @@ from app.services import cohorts, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
-REPORT_BUNDLE_VERSION = "report_bundle_v7"
+REPORT_BUNDLE_VERSION = "report_bundle_v8"
 DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "islv")
 
 
@@ -384,7 +384,7 @@ def _report_scope(
     membership_filters = _clean_filters(cohort_membership_filters or {})
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     canonical = {
-        "version": "report_scope_v7",
+        "version": "report_scope_v8",
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),

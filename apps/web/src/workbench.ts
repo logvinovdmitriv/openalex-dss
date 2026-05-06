@@ -31,7 +31,12 @@ export type ScientometricFindingSummary = {
 export type ScientometricConclusionDraft = {
   version?: string;
   title?: string;
-  paragraphs?: Array<{ role?: string; text?: string }>;
+  paragraphs?: Array<{
+    role?: string;
+    text?: string;
+    evidence_finding_ids?: string[];
+    evidence_metrics?: string[];
+  }>;
   limitations?: string[];
   source?: Record<string, unknown>;
 };
