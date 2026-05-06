@@ -148,6 +148,7 @@ class AuthorCohortCreateRequest(BaseModel):
     top_n: int | None = Field(default=100, ge=1, le=1000)
     min_publications: int | None = Field(default=None, ge=0)
     min_h: int | None = Field(default=None, ge=0)
+    min_metric_value: float | None = Field(default=None, ge=0)
     country_code: str | None = None
     institution_id: str | None = None
     subject_level: str | None = None

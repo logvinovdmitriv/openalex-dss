@@ -10,6 +10,7 @@ from typing import Any
 
 from app.core.paths import DATA
 from app.services import author_slice, jobs, metadata_store, query_planner, registry, warehouse
+from openalex_mvp.openalex import cli_download_signature, corpus_request
 
 
 SLICES_DIR = DATA / "slices"
@@ -26,7 +27,7 @@ def create_slice(payload: dict[str, Any]) -> dict[str, Any]:
     _ensure_dirs()
     technical_payload = _technical_payload(payload)
     cfg = author_slice.config_from_payload({**technical_payload, "workflow_mode": "strict_works"})
-    slice_fingerprint = _slice_fingerprint(technical_payload)
+    slice_fingerprint = _slice_fingerprint(cfg)
     slice_id = _slice_id(payload, cfg, slice_fingerprint)
     technical_payload = {**technical_payload, "slice_name": slice_id}
     cfg = author_slice.config_from_payload({**technical_payload, "workflow_mode": "strict_works"})
@@ -375,20 +376,24 @@ def _safe_id(value: str) -> str:
 
 def _slice_id(payload: dict[str, Any], cfg: Any, fingerprint: str) -> str:
     explicit = str(payload.get("slice_id") or "").strip()
-    if explicit:
-        return _safe_id(explicit)
-    base = _safe_id(str(cfg.slice_name or "openalex_slice"))
+    base = _safe_id(explicit or str(cfg.slice_name or "openalex_slice"))
     suffix = f"_{fingerprint}"
     prefix = base[: max(1, 140 - len(suffix))].strip("_.-") or "openalex_slice"
     return _safe_id(f"{prefix}{suffix}")
 
 
-def _slice_fingerprint(technical_payload: dict[str, Any]) -> str:
-    ignored = {"slice_name", "workflow_mode", "slice_id", "title"}
+def _slice_fingerprint(cfg: Any) -> str:
     canonical = {
-        key: value
-        for key, value in _public_payload(technical_payload).items()
-        if key not in ignored and value not in (None, "", [], {})
+        "version": "slice_fingerprint_v2",
+        "source_mode": "openalex_cli",
+        "corpus_request": corpus_request(cfg),
+        "download_signature": cli_download_signature(cfg),
+        "sort": cfg.sort,
+        "quality_policy": {
+            "exclude_retracted": cfg.exclude_retracted,
+            "exclude_paratext": cfg.exclude_paratext,
+            "include_xpac": cfg.include_xpac,
+        },
     }
     blob = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:10]

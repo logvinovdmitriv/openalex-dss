@@ -25,6 +25,7 @@ import { API_BASE, getJson, postJson, type TableResponse } from "./api";
 import {
   DEFAULT_FILTERS,
   countryLabel,
+  filterParams,
   fmt,
   resolveCountryInput,
   metricLabel,
@@ -301,7 +302,7 @@ function Workbench() {
     },
   });
   const buildReport = useMutation({
-    mutationFn: () => postJson<any>(`/reports/build?metric=${encodeURIComponent(metric)}&fraction_mode=${encodeURIComponent(fractionMode)}&run_id=${encodeURIComponent(runId)}&limit=${Math.max(1, activeTopN || 1)}`, {}),
+    mutationFn: () => postJson<any>(`/reports/build?${filterParams(filters, { metric, fraction_mode: fractionMode, run_id: runId, dump_id: activeDumpId, limit: Math.max(1, activeTopN || 1), cohort_id: selectedCohortId }).toString()}`, {}),
     onSuccess: () => qc.invalidateQueries(),
   });
   const createCohort = useMutation({
@@ -540,7 +541,7 @@ function Workbench() {
         )}
 
         {view === "reports" && (
-          <ReportsPage metric={metric} fractionMode={fractionMode} runId={runId} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
+          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={runId} dumpId={activeDumpId} cohortId={selectedCohortId} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
         )}
 
         {view === "passports" && (
@@ -1281,10 +1282,30 @@ function StatisticsPage({
   );
 }
 
-function ReportsPage({ metric, fractionMode, runId, topN, onBuild, building }: { metric: string; fractionMode: string; runId: string; topN: number; onBuild: () => void; building: boolean }) {
-  const scope = runId ? `&run_id=${encodeURIComponent(runId)}` : "";
-  const rankingUrl = `${API_BASE}/analytics/ranking.csv?fraction_mode=${encodeURIComponent(fractionMode)}&metric=${encodeURIComponent(metric)}&limit=${topN}${scope}`;
-  const bundleUrl = `${API_BASE}/reports/bundle.json${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`;
+function ReportsPage({
+  filters,
+  metric,
+  fractionMode,
+  runId,
+  dumpId,
+  cohortId,
+  topN,
+  onBuild,
+  building,
+}: {
+  filters: ActiveFilters;
+  metric: string;
+  fractionMode: string;
+  runId: string;
+  dumpId: string;
+  cohortId: string;
+  topN: number;
+  onBuild: () => void;
+  building: boolean;
+}) {
+  const reportParams = filterParams(filters, { fraction_mode: fractionMode, metric, limit: topN, run_id: runId, dump_id: dumpId, cohort_id: cohortId });
+  const rankingUrl = `${API_BASE}/analytics/ranking.csv?${reportParams.toString()}`;
+  const bundleUrl = `${API_BASE}/reports/bundle.json?${reportParams.toString()}`;
   return (
     <div className="stack">
       <section className="panel">

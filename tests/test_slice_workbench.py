@@ -75,6 +75,72 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertTrue(first["slice_id"].startswith("same_human_name_"))
         self.assertEqual(len(first["slice_fingerprint"]), 10)
 
+    def test_slice_fingerprint_uses_normalized_corpus_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(slice_workbench, "DATA", Path(tmp)),
+                patch.object(slice_workbench, "SLICES_DIR", Path(tmp) / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", Path(tmp) / "materialization_plans"),
+            ):
+                base = slice_workbench.create_slice(
+                    {
+                        "slice_name": "normalized",
+                        "filter_mode": "all",
+                        "country_code": "ru",
+                        "institution_id": "https://openalex.org/I123",
+                        "from_publication_date": "2020-01-01",
+                        "to_publication_date": "2024-12-31",
+                        "fraction_modes": "integer",
+                        "fraction_mode_default": "integer",
+                        "lrdi_p0": 99,
+                        "lrdi_lambda": 0.99,
+                        "analysis_year": 1999,
+                    }
+                )
+                same_corpus = slice_workbench.create_slice(
+                    {
+                        "slice_name": "normalized",
+                        "filter_mode": "all",
+                        "country_code": "RU",
+                        "institution_id": "I123",
+                        "from_publication_date": "2020-01-01",
+                        "to_publication_date": "2024-12-31",
+                        "fraction_modes": "strict_authors_count,renorm_valid_authors",
+                        "fraction_mode_default": "strict_authors_count",
+                        "lrdi_p0": 5,
+                        "lrdi_lambda": 0.15,
+                        "analysis_year": 2026,
+                    }
+                )
+                different_corpus = slice_workbench.create_slice(
+                    {
+                        "slice_name": "normalized",
+                        "filter_mode": "all",
+                        "country_code": "DE",
+                        "institution_id": "I123",
+                        "from_publication_date": "2020-01-01",
+                        "to_publication_date": "2024-12-31",
+                    }
+                )
+
+        self.assertEqual(base["slice_fingerprint"], same_corpus["slice_fingerprint"])
+        self.assertEqual(base["slice_id"], same_corpus["slice_id"])
+        self.assertNotEqual(base["slice_fingerprint"], different_corpus["slice_fingerprint"])
+
+    def test_explicit_slice_id_is_used_as_prefix_not_collision_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(slice_workbench, "DATA", Path(tmp)),
+                patch.object(slice_workbench, "SLICES_DIR", Path(tmp) / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", Path(tmp) / "materialization_plans"),
+            ):
+                first = slice_workbench.create_slice({"slice_id": "manual_slice", "filter_mode": "keyword", "keyword_id": "https://openalex.org/K1"})
+                second = slice_workbench.create_slice({"slice_id": "manual_slice", "filter_mode": "keyword", "keyword_id": "https://openalex.org/K2"})
+
+        self.assertTrue(first["slice_id"].startswith("manual_slice_"))
+        self.assertTrue(second["slice_id"].startswith("manual_slice_"))
+        self.assertNotEqual(first["slice_id"], second["slice_id"])
+
     def test_slice_estimate_and_materialization_plan_keep_download_policy_separate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

@@ -460,10 +460,81 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertIn("incompatible", str(raised.exception))
 
+    def test_report_build_forwards_filters_to_metric_ranking_and_scopes_cache(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_ranking(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> dict[str, object]:
+            captured["fraction_mode"] = fraction_mode
+            captured["metric"] = metric
+            captured["filters"] = filters
+            captured["kwargs"] = kwargs
+            return {"fields": ["author_id", "h"], "rows": [{"author_id": "https://openalex.org/A1", "h": 3}], "total": 1, "dump_id": "dump_a"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                patch.object(reports, "DATA", root),
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "", "dump_id": "dump_a"}),
+                patch.object(warehouse, "metric_ranking", side_effect=fake_ranking),
+                patch.object(warehouse, "metric_distribution", return_value={"rows": [], "dump_id": "dump_a"}),
+                patch.object(warehouse, "read_json_doc", return_value={}),
+                patch.object(warehouse, "count_rows", return_value=1),
+            ):
+                first = reports.build_report_bundle(
+                    metric="h",
+                    fraction_mode="integer",
+                    dump_id="dump_a",
+                    filters={"country_code": "RU", "filter_mode": "keyword", "keyword_id": "https://openalex.org/K1"},
+                    limit=25,
+                )
+                second = reports.build_report_bundle(
+                    metric="h",
+                    fraction_mode="integer",
+                    dump_id="dump_a",
+                    filters={"country_code": "DE", "filter_mode": "keyword", "keyword_id": "https://openalex.org/K1"},
+                    limit=25,
+                )
+
+        self.assertEqual(captured["filters"], {"country_code": "DE", "filter_mode": "keyword", "keyword_id": "https://openalex.org/K1"})
+        self.assertEqual(captured["kwargs"], {"limit": 25, "max_limit": 500, "run_id": "", "dump_id": "dump_a"})
+        self.assertNotEqual(first["report_scope"]["report_scope_hash"], second["report_scope"]["report_scope_hash"])
+        self.assertIn("country_code=RU", first["exports"]["ranking_csv"])
+
     def test_manual_cohort_requires_run_scope(self) -> None:
         with self.assertRaises(ValueError) as raised:
             cohorts.create_cohort({"source": "manual", "author_ids": ["https://openalex.org/A1"]})
         self.assertIn("run_id", str(raised.exception))
+
+    def test_metric_filter_cohort_uses_all_matching_authors_not_top_n(self) -> None:
+        rows = [
+            {"author_id": f"https://openalex.org/A{idx}", "p": idx, "h": idx % 3, "islv": float(idx)}
+            for idx in range(1, 8)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": "dump_a"}),
+                patch.object(warehouse, "filtered_author_indices", return_value=rows),
+                patch.object(cohorts, "COHORTS_DIR", Path(tmp)),
+            ):
+                cohort = cohorts.create_cohort(
+                    {
+                        "source": "metric_filter",
+                        "run_id": "run_a",
+                        "dump_id": "dump_a",
+                        "metric": "islv",
+                        "fraction_mode": "integer",
+                        "top_n": 2,
+                        "min_publications": 3,
+                        "min_h": 1,
+                        "min_metric_value": 4,
+                    }
+                )
+
+        self.assertEqual(cohort["source"], "metric_filter")
+        self.assertIsNone(cohort["top_n"])
+        self.assertEqual(cohort["author_ids"], ["https://openalex.org/A4", "https://openalex.org/A5", "https://openalex.org/A7"])
+        self.assertEqual(cohort["n_authors"], 3)
 
     def test_cohort_filters_keep_slice_analysis_contract_fields(self) -> None:
         filters = cohorts._filters(

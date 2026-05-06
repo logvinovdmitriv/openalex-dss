@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from app.core.paths import DATA, JSON_FILES
 from app.services import warehouse
@@ -15,17 +17,29 @@ def build_report_bundle(
     *,
     run_id: str = "",
     dump_id: str = "",
+    filters: dict[str, Any] | None = None,
+    cohort_id: str = "",
 ) -> dict[str, Any]:
-    filters: dict[str, str] = {}
+    filters = _clean_filters(filters or {})
     scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
+    report_scope = _report_scope(
+        run_id=run_id,
+        dump_id=dump_id,
+        filters=filters,
+        cohort_id=cohort_id,
+        metric=metric,
+        fraction_mode=fraction_mode,
+        limit=limit,
+    )
+    scope_hash = report_scope["report_scope_hash"]
     if run_id:
         docs = _run_report_artifacts(run_id)
         missing = [name for name, value in docs.items() if not value]
         if missing:
-            report = _incomplete_run_report(run_id=run_id, dump_id=dump_id, missing=missing)
-            _write_json(_report_bundle_path(run_id), report)
+            report = _incomplete_run_report(run_id=run_id, dump_id=dump_id, missing=missing, report_scope=report_scope)
+            _write_json(_report_bundle_path(run_id, scope_hash), report)
             return report
         state = docs["pipeline"]
         quality = docs["quality"]
@@ -47,12 +61,30 @@ def build_report_bundle(
     analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
 
     top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500, run_id=run_id, dump_id=dump_id)
+    distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id)
     resolved_dump_id = dump_id or str(top.get("dump_id") or calculation_passport.get("dump_id") or "")
-    scope_params = "".join(
-        [
-            f"&run_id={run_id}" if run_id else "",
-            f"&dump_id={resolved_dump_id}" if resolved_dump_id and not run_id else "",
-        ]
+    report_scope["dump_id"] = resolved_dump_id
+    export_query = _query_params(
+        {
+            **filters,
+            "fraction_mode": fraction_mode,
+            "metric": metric,
+            "limit": limit,
+            "run_id": run_id,
+            "dump_id": resolved_dump_id,
+            "cohort_id": cohort_id,
+        }
+    )
+    bundle_query = _query_params(
+        {
+            **filters,
+            "fraction_mode": fraction_mode,
+            "metric": metric,
+            "limit": limit,
+            "run_id": run_id,
+            "dump_id": resolved_dump_id,
+            "cohort_id": cohort_id,
+        }
     )
     report = {
         "bundle_version": "report_bundle_v1",
@@ -60,6 +92,9 @@ def build_report_bundle(
         "no_latest_fallback": bool(run_id),
         "run_id": run_id,
         "dump_id": resolved_dump_id,
+        "report_scope": report_scope,
+        "filters": filters,
+        "cohort_id": cohort_id,
         "interpretation_policy": {
             "strict_mode": "Математические выводы строятся только по локально пересчитанным works-based индексам.",
             "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения; корпус Works скачивается через OpenAlex CLI.",
@@ -73,6 +108,7 @@ def build_report_bundle(
         "quality_report": quality,
         "funnel": _quality_funnel(quality, run_id=run_id),
         "rank_table": top,
+        "distribution": distribution,
         "statistics": stats,
         "stability_report": {
             "top1_sensitivity": theory.get("top1_sensitivity"),
@@ -81,11 +117,11 @@ def build_report_bundle(
         },
         "checksums": checksums,
         "exports": {
-            "ranking_csv": f"/api/v1/analytics/ranking.csv?fraction_mode={fraction_mode}&metric={metric}{scope_params}",
+            "ranking_csv": f"/api/v1/analytics/ranking.csv?{export_query}",
             "authors_local_metrics_csv": f"/api/v1/exports/authors_local_metrics.csv?run_id={run_id}" if run_id else "/api/v1/exports/authors_local_metrics.csv",
             "works_csv": f"/api/v1/exports/works.csv?run_id={run_id}" if run_id else "/api/v1/exports/works.csv",
             "authorships_csv": f"/api/v1/exports/authorships.csv?run_id={run_id}" if run_id else "/api/v1/exports/authorships.csv",
-            "report_bundle_json": f"/api/v1/reports/bundle.json?run_id={run_id}" if run_id else "/api/v1/reports/bundle.json",
+            "report_bundle_json": f"/api/v1/reports/bundle.json?{bundle_query}" if bundle_query else "/api/v1/reports/bundle.json",
             "sha256_manifest": checksums.get("sha256_manifest"),
         },
         "mvp_protocol": {
@@ -97,25 +133,50 @@ def build_report_bundle(
             "polyanin_status": "f5/fm5 are operational threshold metrics until a primary source definition is confirmed.",
         },
     }
-    _write_json(_report_bundle_path(run_id), report)
+    _write_json(_report_bundle_path(run_id, scope_hash), report)
     return report
 
 
-def report_bundle_json(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+def report_bundle_json(
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    metric: str = "islv",
+    fraction_mode: str = "strict_authors_count",
+    limit: int = 50,
+    filters: dict[str, Any] | None = None,
+    cohort_id: str = "",
+) -> dict[str, Any]:
+    filters = _clean_filters(filters or {})
     scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
-    path = _report_bundle_path(run_id)
+    report_scope = _report_scope(
+        run_id=run_id,
+        dump_id=dump_id,
+        filters=filters,
+        cohort_id=cohort_id,
+        metric=metric,
+        fraction_mode=fraction_mode,
+        limit=limit,
+    )
+    path = _report_bundle_path(run_id, report_scope["report_scope_hash"])
     if path.exists():
         cached = _read_json(path)
         cached_dump_id = str(cached.get("dump_id") or "").strip()
         if run_id and dump_id and cached_dump_id != dump_id:
             if cached_dump_id:
                 raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
-            return build_report_bundle(run_id=run_id, dump_id=dump_id)
+            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id)
         if not run_id or cached.get("status") != "incomplete_run_artifacts":
             return cached
-    return build_report_bundle(run_id=run_id, dump_id=dump_id)
+    legacy_path = _report_bundle_path(run_id)
+    if legacy_path.exists():
+        legacy = _read_json(legacy_path)
+        cached_dump_id = str(legacy.get("dump_id") or "").strip()
+        if run_id and dump_id and cached_dump_id and cached_dump_id != dump_id:
+            raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
+    return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id)
 
 
 def _quality_funnel(quality: dict[str, Any], *, run_id: str = "") -> list[dict[str, Any]]:
@@ -134,9 +195,13 @@ def _quality_funnel(quality: dict[str, Any], *, run_id: str = "") -> list[dict[s
     ]
 
 
-def _report_bundle_path(run_id: str = "") -> Path:
+def _report_bundle_path(run_id: str = "", scope_hash: str = "") -> Path:
     if run_id:
+        if scope_hash:
+            return DATA / "runs" / _safe_id(run_id) / "reports" / f"report_{_safe_id(scope_hash)}.json"
         return DATA / "runs" / _safe_id(run_id) / "results" / "report_bundle.json"
+    if scope_hash:
+        return DATA / "results" / f"report_bundle_{_safe_id(scope_hash)}.json"
     return JSON_FILES["report_bundle"]
 
 
@@ -156,16 +221,50 @@ def _read_run_json(run_id: str, filename: str) -> dict[str, Any]:
     return _read_json(DATA / "runs" / _safe_id(run_id) / "passports" / filename)
 
 
-def _incomplete_run_report(*, run_id: str, dump_id: str, missing: list[str]) -> dict[str, Any]:
+def _incomplete_run_report(*, run_id: str, dump_id: str, missing: list[str], report_scope: dict[str, Any]) -> dict[str, Any]:
     return {
         "bundle_version": "report_bundle_v1",
         "status": "incomplete_run_artifacts",
         "run_id": run_id,
         "dump_id": dump_id,
+        "report_scope": report_scope,
         "missing_artifacts": missing,
         "no_latest_fallback": True,
         "message": "Run-scoped report was not built because one or more artifacts are missing for the selected run_id. Latest-view artifacts were intentionally not used.",
     }
+
+
+def _clean_filters(filters: dict[str, Any]) -> dict[str, str]:
+    return {key: str(value).strip() for key, value in sorted(filters.items()) if str(value or "").strip()}
+
+
+def _report_scope(
+    *,
+    run_id: str,
+    dump_id: str,
+    filters: dict[str, str],
+    cohort_id: str,
+    metric: str,
+    fraction_mode: str,
+    limit: int,
+) -> dict[str, Any]:
+    canonical = {
+        "version": "report_scope_v1",
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "filters": _clean_filters(filters),
+        "cohort_id": str(cohort_id or "").strip(),
+        "metric": str(metric or "").strip(),
+        "fraction_mode": str(fraction_mode or "").strip(),
+        "limit": int(limit or 0),
+    }
+    blob = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return {**canonical, "report_scope_hash": hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]}
+
+
+def _query_params(params: dict[str, Any]) -> str:
+    clean = {key: value for key, value in params.items() if str(value or "").strip()}
+    return urlencode(clean)
 
 
 def _safe_id(value: str) -> str:

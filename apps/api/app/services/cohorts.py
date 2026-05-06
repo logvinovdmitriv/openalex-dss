@@ -30,6 +30,12 @@ def create_cohort(payload: dict[str, Any]) -> dict[str, Any]:
         if not run_id:
             raise ValueError("Manual cohort requires run_id for reproducible analysis.")
         author_ids = [str(item).strip() for item in payload.get("author_ids") or [] if str(item).strip()]
+    elif source == "metric_filter":
+        rows = warehouse.filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+        min_publications = int(payload.get("min_publications") or 0)
+        min_h = int(payload.get("min_h") or 0)
+        min_metric_value = payload.get("min_metric_value")
+        author_ids = _metric_filter_author_ids(rows, metric, min_publications=min_publications, min_h=min_h, min_metric_value=min_metric_value)
     else:
         top_n = max(1, min(int(payload.get("top_n") or 100), 1000))
         ranking = warehouse.metric_ranking(fraction_mode, metric, filters, limit=top_n, max_limit=1000, run_id=run_id, dump_id=dump_id)
@@ -39,7 +45,8 @@ def create_cohort(payload: dict[str, Any]) -> dict[str, Any]:
 
     min_publications = int(payload.get("min_publications") or 0)
     min_h = int(payload.get("min_h") or 0)
-    if min_publications or min_h:
+    min_metric_value = payload.get("min_metric_value")
+    if source != "metric_filter" and (min_publications or min_h):
         author_ids = _apply_metric_thresholds(
             author_ids,
             fraction_mode,
@@ -60,10 +67,11 @@ def create_cohort(payload: dict[str, Any]) -> dict[str, Any]:
         "source": source,
         "metric": metric,
         "fraction_mode": fraction_mode,
-        "top_n": payload.get("top_n"),
+        "top_n": payload.get("top_n") if source == "top_n" else None,
         "filters": filters,
         "min_publications": min_publications,
         "min_h": min_h,
+        "min_metric_value": min_metric_value,
         "author_ids": author_ids,
         "n_authors": len(author_ids),
         "table_scope": _table_scope(run_id, dump_id),
@@ -149,6 +157,32 @@ def _apply_metric_thresholds(
             continue
         if min_h and _as_float(row.get("h")) < min_h:
             continue
+        out.append(author_id)
+    return out
+
+
+def _metric_filter_author_ids(
+    rows: list[dict[str, Any]],
+    metric: str,
+    *,
+    min_publications: int,
+    min_h: int,
+    min_metric_value: Any,
+) -> list[str]:
+    threshold = None if min_metric_value in (None, "") else _as_float(min_metric_value)
+    out: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        author_id = str(row.get("author_id") or "")
+        if not author_id or author_id in seen:
+            continue
+        if min_publications and _as_float(row.get("p")) < min_publications:
+            continue
+        if min_h and _as_float(row.get("h")) < min_h:
+            continue
+        if threshold is not None and _as_float(row.get(metric)) < threshold:
+            continue
+        seen.add(author_id)
         out.append(author_id)
     return out
 
