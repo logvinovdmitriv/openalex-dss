@@ -11,10 +11,10 @@ router = APIRouter(tags=["entities"])
 
 
 @router.get("/authors/{author_id:path}")
-def author(author_id: str) -> dict[str, Any]:
-    return warehouse.author_detail(author_id)
+def author(author_id: str, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    return warehouse.author_detail(author_id, run_id=run_id, dump_id=dump_id)
 
 
 @router.get("/works/{work_id:path}")
-def work(work_id: str) -> dict[str, Any]:
-    return warehouse.work_detail(work_id)
+def work(work_id: str, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    return warehouse.work_detail(work_id, run_id=run_id, dump_id=dump_id)

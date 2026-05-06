@@ -15,7 +15,7 @@ for path in (API, SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.services import jobs, metadata_store, pipeline  # noqa: E402
+from app.services import cohorts, jobs, metadata_store, pipeline, reports, warehouse  # noqa: E402
 
 
 class PipelineIntegrityTests(unittest.TestCase):
@@ -369,6 +369,42 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(kept, original)
         self.assertFalse(recovered_path.exists())
         self.assertEqual(archive["dump_id"], "dump_keep")
+
+    def test_run_scoped_report_does_not_fallback_to_latest_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            latest_quality = root / "passports" / "quality_report.json"
+            latest_stats = root / "results" / "stats_summary.json"
+            latest_quality.parent.mkdir(parents=True)
+            latest_stats.parent.mkdir(parents=True)
+            latest_quality.write_text(json.dumps({"quality_counts": {"latest_only": 1}}), encoding="utf-8")
+            latest_stats.write_text(json.dumps({"fraction_modes": {"latest_only": {}}}), encoding="utf-8")
+            json_files = {
+                "quality": latest_quality,
+                "stats": latest_stats,
+                "theory": root / "results" / "theory_validation.json",
+                "checksums": root / "passports" / "checksums.json",
+                "pipeline": root / "passports" / "pipeline_summary.json",
+                "report_bundle": root / "results" / "report_bundle.json",
+            }
+
+            with (
+                patch.object(reports, "DATA", root),
+                patch.object(reports, "JSON_FILES", json_files),
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "JSON_FILES", json_files),
+            ):
+                bundle = reports.build_report_bundle(run_id="run_missing", dump_id="dump_missing")
+
+        self.assertEqual(bundle["status"], "incomplete_run_artifacts")
+        self.assertEqual(bundle["no_latest_fallback"], True)
+        self.assertIn("quality", bundle["missing_artifacts"])
+        self.assertNotIn("quality_report", bundle)
+
+    def test_manual_cohort_requires_run_scope(self) -> None:
+        with self.assertRaises(ValueError) as raised:
+            cohorts.create_cohort({"source": "manual", "author_ids": ["https://openalex.org/A1"]})
+        self.assertIn("run_id", str(raised.exception))
 
     def test_pipeline_summary_includes_analysis_eligibility(self) -> None:
         captured: dict[str, object] = {}

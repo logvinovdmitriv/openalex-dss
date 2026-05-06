@@ -17,18 +17,33 @@ def build_report_bundle(
     dump_id: str = "",
 ) -> dict[str, Any]:
     filters: dict[str, str] = {}
-    state = warehouse.read_json_doc("pipeline", run_id=run_id) or warehouse.read_json_doc("pipeline") or {}
+    if run_id:
+        docs = _run_report_artifacts(run_id)
+        missing = [name for name, value in docs.items() if name != "pipeline" and not value]
+        if missing:
+            report = _incomplete_run_report(run_id=run_id, dump_id=dump_id, missing=missing)
+            _write_json(_report_bundle_path(run_id), report)
+            return report
+        state = docs["pipeline"]
+        quality = docs["quality"]
+        stats = docs["stats"]
+        theory = docs["theory"]
+        checksums = docs["checksums"]
+        slice_passport = docs["slice_passport"]
+        calculation_passport = docs["calculation_passport"]
+    else:
+        state = warehouse.read_json_doc("pipeline") or {}
+        quality = warehouse.read_json_doc("quality") or {}
+        stats = warehouse.read_json_doc("stats") or {}
+        theory = warehouse.read_json_doc("theory") or {}
+        checksums = warehouse.read_json_doc("checksums") or {}
+        slice_passport = _read_json(DATA / "passports/slice_passport.json")
+        calculation_passport = _read_json(DATA / "passports/calculation_passport.json")
     current_slice = state.get("slice") or state.get("current_slice") or {}
     request = state.get("request") or {}
-    quality = warehouse.read_json_doc("quality", run_id=run_id) or warehouse.read_json_doc("quality") or {}
-    stats = warehouse.read_json_doc("stats", run_id=run_id) or warehouse.read_json_doc("stats") or {}
-    theory = warehouse.read_json_doc("theory", run_id=run_id) or warehouse.read_json_doc("theory") or {}
-    checksums = warehouse.read_json_doc("checksums", run_id=run_id) or warehouse.read_json_doc("checksums") or {}
-    slice_passport = _read_run_or_latest_json(run_id, "slice_passport.json")
-    calculation_passport = _read_run_or_latest_json(run_id, "calculation_passport.json")
     analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
 
-    top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id)
+    top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500, run_id=run_id, dump_id=dump_id)
     resolved_dump_id = dump_id or str(top.get("dump_id") or calculation_passport.get("dump_id") or "")
     scope_params = "".join(
         [
@@ -38,6 +53,8 @@ def build_report_bundle(
     )
     report = {
         "bundle_version": "report_bundle_v1",
+        "status": "ok",
+        "no_latest_fallback": bool(run_id),
         "run_id": run_id,
         "dump_id": resolved_dump_id,
         "interpretation_policy": {
@@ -84,7 +101,9 @@ def build_report_bundle(
 def report_bundle_json(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
     path = _report_bundle_path(run_id)
     if path.exists():
-        return _read_json(path)
+        cached = _read_json(path)
+        if not run_id or cached.get("status") != "incomplete_run_artifacts":
+            return cached
     return build_report_bundle(run_id=run_id, dump_id=dump_id)
 
 
@@ -110,12 +129,32 @@ def _report_bundle_path(run_id: str = "") -> Path:
     return JSON_FILES["report_bundle"]
 
 
-def _read_run_or_latest_json(run_id: str, filename: str) -> dict[str, Any]:
-    if run_id:
-        path = DATA / "runs" / _safe_id(run_id) / "passports" / filename
-        if path.exists():
-            return _read_json(path)
-    return _read_json(DATA / "passports" / filename)
+def _run_report_artifacts(run_id: str) -> dict[str, dict[str, Any]]:
+    return {
+        "pipeline": warehouse.read_json_doc("pipeline", run_id=run_id) or {},
+        "quality": warehouse.read_json_doc("quality", run_id=run_id) or {},
+        "stats": warehouse.read_json_doc("stats", run_id=run_id) or {},
+        "theory": warehouse.read_json_doc("theory", run_id=run_id) or {},
+        "checksums": warehouse.read_json_doc("checksums", run_id=run_id) or {},
+        "slice_passport": _read_run_json(run_id, "slice_passport.json"),
+        "calculation_passport": _read_run_json(run_id, "calculation_passport.json"),
+    }
+
+
+def _read_run_json(run_id: str, filename: str) -> dict[str, Any]:
+    return _read_json(DATA / "runs" / _safe_id(run_id) / "passports" / filename)
+
+
+def _incomplete_run_report(*, run_id: str, dump_id: str, missing: list[str]) -> dict[str, Any]:
+    return {
+        "bundle_version": "report_bundle_v1",
+        "status": "incomplete_run_artifacts",
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "missing_artifacts": missing,
+        "no_latest_fallback": True,
+        "message": "Run-scoped report was not built because one or more artifacts are missing for the selected run_id. Latest-view artifacts were intentionally not used.",
+    }
 
 
 def _safe_id(value: str) -> str:

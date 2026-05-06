@@ -172,12 +172,16 @@ function Workbench() {
       return status === "queued" || status === "running" ? 1000 : false;
     },
   });
+  const activeDumpId = extractDumpId(run.data);
   const detail = useQuery({
-    queryKey: ["detail", selected],
-    queryFn: () => getJson<any>(selected?.kind === "author" ? `/authors/${encodeURIComponent(selected.id)}` : `/works/${encodeURIComponent(selected?.id ?? "")}`),
+    queryKey: ["detail", selected, runId, activeDumpId],
+    queryFn: () => getJson<any>(
+      selected?.kind === "author"
+        ? `/authors/${encodeURIComponent(selected.id)}?run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}`
+        : `/works/${encodeURIComponent(selected?.id ?? "")}?run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}`,
+    ),
     enabled: Boolean(selected),
   });
-  const activeDumpId = extractDumpId(run.data);
 
   const domainPresets = (registry.data?.domain_presets ?? []) as ResearchAreaPreset[];
   const organizationPresets = (registry.data?.organization_presets ?? []) as OrganizationPreset[];

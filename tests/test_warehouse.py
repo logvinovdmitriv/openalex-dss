@@ -166,6 +166,45 @@ class WarehouseTests(unittest.TestCase):
             self.assertEqual(ranking["dump_id"], "dump_a")
             self.assertEqual([row["author_display_name"] for row in ranking["rows"]], ["Author A"])
             self.assertEqual(ranking["rows"][0]["h"], 1)
+            self.assertEqual(ranking["metric_scope"], "filtered_recomputed")
+
+    def test_metric_ranking_allows_export_scale_limit_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_many_author_scope(root, "run_many", "dump_many", 250)
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
+                patch.object(warehouse, "PARQUET_TABLE_FILES", _latest_parquet_paths(root)),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+            ):
+                ranking = warehouse.metric_ranking("integer", "h", run_id="run_many", limit=250, max_limit=1000)
+
+            self.assertEqual(ranking["total"], 250)
+            self.assertEqual(len(ranking["rows"]), 250)
+
+    def test_author_detail_is_run_scoped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_dump_tables(root, "dump_a", "W_A", "A_A", "Author A", 5)
+            _write_dump_tables(root, "dump_b", "W_B", "A_B", "Author B", 50)
+            _write_run_author_work(root, "run_a", "dump_a", "W_A", "A_A", "Author A", 5)
+            _write_run_author_work(root, "run_b", "dump_b", "W_B", "A_B", "Author B", 50)
+            latest_author_work = root / "latest" / "author_work.parquet"
+            write_parquet_dicts(latest_author_work, [_author_work_row("W_B", "A_B", "Author B", 50)], _author_work_fields())
+            parquet_paths = _latest_parquet_paths(root)
+            parquet_paths["author_work"] = latest_author_work
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
+                patch.object(warehouse, "PARQUET_TABLE_FILES", parquet_paths),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+            ):
+                detail = warehouse.author_detail("https://openalex.org/A_A", run_id="run_a")
+
+            self.assertEqual(detail["dump_id"], "dump_a")
+            self.assertEqual([row["work_id"] for row in detail["works"]], ["https://openalex.org/W_A"])
 
 def _write_dump_tables(root: Path, dump_id: str, work_id: str, author_id: str, author_name: str, citations: int) -> None:
     base = root / "tables" / dump_id
@@ -222,6 +261,83 @@ def _write_run_author_work(root: Path, run_id: str, dump_id: str, work_id: str, 
     run_dir.mkdir(parents=True)
     (run_dir / "metric_run.json").write_text(json.dumps({"run_id": run_id, "dump_id": dump_id, "input_dump_id": dump_id}), encoding="utf-8")
     write_parquet_dicts(run_dir / "tables" / "author_work.parquet", [_author_work_row(work_id, author_id, author_name, citations)], _author_work_fields())
+
+
+def _write_many_author_scope(root: Path, run_id: str, dump_id: str, n: int) -> None:
+    dump_dir = root / "tables" / dump_id
+    run_dir = root / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "metric_run.json").write_text(json.dumps({"run_id": run_id, "dump_id": dump_id, "input_dump_id": dump_id}), encoding="utf-8")
+    works = []
+    authorships = []
+    author_work = []
+    for index in range(n):
+        work_id = f"W{index}"
+        author_id = f"A{index}"
+        author_name = f"Author {index:03d}"
+        citations = index + 1
+        works.append(
+            {
+                "work_id": f"https://openalex.org/{work_id}",
+                "publication_date": "2024-01-01",
+                "publication_year": 2024,
+                "type": "article",
+                "cited_by_count": citations,
+                "display_name": f"Work {index}",
+                "source_display_name": "",
+                "primary_topic_display_name": "Software Engineering",
+                "primary_topic_id": "https://openalex.org/T1",
+                "primary_subfield_short_id": "1706",
+                "primary_subfield_id": "https://openalex.org/subfields/1706",
+                "primary_field_id": "https://openalex.org/fields/17",
+            }
+        )
+        authorships.append(
+            {
+                "work_id": f"https://openalex.org/{work_id}",
+                "author_id": f"https://openalex.org/{author_id}",
+                "author_display_name": author_name,
+                "country_codes_csv": "RU",
+                "institution_ids_csv": "https://openalex.org/I1",
+            }
+        )
+        author_work.append(_author_work_row(work_id, author_id, author_name, citations))
+    write_parquet_dicts(
+        dump_dir / "works.parquet",
+        works,
+        [
+            "work_id",
+            "publication_date",
+            "publication_year",
+            "type",
+            "cited_by_count",
+            "display_name",
+            "source_display_name",
+            "primary_topic_display_name",
+            "primary_topic_id",
+            "primary_subfield_short_id",
+            "primary_subfield_id",
+            "primary_field_id",
+        ],
+    )
+    write_parquet_dicts(dump_dir / "authorships.parquet", authorships, ["work_id", "author_id", "author_display_name", "country_codes_csv", "institution_ids_csv"])
+    write_parquet_dicts(run_dir / "tables" / "author_work.parquet", author_work, _author_work_fields())
+
+
+def _latest_parquet_paths(root: Path) -> dict[str, Path]:
+    return {
+        "author_work": root / "missing" / "author_work.parquet",
+        "works": root / "missing" / "works.parquet",
+        "authorships": root / "missing" / "authorships.parquet",
+        "work_topics": root / "missing" / "work_topics.parquet",
+        "indices": root / "missing" / "indices.parquet",
+        "authors_local_metrics": root / "missing" / "indices.parquet",
+        "ratings": root / "missing" / "ratings.parquet",
+    }
+
+
+def _latest_csv_paths(root: Path) -> dict[str, Path]:
+    return {name: path.with_suffix(".csv") for name, path in _latest_parquet_paths(root).items()}
 
 
 def _author_work_row(work_id: str, author_id: str, author_name: str, citations: int) -> dict[str, object]:

@@ -57,20 +57,33 @@ def analytics(
     theory = warehouse.read_json_doc("theory", run_id=run_id) or {}
     try:
         distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id)
-        top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id)
+        top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=200, run_id=run_id, dump_id=dump_id)
         metric_lines = warehouse.metric_line_series(fraction_mode, filters, rank_metric=metric, limit=40, run_id=run_id, dump_id=dump_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    run_global_stats = {
+        "metric_summary": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("metrics", {}).get(metric),
+        "spearman": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("spearman_on_competition_ranks"),
+        "top_overlap": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("top_overlap"),
+        "scope": "full_run_precomputed",
+        "note": "These statistics come from the full selected run; filtered_distribution and filtered_top are recomputed after current filters.",
+    }
     return {
         "fraction_mode": fraction_mode,
         "metric": metric,
         "run_id": run_id,
         "dump_id": dump_id or top.get("dump_id") or distribution.get("dump_id"),
+        "metric_scope": "filtered_recomputed",
+        "percentile_scope": "current filtered author set",
         "filters": filters,
+        "filtered_distribution": distribution,
+        "filtered_top": top,
+        "filtered_metric_lines": metric_lines,
+        "run_global_stats": run_global_stats,
         "distribution": distribution,
-        "metric_summary": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("metrics", {}).get(metric),
-        "spearman": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("spearman_on_competition_ranks"),
-        "top_overlap": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("top_overlap"),
+        "metric_summary": run_global_stats["metric_summary"],
+        "spearman": run_global_stats["spearman"],
+        "top_overlap": run_global_stats["top_overlap"],
         "theory": theory,
         "top": top["rows"],
         "top_table": top,
@@ -166,7 +179,7 @@ def ranking_csv(
         work_type=work_type,
     )
     try:
-        payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id)
+        payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=run_id, dump_id=dump_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     output = StringIO()

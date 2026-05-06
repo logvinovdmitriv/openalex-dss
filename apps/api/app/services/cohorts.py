@@ -26,10 +26,12 @@ def create_cohort(payload: dict[str, Any]) -> dict[str, Any]:
     filters = _filters(payload)
 
     if source == "manual":
+        if not run_id:
+            raise ValueError("Manual cohort requires run_id for reproducible analysis.")
         author_ids = [str(item).strip() for item in payload.get("author_ids") or [] if str(item).strip()]
     else:
         top_n = max(1, min(int(payload.get("top_n") or 100), 1000))
-        ranking = warehouse.metric_ranking(fraction_mode, metric, filters, limit=top_n, run_id=run_id, dump_id=dump_id)
+        ranking = warehouse.metric_ranking(fraction_mode, metric, filters, limit=top_n, max_limit=1000, run_id=run_id, dump_id=dump_id)
         rows = ranking.get("rows") or []
         author_ids = [str(row.get("author_id")) for row in rows if row.get("author_id")]
         dump_id = dump_id or str(ranking.get("dump_id") or "")

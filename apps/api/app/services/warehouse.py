@@ -15,7 +15,7 @@ from app.core.paths import DATA, JSON_FILES, PARQUET_TABLE_FILES, SRC, TABLE_FIL
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from openalex_mvp.metrics import assign_iupv_percentiles, g_index, h_index, i10_index  # noqa: E402
+from openalex_mvp.metrics import assign_iupv_percentiles, g_index, h_index, i10_index, lrdi as lrdi_metric  # noqa: E402
 from openalex_mvp.ranking import sort_metric_rows  # noqa: E402
 
 INDEX_NUMERIC_FIELDS = {
@@ -405,6 +405,7 @@ def _filtered_work_author_indices(
         return []
 
     filters = _clean_filters(filters or {})
+    metric_params = _run_metric_params(run_id)
     work_fields = set(table_schema("works", run_id=run_id, dump_id=dump_id))
     where = ["aw.fraction_mode = ?"]
     args: list[Any] = [fraction_mode]
@@ -575,6 +576,8 @@ def _filtered_work_author_indices(
                 "run_id": "filtered",
                 "source_run_id": run_id,
                 "source_dump_id": dump_id or _dump_id_for_run(run_id),
+                "metric_scope": "filtered_recomputed",
+                "percentile_scope": "current filtered author set",
                 "fraction_mode": fraction_mode,
                 "author_id": author_id,
                 "author_display_name": _first_nonempty(row.get("author_display_name") for row in group),
@@ -591,6 +594,12 @@ def _filtered_work_author_indices(
                 "fm5": fm5_value,
                 "iupv": 0.0,
                 "islv": 0.0,
+                "lrdi": lrdi_metric(
+                    group,
+                    analysis_year=metric_params["analysis_year"],
+                    p0=metric_params["lrdi_p0"],
+                    lam=metric_params["lrdi_lambda"],
+                ),
                 "mean_authors_per_work": _mean([_as_float(row.get("authors_count_used")) for row in group]),
                 "share_single_authored": _mean([1.0 if _truthy(row.get("single_authored_flag")) else 0.0 for row in group]),
                 "n_flagged_works": sum(1 for row in group if _truthy(row.get("qf_any"))),
@@ -611,6 +620,7 @@ def metric_ranking(
     filters: FilterSet | None = None,
     *,
     limit: int = 20,
+    max_limit: int = 200,
     run_id: str = "",
     dump_id: str = "",
 ) -> dict[str, Any]:
@@ -629,12 +639,14 @@ def metric_ranking(
             item[field] = row.get(field)
         ranked.append(item)
     _assign_competition_rank(ranked, "score", "rank_competition")
-    limit = max(1, min(int(limit), 200))
+    limit = max(1, min(int(limit), max(1, int(max_limit))))
     fields = ["rank_competition", "author_display_name", "score", *visible_metrics, "author_id"]
     return {
         "table": "filtered_rating",
         "rank_metric": metric,
         "fraction_mode": fraction_mode,
+        "metric_scope": "filtered_recomputed",
+        "percentile_scope": "current filtered author set",
         "filters": filters or {},
         "run_id": run_id,
         "dump_id": dump_id or _dump_id_for_run(run_id),
@@ -661,6 +673,8 @@ def metric_distribution(
     summary["histogram"] = _histogram(values, bins=8)
     summary["run_id"] = run_id
     summary["dump_id"] = dump_id or _dump_id_for_run(run_id)
+    summary["metric_scope"] = "filtered_recomputed"
+    summary["percentile_scope"] = "current filtered author set"
     return summary
 
 
@@ -706,6 +720,8 @@ def metric_line_series(
         "fraction_mode": fraction_mode,
         "run_id": run_id,
         "dump_id": dump_id or _dump_id_for_run(run_id),
+        "metric_scope": "filtered_recomputed",
+        "percentile_scope": "current filtered author set",
         "normalization": "min_max_0_100_by_current_filtered_slice",
         "metrics": list(selected_metrics),
         "rows": out,
@@ -726,12 +742,12 @@ def read_json_doc(name: str, *, run_id: str = "") -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def author_detail(author_id: str) -> dict[str, Any]:
-    with connect() as conn:
-        indices = _records(conn.execute("SELECT * FROM indices WHERE author_id = ?", [author_id]))
-        ratings = _records(conn.execute("SELECT * FROM ratings WHERE author_id = ? ORDER BY metric_name, rank_competition", [author_id]))
+def author_detail(author_id: str, *, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
+        indices = _records(conn.execute("SELECT * FROM indices WHERE author_id = ?", [author_id])) if table_exists("indices", run_id=run_id, dump_id=dump_id) else []
+        ratings = _records(conn.execute("SELECT * FROM ratings WHERE author_id = ? ORDER BY metric_name, rank_competition", [author_id])) if table_exists("ratings", run_id=run_id, dump_id=dump_id) else []
         works = []
-        if table_exists("author_work") and table_exists("works"):
+        if table_exists("author_work", run_id=run_id, dump_id=dump_id) and table_exists("works", run_id=run_id, dump_id=dump_id):
             works = _records(conn.execute(
                 """
                 SELECT DISTINCT w.*
@@ -742,15 +758,30 @@ def author_detail(author_id: str) -> dict[str, Any]:
                 """,
                 [author_id],
             ))
-    return {"author_id": author_id, "indices": indices, "ratings": ratings, "works": works}
+    return {
+        "author_id": author_id,
+        "run_id": run_id,
+        "dump_id": dump_id or _dump_id_for_run(run_id),
+        "indices": indices,
+        "ratings": ratings,
+        "works": works,
+    }
 
 
-def work_detail(work_id: str) -> dict[str, Any]:
-    with connect() as conn:
-        works = _records(conn.execute("SELECT * FROM works WHERE work_id = ?", [work_id]))
-        authorships = _records(conn.execute("SELECT * FROM authorships WHERE work_id = ? ORDER BY author_seq", [work_id]))
-        author_work = _records(conn.execute("SELECT * FROM author_work WHERE work_id = ? ORDER BY fraction_mode, author_display_name", [work_id]))
-    return {"work_id": work_id, "work": works[0] if works else None, "authorships": authorships, "author_work": author_work}
+def work_detail(work_id: str, *, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
+        works = _records(conn.execute("SELECT * FROM works WHERE work_id = ?", [work_id])) if table_exists("works", run_id=run_id, dump_id=dump_id) else []
+        authorship_order = " ORDER BY author_seq" if "author_seq" in table_schema("authorships", run_id=run_id, dump_id=dump_id) else ""
+        authorships = _records(conn.execute(f"SELECT * FROM authorships WHERE work_id = ?{authorship_order}", [work_id])) if table_exists("authorships", run_id=run_id, dump_id=dump_id) else []
+        author_work = _records(conn.execute("SELECT * FROM author_work WHERE work_id = ? ORDER BY fraction_mode, author_display_name", [work_id])) if table_exists("author_work", run_id=run_id, dump_id=dump_id) else []
+    return {
+        "work_id": work_id,
+        "run_id": run_id,
+        "dump_id": dump_id or _dump_id_for_run(run_id),
+        "work": works[0] if works else None,
+        "authorships": authorships,
+        "author_work": author_work,
+    }
 
 
 def _records(result: duckdb.DuckDBPyConnection) -> list[dict[str, Any]]:
@@ -972,6 +1003,30 @@ def _run_json_path(run_id: str, name: str) -> Path | None:
     if fallback.exists():
         return fallback
     return None
+
+
+def _run_metric_params(run_id: str) -> dict[str, Any]:
+    defaults = {"analysis_year": 2026, "lrdi_p0": 5.0, "lrdi_lambda": 0.15}
+    candidates: list[Path] = []
+    if run_id:
+        candidates.append(_run_dir(run_id) / "passports" / "calculation_passport.json")
+    candidates.append(DATA / "passports" / "calculation_passport.json")
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        lrdi_doc = doc.get("lrdi") if isinstance(doc, dict) else {}
+        if not isinstance(lrdi_doc, dict):
+            lrdi_doc = {}
+        return {
+            "analysis_year": _as_int(lrdi_doc.get("analysis_year") or doc.get("analysis_year") or defaults["analysis_year"]),
+            "lrdi_p0": _as_float(lrdi_doc.get("p0") or doc.get("lrdi_p0") or defaults["lrdi_p0"]),
+            "lrdi_lambda": _as_float(lrdi_doc.get("lambda") or doc.get("lrdi_lambda") or defaults["lrdi_lambda"]),
+        }
+    return defaults
 
 
 def _dump_id_for_run(run_id: str) -> str:
