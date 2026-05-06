@@ -64,10 +64,14 @@ class PublicApiSurfaceTests(unittest.TestCase):
         props = SliceCreateRequest.model_json_schema()["properties"]
 
         for field in (
+            "slice_name",
+            "workflow_mode",
             "raw_openalex_filter",
             "api_key",
             "source_path",
             "source_strategy",
+            "sort",
+            "per_page",
             "accepted_estimate_signature",
             "accepted_download_signature",
             "fraction_modes",
@@ -84,7 +88,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertIn("country_code", props)
 
     def test_slice_create_request_rejects_internal_pipeline_fields(self) -> None:
-        for field in ("api_key", "raw_openalex_filter", "source_path", "accepted_download_signature", "lrdi_p0"):
+        for field in ("slice_name", "workflow_mode", "sort", "per_page", "api_key", "raw_openalex_filter", "source_path", "accepted_download_signature", "lrdi_p0"):
             with self.assertRaises(ValidationError):
                 SliceCreateRequest(filter_mode="all", **{field: "legacy"})
 
@@ -100,9 +104,15 @@ class PublicApiSurfaceTests(unittest.TestCase):
         internal_props = InternalPipelinePayload.model_json_schema()["properties"]
 
         self.assertNotIn("PipelineRequest", public_exports)
+        self.assertIn("slice_name", internal_props)
+        self.assertIn("workflow_mode", internal_props)
+        self.assertIn("sort", internal_props)
+        self.assertIn("per_page", internal_props)
         self.assertIn("raw_openalex_filter", internal_props)
         self.assertIn("accepted_download_signature", internal_props)
-        self.assertEqual(InternalPipelinePayload(filter_mode="all", api_key="secret", extra_legacy="ignored").api_key, "secret")
+        internal = InternalPipelinePayload(filter_mode="all", api_key="secret", workflow_mode="strict_works", extra_legacy="ignored")
+        self.assertEqual(internal.api_key, "secret")
+        self.assertEqual(internal.workflow_mode, "strict_works")
 
     def test_run_request_exposes_only_recalculate_action(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")

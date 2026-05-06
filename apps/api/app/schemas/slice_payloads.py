@@ -6,8 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class SliceDefinitionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    slice_name: str | None = None
-    workflow_mode: str | None = None
     entity_level: str | None = None
     entity_id_short: str | None = None
     entity_id_full: str | None = None
@@ -38,8 +36,6 @@ class SliceDefinitionPayload(BaseModel):
     exclude_retracted: bool | None = None
     exclude_paratext: bool | None = None
     country_code: str | None = None
-    sort: str | None = None
-    per_page: int | None = Field(default=None, ge=1, le=100)
 
     @field_validator("entity_level")
     @classmethod
@@ -48,15 +44,6 @@ class SliceDefinitionPayload(BaseModel):
             return value
         if value not in {"", "field", "subfield", "topic"}:
             raise ValueError("entity_level must be one of: field, subfield, topic")
-        return value
-
-    @field_validator("workflow_mode")
-    @classmethod
-    def validate_workflow_mode(cls, value: str | None) -> str | None:
-        if value is None:
-            return value
-        if value not in {"strict_works"}:
-            raise ValueError("workflow_mode must be strict_works")
         return value
 
     @field_validator("filter_mode")

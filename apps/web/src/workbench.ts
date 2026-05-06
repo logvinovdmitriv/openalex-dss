@@ -94,8 +94,6 @@ export type EntitySuggestion = {
 };
 
 export type SliceDefinitionPayload = {
-  slice_name: string;
-  workflow_mode: "strict_works";
   entity_level: string;
   entity_id_short: string;
   entity_id_full: string;
@@ -126,7 +124,6 @@ export type SliceDefinitionPayload = {
   include_xpac: boolean;
   exclude_retracted: boolean;
   exclude_paratext: boolean;
-  sort: string;
 };
 
 export type AnalysisRunPayload = {
@@ -213,8 +210,6 @@ export const VIEW_DEFINITIONS: Record<View, { label: string; lead: string }> = {
 
 export function buildSliceDefinitionPayload(filters: ActiveFilters): SliceDefinitionPayload {
   return {
-    slice_name: sliceName(filters),
-    workflow_mode: "strict_works",
     entity_level: filters.subject_level,
     entity_id_short: filters.subject_id,
     entity_id_full: openAlexEntityUrl(filters.subject_level, filters.subject_id),
@@ -245,7 +240,6 @@ export function buildSliceDefinitionPayload(filters: ActiveFilters): SliceDefini
     include_xpac: false,
     exclude_retracted: true,
     exclude_paratext: true,
-    sort: "",
   };
 }
 
@@ -266,27 +260,6 @@ export function buildDownloadPolicy(): DownloadPolicy {
     complete_slice_required: true,
     allow_incomplete_preview: false,
   };
-}
-
-export function sliceName(filters: ActiveFilters) {
-  return [
-    filters.filter_mode || "all",
-    filters.subject_level || "all_subjects",
-    filters.subject_id || "all",
-    shortToken(filters.keyword_id) || shortToken(filters.text_search_query) || "all_keywords",
-    filters.country_code || "all",
-    shortToken(filters.institution_id) || "all_orgs",
-    shortToken(filters.author_id) || "all_authors",
-    shortToken(filters.source_id) || "all_sources",
-    filters.from_publication_date.slice(0, 4),
-    filters.to_publication_date.slice(0, 4),
-    filters.work_type || "all_types",
-    filters.language || "all_lang",
-    filters.open_access_is_oa || "all_oa",
-    filters.has_abstract || "all_abs",
-    filters.min_cited_by_count || "all_cites",
-    shortToken(filters.doi) || "all_doi",
-  ].join("_").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 120);
 }
 
 export function humanSliceTitle(filters: ActiveFilters) {
@@ -410,10 +383,6 @@ export function cohortStatisticsUrl(cohortId: string, filters: ActiveFilters, fr
 function openAlexEntityUrl(level: string, id: string) {
   if (!level || !id) return "";
   return level === "topic" ? `https://openalex.org/${id}` : `https://openalex.org/${level}s/${id}`;
-}
-
-function shortToken(value: string) {
-  return String(value || "").trim().replace(/^https?:\/\/[^/]+\//, "").replace(/^doi:/i, "").slice(-24);
 }
 
 function clampProgress(value: number) {
