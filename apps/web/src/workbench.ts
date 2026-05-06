@@ -248,8 +248,12 @@ export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string
   return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, cohort_id: cohortId }).toString()}`;
 }
 
-export function cohortAuthorMetricsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, runId = "", dumpId = "", format: "csv" | "json" = "csv") {
-  return `/cohorts/${encodeURIComponent(cohortId)}/author-metrics.${format}?${filterParams(filters, { fraction_mode: fractionMode, run_id: runId, dump_id: dumpId }).toString()}`;
+export function cohortAuthorMetricsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", format: "csv" | "json" = "csv") {
+  return `/cohorts/${encodeURIComponent(cohortId)}/author-metrics.${format}?${filterParams(filters, { fraction_mode: fractionMode, metric, run_id: runId, dump_id: dumpId }).toString()}`;
+}
+
+export function cohortStatisticsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, runId = "", dumpId = "") {
+  return `/cohorts/${encodeURIComponent(cohortId)}/statistics?${filterParams(filters, { fraction_mode: fractionMode, run_id: runId, dump_id: dumpId }).toString()}`;
 }
 
 function openAlexEntityUrl(level: string, id: string) {

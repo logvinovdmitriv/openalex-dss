@@ -43,6 +43,7 @@ import {
   buildSlicePayload,
   bytesToMb,
   cohortAuthorMetricsUrl,
+  cohortStatisticsUrl,
   humanSliceTitle,
   mutationError,
   pageLead,
@@ -156,11 +157,6 @@ function Workbench() {
     queryFn: () => getJson<any>(`/openalex/rate-limit?api_key=${encodeURIComponent(apiKey.trim())}`),
     enabled: Boolean(apiKey.trim()),
   });
-  const cohortStats = useQuery({
-    queryKey: ["cohort-stats", selectedCohortId],
-    queryFn: () => postJson<any>(`/cohorts/${encodeURIComponent(selectedCohortId)}/statistics`, {}),
-    enabled: Boolean(selectedCohortId),
-  });
   const run = useQuery({
     queryKey: ["run", runId],
     queryFn: () => getJson<any>(`/runs/${runId}`),
@@ -172,6 +168,11 @@ function Workbench() {
   });
   const activeDumpId = extractDumpId(run.data);
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const cohortStats = useQuery({
+    queryKey: ["cohort-stats", selectedCohortId, fractionMode, runId, activeDumpId, filterKey],
+    queryFn: () => getJson<any>(cohortStatisticsUrl(selectedCohortId, filters, fractionMode, runId, activeDumpId)),
+    enabled: Boolean(selectedCohortId),
+  });
   const hasLocalAnalyticsData = Boolean(runId || activeDumpId || state.data?.tables?.author_work?.rows || state.data?.tables?.indices?.rows);
   const table = useQuery({
     queryKey: ["table", tableName, tableQ, topN, runId, activeDumpId],
@@ -1344,8 +1345,8 @@ function ReportsPage({
   const reportParams = filterParams(filters, { fraction_mode: fractionMode, metric, limit: topN, run_id: runId, dump_id: dumpId, cohort_id: cohortId });
   const rankingUrl = `${API_BASE}/analytics/ranking.csv?${reportParams.toString()}`;
   const bundleUrl = `${API_BASE}/reports/bundle.json?${reportParams.toString()}`;
-  const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, runId, dumpId, "csv")}` : "";
-  const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, runId, dumpId, "json")}` : "";
+  const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "csv")}` : "";
+  const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "json")}` : "";
   return (
     <div className="stack">
       <section className="panel">

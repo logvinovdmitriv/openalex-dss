@@ -13,6 +13,7 @@ for path in (API, SRC):
         sys.path.insert(0, str(path))
 
 from app.api.routes import analytics as analytics_routes  # noqa: E402
+from app.api.routes import cohorts as cohort_routes  # noqa: E402
 
 
 class AnalyticsRouteTests(unittest.TestCase):
@@ -137,6 +138,85 @@ class AnalyticsRouteTests(unittest.TestCase):
         with patch.object(analytics_routes.cohorts, "resolve_cohort_context", side_effect=analytics_routes.cohorts.CohortNotFound("Unknown cohort_id: nope")):
             with self.assertRaises(analytics_routes.HTTPException) as raised:
                 analytics_routes.ranking_json(cohort_id="nope", fraction_mode="integer", metric="h", limit=100)
+
+        self.assertEqual(raised.exception.status_code, 404)
+
+    def test_cohort_statistics_route_forwards_analysis_scope(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_statistics(cohort_id: str, **kwargs: object) -> dict[str, object]:
+            captured["cohort_id"] = cohort_id
+            captured["kwargs"] = kwargs
+            return {"cohort_id": cohort_id, "n_rows": 1}
+
+        with patch.object(cohort_routes.cohorts, "cohort_statistics", side_effect=fake_statistics):
+            payload = cohort_routes.cohort_statistics(
+                "cohort_a",
+                run_id="run_a",
+                dump_id="dump_a",
+                fraction_mode="integer",
+                country_code="de",
+                filter_mode="search",
+                text_search_query="ergodesign",
+            )
+
+        self.assertEqual(payload["n_rows"], 1)
+        self.assertEqual(captured["cohort_id"], "cohort_a")
+        self.assertEqual(
+            captured["kwargs"],
+            {
+                "run_id": "run_a",
+                "dump_id": "dump_a",
+                "fraction_mode": "integer",
+                "filters": {"country_code": "DE", "filter_mode": "search", "text_search_query": "ergodesign"},
+            },
+        )
+
+    def test_cohort_author_metrics_routes_forward_metric_and_scope(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_payload(cohort_id: str, **kwargs: object) -> dict[str, object]:
+            captured["json"] = {"cohort_id": cohort_id, **kwargs}
+            return {"fields": ["author_id", "h"], "rows": [{"author_id": "https://openalex.org/A1", "h": 3}], "total": 1}
+
+        def fake_csv(cohort_id: str, **kwargs: object) -> str:
+            captured["csv"] = {"cohort_id": cohort_id, **kwargs}
+            return "author_id,h\nhttps://openalex.org/A1,3\n"
+
+        with (
+            patch.object(cohort_routes.cohorts, "cohort_author_metrics", side_effect=fake_payload),
+            patch.object(cohort_routes.cohorts, "cohort_author_metrics_csv", side_effect=fake_csv),
+        ):
+            json_payload = cohort_routes.cohort_author_metrics_json(
+                "cohort_a",
+                run_id="run_a",
+                dump_id="dump_a",
+                fraction_mode="integer",
+                metric="islv",
+                country_code="ru",
+                limit=50,
+            )
+            csv_response = cohort_routes.cohort_author_metrics_csv(
+                "cohort_a",
+                run_id="run_a",
+                dump_id="dump_a",
+                fraction_mode="integer",
+                metric="islv",
+                country_code="ru",
+                limit=50,
+            )
+
+        self.assertEqual(json_payload["total"], 1)
+        self.assertEqual(captured["json"]["metric"], "islv")
+        self.assertEqual(captured["json"]["filters"], {"country_code": "RU"})
+        self.assertEqual(captured["csv"]["metric"], "islv")
+        self.assertIn("author_metrics", csv_response.headers["Content-Disposition"])
+        self.assertIn("https://openalex.org/A1", csv_response.body.decode("utf-8"))
+
+    def test_cohort_routes_unknown_cohort_returns_404(self) -> None:
+        with patch.object(cohort_routes.cohorts, "cohort_author_metrics", side_effect=cohort_routes.cohorts.CohortNotFound("Unknown cohort_id: nope")):
+            with self.assertRaises(cohort_routes.HTTPException) as raised:
+                cohort_routes.cohort_author_metrics_json("nope")
 
         self.assertEqual(raised.exception.status_code, 404)
 

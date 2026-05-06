@@ -165,11 +165,15 @@ def cohort_author_metrics(
     dump_id: str = "",
     fraction_mode: str = "",
     filters: dict[str, Any] | None = None,
+    metric: str = "",
     limit: int = 100_000,
     offset: int = 0,
 ) -> dict[str, Any]:
     ctx = resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
     resolved_fraction_mode = str(ctx.get("fraction_mode") or "strict_authors_count")
+    sort_metric = str(metric or (ctx.get("cohort") or {}).get("metric") or "h")
+    if sort_metric not in warehouse.INDEX_NUMERIC_FIELDS:
+        raise ValueError(f"Unsupported metric: {sort_metric}")
     rows = warehouse.filtered_author_indices(
         resolved_fraction_mode,
         ctx.get("filters") or {},
@@ -177,7 +181,7 @@ def cohort_author_metrics(
         dump_id=str(ctx.get("dump_id") or ""),
     )
     rows = warehouse.filter_rows_by_author_ids(rows, ctx.get("author_ids"))
-    rows = warehouse.sort_metric_rows(rows, str((ctx.get("cohort") or {}).get("metric") or "h"))
+    rows = warehouse.sort_metric_rows(rows, sort_metric)
     total = len(rows)
     limit = max(1, min(int(limit), 500_000))
     offset = max(0, int(offset))
@@ -189,6 +193,7 @@ def cohort_author_metrics(
         "run_id": str(ctx.get("run_id") or ""),
         "dump_id": str(ctx.get("dump_id") or ""),
         "fraction_mode": resolved_fraction_mode,
+        "sort_metric": sort_metric,
         "fields": fields,
         "rows": page,
         "total": total,
@@ -206,20 +211,23 @@ def cohort_author_metrics_csv(cohort_id: str, **kwargs: Any) -> str:
     return output.getvalue()
 
 
-def cohort_statistics(cohort_id: str) -> dict[str, Any]:
-    cohort = get_cohort(cohort_id)
-    author_ids = set(cohort.get("author_ids") or [])
-    run_id = str(cohort.get("run_id") or "")
-    dump_id = str(cohort.get("dump_id") or "")
-    rows = [
-        row for row in warehouse.filtered_author_indices(
-            str(cohort.get("fraction_mode") or "strict_authors_count"),
-            cohort.get("filters") or {},
-            run_id=run_id,
-            dump_id=dump_id,
-        )
-        if str(row.get("author_id") or "") in author_ids
-    ]
+def cohort_statistics(
+    cohort_id: str,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    fraction_mode: str = "",
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ctx = resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+    resolved_fraction_mode = str(ctx.get("fraction_mode") or "strict_authors_count")
+    rows = warehouse.filtered_author_indices(
+        resolved_fraction_mode,
+        ctx.get("filters") or {},
+        run_id=str(ctx.get("run_id") or ""),
+        dump_id=str(ctx.get("dump_id") or ""),
+    )
+    rows = warehouse.filter_rows_by_author_ids(rows, ctx.get("author_ids"))
     descriptive = {metric: _describe([_as_float(row.get(metric)) for row in rows]) for metric in COHORT_METRICS}
     boxplots = {metric: _boxplot([_as_float(row.get(metric)) for row in rows]) for metric in COHORT_METRICS}
     histograms = {
@@ -230,9 +238,11 @@ def cohort_statistics(cohort_id: str) -> dict[str, Any]:
         for metric in COHORT_METRICS
     }
     return {
-        "cohort": cohort,
-        "run_id": run_id,
-        "dump_id": dump_id,
+        "cohort": ctx.get("cohort") or {},
+        "cohort_context": cohort_context_summary(ctx),
+        "run_id": str(ctx.get("run_id") or ""),
+        "dump_id": str(ctx.get("dump_id") or ""),
+        "fraction_mode": resolved_fraction_mode,
         "n_rows": len(rows),
         "metrics": list(COHORT_METRICS),
         "descriptive": descriptive,
