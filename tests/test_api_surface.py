@@ -32,6 +32,14 @@ class PublicApiSurfaceTests(unittest.TestCase):
 
         self.assertNotIn("/api/v1/slices/plan", route_paths)
 
+    def test_legacy_state_and_snapshot_diagnostics_are_not_public(self) -> None:
+        route_paths = {getattr(route, "path", "") for route in app.routes}
+
+        self.assertNotIn("/api/v1/state", route_paths)
+        self.assertNotIn("/api/v1/snapshot/manifest", route_paths)
+        self.assertIn("/api/v1/workbench", route_paths)
+        self.assertIn("/api/v1/catalog", route_paths)
+
     def test_run_request_exposes_only_recalculate_action(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")
         self.assertEqual(RunRequest(action="recalculate", payload={"dump_id": "dump_a"}).action, "recalculate")

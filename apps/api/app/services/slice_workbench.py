@@ -281,12 +281,21 @@ def workbench_summary() -> dict[str, Any]:
     slices = list_slices(limit=20)
     materializations = list_materialization_plans(limit=20)
     dumps = list_dumps(limit=20)
+    quality = warehouse.read_json_doc("quality") or {}
     return {
         "states": SLICE_STATES,
         "slices": slices["slices"],
         "materializations": materializations["materializations"],
         "dumps": dumps["dumps"],
         "tables": tables,
+        "quality": quality,
+        "workflow": _workbench_workflow(
+            tables=tables,
+            slices=slices["slices"],
+            materializations=materializations["materializations"],
+            dumps=dumps["dumps"],
+            quality=quality,
+        ),
     }
 
 
@@ -346,6 +355,40 @@ def _storage_profiles() -> dict[str, dict[str, Any]]:
             "selected_fields": [],
         }
     return out
+
+
+def _workbench_workflow(
+    *,
+    tables: dict[str, Any],
+    slices: list[dict[str, Any]],
+    materializations: list[dict[str, Any]],
+    dumps: list[dict[str, Any]],
+    quality: dict[str, Any],
+) -> dict[str, Any]:
+    rows = {name: int((info or {}).get("rows") or 0) for name, info in tables.items()}
+    active_stage = "idle"
+    if rows.get("indices", 0) > 0 or rows.get("ratings", 0) > 0:
+        active_stage = "analyzed"
+    elif rows.get("works", 0) > 0 and rows.get("authorships", 0) > 0:
+        active_stage = "tables"
+    elif dumps:
+        active_stage = "ready"
+    elif any(str(item.get("state") or "") == "materializing" for item in materializations):
+        active_stage = "materializing"
+    elif slices:
+        active_stage = str(slices[0].get("state") or "slice")
+
+    quality_counts = quality.get("quality_counts") or {}
+    return {
+        "active_stage": active_stage,
+        "current_slice": slices[0] if slices else {},
+        "quality_summary": {
+            "quality_flags": sum(int(value or 0) for value in quality_counts.values()),
+            "works": rows.get("works", 0),
+            "authorships": rows.get("authorships", 0),
+            "authors_indexed": rows.get("indices", 0),
+        },
+    }
 
 
 def _slice_title(cfg: Any) -> str:

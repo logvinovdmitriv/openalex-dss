@@ -159,7 +159,6 @@ function Workbench() {
 
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => getJson<any>("/registry") });
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => getJson<any>("/catalog") });
-  const state = useQuery({ queryKey: ["state"], queryFn: () => getJson<any>("/state") });
   const workbench = useQuery({ queryKey: ["workbench"], queryFn: () => getJson<any>("/workbench") });
   const dumps = useQuery({ queryKey: ["dumps"], queryFn: () => getJson<any>("/dumps?limit=50") });
   const cohorts = useQuery({ queryKey: ["cohorts"], queryFn: () => getJson<any>("/cohorts?limit=50") });
@@ -187,7 +186,7 @@ function Workbench() {
     queryFn: () => getJson<any>(cohortStatisticsUrl(selectedCohortId, filters, fractionMode, runId, activeDumpId, cohortFilterPolicy)),
     enabled: Boolean(selectedCohortId),
   });
-  const hasLocalAnalyticsData = Boolean(runId || activeDumpId || state.data?.tables?.author_work?.rows || state.data?.tables?.indices?.rows);
+  const hasLocalAnalyticsData = Boolean(runId || activeDumpId || workbench.data?.tables?.author_work?.rows || workbench.data?.tables?.indices?.rows);
   const table = useQuery({
     queryKey: ["table", tableName, tableQ, topN, runId, activeDumpId],
     queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}&limit=${Math.max(1, topN || 1)}`),
@@ -236,7 +235,7 @@ function Workbench() {
   const topNOptions = configuredOptions(uiOptions.top_n ?? []);
   const primaryMetricOptions = configuredOptions(catalog.data?.metrics ?? []);
   const fractionModeOptions = configuredOptions(catalog.data?.fraction_modes ?? []);
-  const tableOptions = Object.keys(state.data?.tables ?? {}).map((value) => ({ value, label: value }));
+  const tableOptions = Object.keys(workbench.data?.tables ?? {}).map((value) => ({ value, label: value }));
   const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
     .filter((item) => ["openalex_cli"].includes(item.value));
   const defaultStorageProfileId = String(defaultOption(storageProfileOptions)?.value ?? "minimal_analytics");
@@ -423,8 +422,8 @@ function Workbench() {
   }, [cohorts.data, selectedCohortId]);
 
   const running = run.data?.status === "queued" || run.data?.status === "running";
-  const tables = state.data?.tables ?? {};
-  const qualityCounts = state.data?.quality?.quality_counts ?? {};
+  const tables = workbench.data?.tables ?? {};
+  const qualityCounts = workbench.data?.quality?.quality_counts ?? {};
   const rankingRows = ranking.data?.rows ?? [];
   const chartRows = useMemo(() => rankingChartRows(rankingRows, metric), [rankingRows, metric]);
   const errors = [
@@ -464,7 +463,7 @@ function Workbench() {
             </button>
           ))}
         </div>
-        <StatusRail state={state.data} run={run.data} running={running} />
+        <StatusRail state={workbench.data} run={run.data} running={running} />
       </header>
 
       <AnimatePresence mode="wait">
@@ -638,7 +637,7 @@ function Workbench() {
         )}
 
         {view === "passports" && (
-          <PassportsPage state={state.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
+          <PassportsPage state={workbench.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
         )}
         </motion.section>
       </AnimatePresence>
@@ -1997,7 +1996,7 @@ function ReportsPage({
           {cohortMetricsJsonUrl && <a href={cohortMetricsJsonUrl}>JSON метрик когорты</a>}
           {cohortStatsUrl && <a href={cohortStatsUrl}>JSON статистики когорты</a>}
           <a href={bundleUrl}>JSON-пакет отчета</a>
-          <a href={`${API_BASE}/state`}>JSON состояния</a>
+          <a href={`${API_BASE}/workbench`}>JSON workbench</a>
           <a href={`${API_BASE}/catalog`}>Каталог конфигураций</a>
         </div>
         {cohortMetricsCsvUrl && (

@@ -17,6 +17,26 @@ from app.services import author_slice, slice_workbench  # noqa: E402
 
 
 class SliceWorkbenchTests(unittest.TestCase):
+    def test_workbench_summary_carries_quality_and_slice_centric_workflow(self) -> None:
+        quality = {"quality_counts": {"works_without_authorships": 2, "authorships_null_author_id": 1}}
+        with (
+            patch.object(
+                slice_workbench.warehouse,
+                "list_tables",
+                return_value={"works": {"rows": 3}, "authorships": {"rows": 4}, "indices": {"rows": 2}},
+            ),
+            patch.object(slice_workbench.warehouse, "read_json_doc", return_value=quality),
+            patch.object(slice_workbench, "list_slices", return_value={"slices": [{"slice_id": "slice_a", "state": "ready"}], "total": 1}),
+            patch.object(slice_workbench, "list_materialization_plans", return_value={"materializations": []}),
+            patch.object(slice_workbench, "list_dumps", return_value={"dumps": [{"dump_id": "dump_a"}], "total": 1}),
+        ):
+            summary = slice_workbench.workbench_summary()
+
+        self.assertEqual(summary["quality"], quality)
+        self.assertEqual(summary["workflow"]["active_stage"], "analyzed")
+        self.assertEqual(summary["workflow"]["current_slice"]["slice_id"], "slice_a")
+        self.assertEqual(summary["workflow"]["quality_summary"]["quality_flags"], 3)
+
     def test_keyword_and_search_modes_do_not_require_subject(self) -> None:
         keyword_cfg = author_slice.config_from_payload(
             {

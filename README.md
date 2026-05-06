@@ -91,6 +91,7 @@ POST /api/v1/slices/{slice_id}/materialization-plans
 POST /api/v1/materializations/{materialization_id}/run
 GET  /api/v1/dumps
 GET  /api/v1/workbench
+GET  /api/v1/catalog
 ```
 
 Справочники для UI берутся из OpenAlex и локального metadata-кэша:

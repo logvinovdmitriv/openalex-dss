@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
     analytics,
+    catalog,
     cohorts,
     entities,
     health,
@@ -13,9 +14,7 @@ from app.api.routes import (
     reports,
     runs,
     slices,
-    snapshot,
     sources,
-    state,
     tables,
 )
 
@@ -38,13 +37,12 @@ for router in (
     health.router,
     openalex.router,
     slices.router,
-    state.router,
+    catalog.router,
     sources.router,
     tables.router,
     entities.router,
     cohorts.router,
     analytics.router,
-    snapshot.router,
     runs.router,
     registry.router,
     reports.router,
