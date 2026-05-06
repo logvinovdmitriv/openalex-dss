@@ -417,5 +417,8 @@ def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode:
             "source": cohort.get("source"),
             "n_authors": cohort.get("n_authors"),
             "checksum": cohort.get("checksum"),
+            "membership_filters": ctx.get("membership_filters") or {},
+            "analysis_filters": ctx.get("analysis_filters") or ctx.get("filters") or {},
+            "filter_mode": ctx.get("filter_mode"),
         },
     }

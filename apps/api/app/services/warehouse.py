@@ -911,9 +911,11 @@ def metric_bundle(
 
 
 def filter_rows_by_author_ids(rows: list[dict[str, Any]], author_ids: set[str] | list[str] | tuple[str, ...] | None) -> list[dict[str, Any]]:
-    if not author_ids:
+    if author_ids is None:
         return rows
     allowed = {str(author_id) for author_id in author_ids if str(author_id).strip()}
+    if not allowed:
+        return []
     return [row for row in rows if str(row.get("author_id") or "") in allowed]
 
 

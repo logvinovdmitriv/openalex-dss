@@ -165,6 +165,34 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(first["slice_fingerprint"], second["slice_fingerprint"])
         self.assertNotEqual(first_plan["materialization_fingerprint"], second_plan["materialization_fingerprint"])
 
+    def test_materialization_fingerprint_uses_storage_profile_content(self) -> None:
+        cfg = author_slice.config_from_payload({"filter_mode": "all", "sort": "cited_by_count:desc"})
+        kwargs = {
+            "slice_fingerprint": "slicehash",
+            "source_strategy": "openalex_cli",
+            "storage_profile_id": "minimal_analytics",
+            "download_policy": {"complete_slice_required": True, "allow_incomplete_preview": False},
+        }
+        first_profiles = {
+            "minimal_analytics": {
+                "profile_id": "minimal_analytics",
+                "selected_fields": ["id", "display_name"],
+            }
+        }
+        second_profiles = {
+            "minimal_analytics": {
+                "profile_id": "minimal_analytics",
+                "selected_fields": ["id", "display_name", "authorships"],
+            }
+        }
+
+        with patch.object(slice_workbench, "_storage_profiles", return_value=first_profiles):
+            first = slice_workbench._materialization_fingerprint(cfg, **kwargs)
+        with patch.object(slice_workbench, "_storage_profiles", return_value=second_profiles):
+            second = slice_workbench._materialization_fingerprint(cfg, **kwargs)
+
+        self.assertNotEqual(first, second)
+
     def test_slice_estimate_and_materialization_plan_keep_download_policy_separate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

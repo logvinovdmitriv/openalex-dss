@@ -176,13 +176,13 @@ function Workbench() {
     queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}&limit=${Math.max(1, topN || 1)}`),
   });
   const analytics = useQuery({
-    queryKey: ["analytics", metric, fractionMode, runId, activeDumpId, filterKey],
-    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, runId, activeDumpId)),
+    queryKey: ["analytics", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey],
+    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, runId, activeDumpId, selectedCohortId)),
     enabled: hasLocalAnalyticsData,
   });
   const ranking = useQuery({
-    queryKey: ["analytics-ranking", metric, fractionMode, runId, activeDumpId, filterKey, topN],
-    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, runId, activeDumpId, Math.max(1, topN || 100))),
+    queryKey: ["analytics-ranking", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, topN],
+    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, runId, activeDumpId, Math.max(1, topN || 100), selectedCohortId)),
     enabled: hasLocalAnalyticsData,
   });
   const detail = useQuery({
@@ -1345,7 +1345,7 @@ function ReportsPage({
           <div>
             <span className="step-badge">Report</span>
             <h2>Отчеты и пакет воспроизводимости</h2>
-            <p>Отчет фиксирует срез исследования, локальную загрузку, когорту Top-{topN}, расчет индексов, графики, ограничения и паспорта.</p>
+            <p>Отчет фиксирует срез исследования, локальную загрузку, выбранную авторскую когорту, расчет индексов, ограничения и паспорта.</p>
           </div>
           <button onClick={onBuild} disabled={building}>{building ? <Loader2 size={16} className="spin" /> : <Download size={16} />} Собрать HTML</button>
         </div>

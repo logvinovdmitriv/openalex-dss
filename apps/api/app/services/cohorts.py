@@ -105,7 +105,10 @@ def resolve_cohort_context(
     fraction_mode: str = "",
     filters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    cohort = get_cohort(cohort_id)
+    try:
+        cohort = get_cohort(cohort_id)
+    except KeyError as exc:
+        raise ValueError(f"Unknown cohort_id: {cohort_id}") from exc
     cohort_run_id = str(cohort.get("run_id") or "")
     cohort_dump_id = str(cohort.get("dump_id") or "")
     cohort_fraction_mode = str(cohort.get("fraction_mode") or "")
@@ -117,15 +120,17 @@ def resolve_cohort_context(
         raise ValueError(f"cohort_id={cohort_id} uses fraction_mode={cohort_fraction_mode}, not fraction_mode={fraction_mode}")
     request_filters = clean_analysis_filters(filters or {})
     cohort_filters = clean_analysis_filters(cohort.get("filters") or {})
-    if request_filters and cohort_filters and request_filters != cohort_filters:
-        raise ValueError("Requested filters are incompatible with the stored cohort filters.")
+    analysis_filters = request_filters or cohort_filters
     return {
         "cohort": cohort,
         "author_ids": {str(author_id) for author_id in cohort.get("author_ids") or [] if str(author_id).strip()},
         "run_id": run_id or cohort_run_id,
         "dump_id": dump_id or cohort_dump_id,
         "fraction_mode": fraction_mode or cohort_fraction_mode,
-        "filters": request_filters or cohort_filters,
+        "filters": analysis_filters,
+        "analysis_filters": analysis_filters,
+        "membership_filters": cohort_filters,
+        "filter_mode": "analysis_override" if request_filters and request_filters != cohort_filters else "membership_filters",
     }
 
 

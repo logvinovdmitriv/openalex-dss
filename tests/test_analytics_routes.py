@@ -108,6 +108,38 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["run_id"], "run_a")
         self.assertEqual(payload["cohort"]["cohort_id"], "cohort_a")
 
+    def test_ranking_csv_with_empty_cohort_has_header_only(self) -> None:
+        cohort = {
+            "cohort": {
+                "cohort_id": "cohort_empty",
+                "name": "Empty Cohort",
+                "source": "manual",
+                "n_authors": 0,
+                "checksum": "empty",
+            },
+            "author_ids": set(),
+            "run_id": "run_a",
+            "dump_id": "dump_a",
+            "fraction_mode": "integer",
+            "filters": {},
+        }
+
+        with (
+            patch.object(analytics_routes.cohorts, "resolve_cohort_context", return_value=cohort),
+            patch.object(analytics_routes.warehouse, "metric_ranking", return_value={"fields": ["author_id", "score"], "rows": [], "total": 0}),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            response = analytics_routes.ranking_csv(cohort_id="cohort_empty", fraction_mode="integer", metric="h", limit=100)
+
+        self.assertEqual(response.body.decode("utf-8").strip(), "author_id,score")
+
+    def test_unknown_cohort_returns_controlled_error(self) -> None:
+        with patch.object(analytics_routes.cohorts, "resolve_cohort_context", side_effect=ValueError("Unknown cohort_id: nope")):
+            with self.assertRaises(analytics_routes.HTTPException) as raised:
+                analytics_routes.ranking_json(cohort_id="nope", fraction_mode="integer", metric="h", limit=100)
+
+        self.assertEqual(raised.exception.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

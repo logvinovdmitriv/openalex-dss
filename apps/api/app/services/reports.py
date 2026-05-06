@@ -34,7 +34,7 @@ def build_report_bundle(
     scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
-    if not (run_id or dump_id):
+    if not run_id:
         report_scope = _report_scope(
             run_id=run_id,
             dump_id=dump_id,
@@ -74,13 +74,13 @@ def build_report_bundle(
         slice_passport = docs["slice_passport"]
         calculation_passport = docs["calculation_passport"]
     else:
-        state = warehouse.read_json_doc("pipeline") or {}
-        quality = warehouse.read_json_doc("quality") or {}
-        stats = warehouse.read_json_doc("stats") or {}
-        theory = warehouse.read_json_doc("theory") or {}
-        checksums = warehouse.read_json_doc("checksums") or {}
-        slice_passport = _read_json(DATA / "passports/slice_passport.json")
-        calculation_passport = _read_json(DATA / "passports/calculation_passport.json")
+        state = {}
+        quality = {}
+        stats = {}
+        theory = {}
+        checksums = {}
+        slice_passport = {}
+        calculation_passport = {}
     current_slice = state.get("slice") or state.get("current_slice") or {}
     request = state.get("request") or {}
     analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
@@ -195,6 +195,8 @@ def report_bundle_json(
         fraction_mode=fraction_mode,
         limit=limit,
     )
+    if not run_id:
+        return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id)
     path = _report_bundle_path(run_id, report_scope["report_scope_hash"])
     if path.exists():
         cached = _read_json(path)
@@ -305,10 +307,10 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
     return {
         "bundle_version": "report_bundle_v1",
         "status": "preview_not_reproducible",
-        "run_id": "",
-        "dump_id": "",
+        "run_id": str(report_scope.get("run_id") or ""),
+        "dump_id": str(report_scope.get("dump_id") or ""),
         "report_scope": report_scope,
-        "message": "Report build requires explicit run_id or dump_id for a reproducible report. Latest-view report mode is reserved for development preview only.",
+        "message": "Final report build requires explicit run_id. Dump-only and latest-view report modes are development previews because they do not have run-scoped passports, statistics and checksums.",
         "no_latest_fallback": False,
     }
 
@@ -324,6 +326,7 @@ def _cohort_summary(cohort: dict[str, Any]) -> dict[str, Any] | None:
         "fraction_mode": cohort.get("fraction_mode"),
         "n_authors": cohort.get("n_authors"),
         "checksum": cohort.get("checksum"),
+        "membership_filters": cohort.get("filters") or {},
     }
 
 

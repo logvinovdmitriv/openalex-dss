@@ -419,6 +419,7 @@ def _materialization_fingerprint(
         "slice_fingerprint": slice_fingerprint,
         "source_strategy": source_strategy,
         "storage_profile_id": storage_profile_id,
+        "storage_profile_hash": _storage_profile_hash(storage_profile_id),
         "download_signature": cli_download_signature(cfg),
         "sort": cfg.sort,
         "download_policy": {
@@ -426,6 +427,17 @@ def _materialization_fingerprint(
             for key, value in sorted(download_policy.items())
             if key in {"complete_slice_required", "allow_incomplete_preview"}
         },
+    }
+    blob = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:10]
+
+
+def _storage_profile_hash(storage_profile_id: str) -> str:
+    profiles = _storage_profiles()
+    profile = profiles.get(storage_profile_id) or {"profile_id": storage_profile_id}
+    canonical = {
+        "version": "storage_profile_hash_v1",
+        "profile": profile,
     }
     blob = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:10]

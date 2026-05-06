@@ -19,6 +19,31 @@ from openalex_mvp.io_utils import write_parquet_dicts  # noqa: E402
 
 
 class WarehouseTests(unittest.TestCase):
+    def test_empty_author_id_filter_returns_empty_rows(self) -> None:
+        rows = [
+            {"author_id": "https://openalex.org/A1", "h": 3},
+            {"author_id": "https://openalex.org/A2", "h": 2},
+        ]
+
+        self.assertEqual(warehouse.filter_rows_by_author_ids(rows, None), rows)
+        self.assertEqual(warehouse.filter_rows_by_author_ids(rows, set()), [])
+        self.assertEqual(warehouse.filter_rows_by_author_ids(rows, ["https://openalex.org/A2"]), [rows[1]])
+
+    def test_metric_ranking_with_empty_author_id_filter_returns_no_rows(self) -> None:
+        rows = [
+            {"author_id": "https://openalex.org/A1", "author_display_name": "Author One", "h": 3, "p": 4, "c": 10},
+            {"author_id": "https://openalex.org/A2", "author_display_name": "Author Two", "h": 2, "p": 3, "c": 7},
+        ]
+
+        with (
+            patch.object(warehouse, "filtered_author_indices", return_value=rows),
+            patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": "dump_a"}),
+        ):
+            ranking = warehouse.metric_ranking("integer", "h", run_id="run_a", author_ids=set())
+
+        self.assertEqual(ranking["rows"], [])
+        self.assertEqual(ranking["total"], 0)
+
     def test_filtered_author_indices_reads_parquet_when_csv_latest_view_is_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -240,12 +240,12 @@ export function progressForRun(run?: WorkbenchRun | null) {
   return { percent: 0, label: run.status || "Ожидание" };
 }
 
-export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "") {
-  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId }).toString()}`;
+export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", cohortId = "") {
+  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId, cohort_id: cohortId }).toString()}`;
 }
 
-export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100) {
-  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId }).toString()}`;
+export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, cohortId = "") {
+  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, cohort_id: cohortId }).toString()}`;
 }
 
 function openAlexEntityUrl(level: string, id: string) {
