@@ -46,6 +46,9 @@ import {
   cohortAuthorMetricsUrl,
   cohortStatisticsUrl,
   humanSliceTitle,
+  LOCAL_DATA_KIND_OPTIONS,
+  localDataPreviewUrl,
+  localDataSummaryUrl,
   mutationError,
   pageLead,
   pageTitle,
@@ -56,6 +59,8 @@ import {
   viewFromHash,
   type EntitySuggestion,
   type CohortFilterPolicy,
+  type LocalDataKind,
+  type LocalDataSummary,
   type ResolverTab,
   type ScientometricAnalysisPayload,
   type ScientometricFinding,
@@ -116,7 +121,7 @@ function Workbench() {
   const [runId, setRunId] = useState("");
   const [resolverOpen, setResolverOpen] = useState(false);
   const [selected, setSelected] = useState<{ kind: "author" | "work"; id: string } | null>(null);
-  const [tableName, setTableName] = useState("authors_local_metrics");
+  const [localDataKind, setLocalDataKind] = useState<LocalDataKind>("indices");
   const [tableQ, setTableQ] = useState("");
   const [selectedCohortId, setSelectedCohortId] = useState("");
   const [cohortSource, setCohortSource] = useState<"top_n" | "metric_filter">("top_n");
@@ -181,6 +186,10 @@ function Workbench() {
   const activeDumpId = extractDumpId(run.data);
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
   const scientometricMetricKey = useMemo(() => scientometricMetrics.join(","), [scientometricMetrics]);
+  const localDataSummary = useQuery({
+    queryKey: ["local-data-summary", runId, activeDumpId],
+    queryFn: () => getJson<LocalDataSummary>(localDataSummaryUrl(runId, activeDumpId)),
+  });
   const cohortStats = useQuery({
     queryKey: ["cohort-stats", selectedCohortId, fractionMode, runId, activeDumpId, filterKey, cohortFilterPolicy],
     queryFn: () => getJson<any>(cohortStatisticsUrl(selectedCohortId, filters, fractionMode, runId, activeDumpId, cohortFilterPolicy)),
@@ -188,8 +197,8 @@ function Workbench() {
   });
   const hasLocalAnalyticsData = Boolean(runId || activeDumpId || workbench.data?.tables?.author_work?.rows || workbench.data?.tables?.indices?.rows);
   const table = useQuery({
-    queryKey: ["table", tableName, tableQ, topN, runId, activeDumpId],
-    queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}&limit=${Math.max(1, topN || 1)}`),
+    queryKey: ["local-data-preview", localDataKind, tableQ, topN, runId, activeDumpId],
+    queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: tableQ, runId, dumpId: activeDumpId, limit: Math.max(1, topN || 1) })),
   });
   const analytics = useQuery({
     queryKey: ["analytics", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, cohortFilterPolicy],
@@ -235,7 +244,7 @@ function Workbench() {
   const topNOptions = configuredOptions(uiOptions.top_n ?? []);
   const primaryMetricOptions = configuredOptions(catalog.data?.metrics ?? []);
   const fractionModeOptions = configuredOptions(catalog.data?.fraction_modes ?? []);
-  const tableOptions = Object.keys(workbench.data?.tables ?? {}).map((value) => ({ value, label: value }));
+  const localDataKindOptions = localDataSummary.data?.kinds?.map((item) => ({ value: item.kind, label: item.label })) ?? LOCAL_DATA_KIND_OPTIONS;
   const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
     .filter((item) => ["openalex_cli"].includes(item.value));
   const defaultStorageProfileId = String(defaultOption(storageProfileOptions)?.value ?? "minimal_analytics");
@@ -422,7 +431,7 @@ function Workbench() {
   }, [cohorts.data, selectedCohortId]);
 
   const running = run.data?.status === "queued" || run.data?.status === "running";
-  const tables = workbench.data?.tables ?? {};
+  const tables = localDataSummary.data?.tables ?? workbench.data?.tables ?? {};
   const qualityCounts = workbench.data?.quality?.quality_counts ?? {};
   const rankingRows = ranking.data?.rows ?? [];
   const chartRows = useMemo(() => rankingChartRows(rankingRows, metric), [rankingRows, metric]);
@@ -526,9 +535,9 @@ function Workbench() {
             workbench={workbench.data}
             dumps={dumps.data}
             tables={tables}
-            tableName={tableName}
-            setTableName={setTableName}
-            tableOptions={tableOptions}
+            localDataKind={localDataKind}
+            setLocalDataKind={setLocalDataKind}
+            localDataKindOptions={localDataKindOptions}
             tableQ={tableQ}
             setTableQ={setTableQ}
             table={table.data}
@@ -874,9 +883,9 @@ function LocalDataPage({
   workbench,
   dumps,
   tables,
-  tableName,
-  setTableName,
-  tableOptions,
+  localDataKind,
+  setLocalDataKind,
+  localDataKindOptions,
   tableQ,
   setTableQ,
   table,
@@ -888,9 +897,9 @@ function LocalDataPage({
   workbench: any;
   dumps: any;
   tables: any;
-  tableName: string;
-  setTableName: (value: string) => void;
-  tableOptions: SelectOption[];
+  localDataKind: LocalDataKind;
+  setLocalDataKind: (value: LocalDataKind) => void;
+  localDataKindOptions: SelectOption[];
   tableQ: string;
   setTableQ: (value: string) => void;
   table?: TableResponse;
@@ -906,7 +915,7 @@ function LocalDataPage({
       <section className="metric-grid">
         <MetricCard label="Локальных дампов" value={fmt(dumpRows.length)} />
         <MetricCard label="Raw на диске" value={`${fmt(totalRawMb)} МБ`} />
-        <MetricCard label="Parquet таблиц" value={fmt(["works", "authorships", "work_topics", "author_work"].filter((name) => tables?.[name]?.exists).length)} />
+        <MetricCard label="Локальных витрин" value={fmt(["works", "authorships", "author_work", "indices", "ratings"].filter((name) => tables?.[name]?.exists).length)} />
         <MetricCard label="Индексов авторов" value={fmt(tables?.indices?.rows ?? 0)} />
       </section>
       <section className="panel">
@@ -949,14 +958,14 @@ function LocalDataPage({
       </section>
       <section className="panel table-panel">
         <div className="panel-head">
-          <span className="step-badge">Physical table</span>
+          <span className="step-badge">Local data preview</span>
           <h2>Просмотр локальной таблицы</h2>
         </div>
         <div className="toolbar">
-          <select value={tableName} onChange={(event) => setTableName(event.target.value)}>
-            {ensureCurrentOption(tableOptions, tableName).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          <select value={localDataKind} onChange={(event) => setLocalDataKind(event.target.value as LocalDataKind)}>
+            {ensureCurrentOption(localDataKindOptions, localDataKind).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
-          <input value={tableQ} onChange={(event) => setTableQ(event.target.value)} placeholder="Поиск по физической таблице" />
+          <input value={tableQ} onChange={(event) => setTableQ(event.target.value)} placeholder="Поиск по локальной витрине" />
         </div>
         <DataGrid data={table} onSelect={onSelect} hiddenFields={["slice_id"]} />
       </section>

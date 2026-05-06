@@ -40,6 +40,13 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertIn("/api/v1/workbench", route_paths)
         self.assertIn("/api/v1/catalog", route_paths)
 
+    def test_local_data_preview_routes_are_public(self) -> None:
+        route_paths = {getattr(route, "path", "") for route in app.routes}
+
+        self.assertIn("/api/v1/local-data/summary", route_paths)
+        self.assertIn("/api/v1/local-data/preview", route_paths)
+        self.assertIn("/api/v1/local-data/preview.csv", route_paths)
+
     def test_run_request_exposes_only_recalculate_action(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")
         self.assertEqual(RunRequest(action="recalculate", payload={"dump_id": "dump_a"}).action, "recalculate")

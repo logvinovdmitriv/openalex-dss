@@ -3,6 +3,7 @@ import { FRACTION_MODES, type ActiveFilters, countryLabel, filterParams, fmt } f
 export type View = "slices" | "data" | "enrichment" | "rankings" | "cohorts" | "statistics" | "reports" | "passports";
 export type ResolverTab = "subject" | "organization" | "author" | "source";
 export type CohortFilterPolicy = "membership" | "current" | "none";
+export type LocalDataKind = "works" | "authorships" | "author_work" | "indices" | "ratings";
 export type ScientometricFindingSeverity = "high" | "medium" | "low" | "informational";
 
 export type ScientometricFinding = {
@@ -155,6 +156,21 @@ export type WorkbenchState = {
   workflow?: Record<string, unknown>;
   quality?: Record<string, unknown>;
 };
+
+export type LocalDataSummary = {
+  kinds?: Array<{ kind: LocalDataKind; label: string }>;
+  tables?: Record<LocalDataKind, Record<string, unknown>>;
+  run_id?: string;
+  dump_id?: string;
+};
+
+export const LOCAL_DATA_KIND_OPTIONS: Array<{ value: LocalDataKind; label: string }> = [
+  { value: "works", label: "Работы" },
+  { value: "authorships", label: "Авторства" },
+  { value: "author_work", label: "Автор-работа" },
+  { value: "indices", label: "Индексы авторов" },
+  { value: "ratings", label: "Позиции рейтингов" },
+];
 
 export const VIEW_DEFINITIONS: Record<View, { label: string; lead: string }> = {
   slices: {
@@ -321,6 +337,23 @@ export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metri
 
 export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, cohortId = "", cohortFilterPolicy: CohortFilterPolicy = "membership") {
   return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, cohort_id: cohortId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
+}
+
+export function localDataSummaryUrl(runId = "", dumpId = "") {
+  const params = new URLSearchParams();
+  if (runId) params.set("run_id", runId);
+  if (dumpId) params.set("dump_id", dumpId);
+  const query = params.toString();
+  return `/local-data/summary${query ? `?${query}` : ""}`;
+}
+
+export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number } = {}) {
+  const query = new URLSearchParams({ kind });
+  if (params.q?.trim()) query.set("q", params.q.trim());
+  if (params.runId) query.set("run_id", params.runId);
+  if (params.dumpId) query.set("dump_id", params.dumpId);
+  if (params.limit) query.set("limit", String(params.limit));
+  return `/local-data/preview?${query.toString()}`;
 }
 
 export function scientometricsUrl(params: {
