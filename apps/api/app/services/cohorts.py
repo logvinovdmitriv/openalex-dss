@@ -161,7 +161,19 @@ def _filters(payload: dict[str, Any]) -> dict[str, Any]:
         "subject_level",
         "subject_id",
         "filter_mode",
+        "keyword_id",
+        "keyword_display_name",
+        "keyword_name",
+        "text_search_query",
+        "author_id",
+        "author_display_name",
+        "author_name",
+        "author_orcid",
+        "doi",
+        "affiliation_mode",
         "source_id",
+        "source_display_name",
+        "source_name",
         "source_type",
         "language",
         "open_access_is_oa",
@@ -174,6 +186,18 @@ def _filters(payload: dict[str, Any]) -> dict[str, Any]:
         value = str(payload.get(key) or "").strip()
         if value:
             clean[key] = value
+    if "keyword_display_name" not in clean and clean.get("keyword_name"):
+        clean["keyword_display_name"] = clean.pop("keyword_name")
+    else:
+        clean.pop("keyword_name", None)
+    if "author_display_name" not in clean and clean.get("author_name"):
+        clean["author_display_name"] = clean.pop("author_name")
+    else:
+        clean.pop("author_name", None)
+    if "source_display_name" not in clean and clean.get("source_name"):
+        clean["source_display_name"] = clean.pop("source_name")
+    else:
+        clean.pop("source_name", None)
     return clean
 
 

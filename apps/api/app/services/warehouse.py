@@ -438,6 +438,7 @@ def _filtered_work_author_indices(
     filters = _clean_filters(filters or {})
     metric_params = _run_metric_params(run_id)
     work_fields = set(table_schema("works", run_id=run_id, dump_id=dump_id))
+    _validate_local_analysis_filters(filters)
     where = ["aw.fraction_mode = ?"]
     args: list[Any] = [fraction_mode]
 
@@ -460,10 +461,10 @@ def _filtered_work_author_indices(
             where.append(f"w.type IN ({', '.join('?' for _ in work_types)})")
             args.extend(work_types)
 
+    filter_mode = filters.get("filter_mode")
     subject_id = filters.get("subject_id")
     subject_level = filters.get("subject_level")
     if subject_id:
-        filter_mode = filters.get("filter_mode")
         use_topics_any = filter_mode == "topics_any" and table_exists("work_topics", run_id=run_id, dump_id=dump_id)
         if use_topics_any and subject_level == "field":
             where.append("EXISTS (SELECT 1 FROM work_topics wt WHERE wt.work_id = w.work_id AND wt.field_id ILIKE ?)")
@@ -484,6 +485,39 @@ def _filtered_work_author_indices(
             where.append("(w.primary_subfield_short_id = ? OR w.primary_subfield_id ILIKE ?)")
             args.extend([subject_id, f"%/{subject_id}"])
 
+    keyword_id = filters.get("keyword_id")
+    keyword_display_name = filters.get("keyword_display_name")
+    if filter_mode == "keyword" and (keyword_id or keyword_display_name):
+        clauses: list[str] = []
+        if table_exists("work_topics", run_id=run_id, dump_id=dump_id):
+            topic_terms = [term for term in (_short_openalex_id(keyword_id), keyword_display_name) if term]
+            if topic_terms:
+                topic_clauses = []
+                for term in topic_terms:
+                    topic_clauses.append("(wt.topic_id ILIKE ? OR wt.topic_display_name ILIKE ?)")
+                    args.extend([f"%{term}%", f"%{term}%"])
+                clauses.append(f"EXISTS (SELECT 1 FROM work_topics wt WHERE wt.work_id = w.work_id AND ({' OR '.join(topic_clauses)}))")
+        text_clause, text_args = _text_match_clause(work_fields, keyword_display_name or _short_openalex_id(keyword_id))
+        if text_clause:
+            clauses.append(text_clause)
+            args.extend(text_args)
+        if clauses:
+            where.append(f"({' OR '.join(clauses)})")
+
+    text_search_query = filters.get("text_search_query")
+    if text_search_query:
+        text_clause, text_args = _text_match_clause(work_fields, text_search_query)
+        if text_clause:
+            where.append(text_clause)
+            args.extend(text_args)
+
+    doi = filters.get("doi")
+    if doi and "doi" in work_fields:
+        variants = _doi_variants(doi)
+        if variants:
+            where.append(f"lower(trim(coalesce(w.doi, ''))) IN ({', '.join('?' for _ in variants)})")
+            args.extend(variants)
+
     country_code = filters.get("country_code")
     if country_code:
         where.append("list_contains(string_split(upper(coalesce(au.country_codes_csv, '')), '|'), ?)")
@@ -493,6 +527,20 @@ def _filtered_work_author_indices(
     if author_id:
         where.append("aw.author_id ILIKE ?")
         args.append(f"%{_short_openalex_id(author_id)}%")
+
+    author_orcid = filters.get("author_orcid")
+    if author_orcid and "author_orcid" in set(table_schema("authorships", run_id=run_id, dump_id=dump_id)):
+        where.append(
+            """
+            EXISTS (
+              SELECT 1 FROM authorships ax
+              WHERE ax.work_id = aw.work_id
+                AND ax.author_id = aw.author_id
+                AND coalesce(ax.author_orcid, '') ILIKE ?
+            )
+            """
+        )
+        args.append(f"%{author_orcid}%")
 
     author_name = filters.get("author_display_name")
     if author_name:
@@ -508,6 +556,11 @@ def _filtered_work_author_indices(
     if source_id and "source_id" in work_fields:
         where.append("w.source_id ILIKE ?")
         args.append(f"%{_short_openalex_id(source_id)}%")
+
+    source_display_name = filters.get("source_display_name")
+    if source_display_name and "source_display_name" in work_fields:
+        where.append("w.source_display_name ILIKE ?")
+        args.append(f"%{source_display_name}%")
 
     source_type = filters.get("source_type")
     if source_type and "source_type" in work_fields:
@@ -920,10 +973,20 @@ def _clean_filters(filters: FilterSet) -> FilterSet:
         "filter_mode",
         "subject_level",
         "subject_id",
+        "keyword_id",
+        "keyword_display_name",
+        "keyword_name",
+        "text_search_query",
         "author_id",
+        "author_orcid",
         "author_display_name",
+        "author_name",
+        "doi",
+        "affiliation_mode",
         "institution_id",
         "source_id",
+        "source_display_name",
+        "source_name",
         "source_type",
         "language",
         "open_access_is_oa",
@@ -946,7 +1009,78 @@ def _clean_filters(filters: FilterSet) -> FilterSet:
                 continue
             continue
         clean[key] = text
+    if "keyword_display_name" not in clean and clean.get("keyword_name"):
+        clean["keyword_display_name"] = str(clean.pop("keyword_name"))
+    else:
+        clean.pop("keyword_name", None)
+    if "author_display_name" not in clean and clean.get("author_name"):
+        clean["author_display_name"] = str(clean.pop("author_name"))
+    else:
+        clean.pop("author_name", None)
+    if "source_display_name" not in clean and clean.get("source_name"):
+        clean["source_display_name"] = str(clean.pop("source_name"))
+    else:
+        clean.pop("source_name", None)
     return clean
+
+
+def _validate_local_analysis_filters(filters: FilterSet) -> None:
+    if filters.get("affiliation_mode") == "current" and (filters.get("country_code") or filters.get("institution_id")):
+        raise ValueError(
+            "affiliation_mode=current is not available for local works-dump analytics. "
+            "Use affiliation_mode=historical or run a targeted Authors API enrichment workflow."
+        )
+
+
+def analysis_filter_warnings(filters: FilterSet | None = None, *, run_id: str = "", dump_id: str = "") -> list[dict[str, str]]:
+    clean = _clean_filters(filters or {})
+    warnings: list[dict[str, str]] = []
+    if clean.get("affiliation_mode") == "current":
+        warnings.append(
+            {
+                "code": "current_affiliation_requires_enrichment",
+                "message": "Current affiliation is an Authors API enrichment concept; local analytics use historical works authorships.",
+            }
+        )
+    if clean.get("filter_mode") == "keyword":
+        warnings.append(
+            {
+                "code": "keyword_local_best_effort",
+                "message": "OpenAlex keyword IDs are used for download pushdown; local analytics can only match normalized work topic/text fields.",
+            }
+        )
+    if clean.get("filter_mode") == "topics_any" and not table_exists("work_topics", run_id=run_id, dump_id=dump_id):
+        warnings.append(
+            {
+                "code": "topics_any_requires_work_topics",
+                "message": "topics_any requires a local work_topics table; without it only primary-topic fields can be used.",
+            }
+        )
+    return warnings
+
+
+def _text_match_clause(work_fields: set[str], query: str | None) -> tuple[str, list[str]]:
+    text = str(query or "").strip()
+    if not text:
+        return "", []
+    searchable = [
+        ("display_name", "w.display_name"),
+        ("source_display_name", "w.source_display_name"),
+        ("primary_topic_display_name", "w.primary_topic_display_name"),
+        ("doi", "w.doi"),
+    ]
+    clauses = [f"{expr} ILIKE ?" for field, expr in searchable if field in work_fields]
+    return (f"({' OR '.join(clauses)})", [f"%{text}%"] * len(clauses)) if clauses else ("", [])
+
+
+def _doi_variants(value: str) -> list[str]:
+    text = str(value or "").strip().lower().rstrip("/")
+    if not text:
+        return []
+    text = text.removeprefix("https://doi.org/").removeprefix("http://doi.org/")
+    text = text.removeprefix("https://dx.doi.org/").removeprefix("http://dx.doi.org/")
+    text = text.removeprefix("doi:")
+    return sorted({text, f"doi:{text}", f"https://doi.org/{text}", f"http://doi.org/{text}"})
 
 
 def _short_openalex_id(value: Any) -> str:

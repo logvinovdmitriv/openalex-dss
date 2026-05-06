@@ -465,6 +465,35 @@ class PipelineIntegrityTests(unittest.TestCase):
             cohorts.create_cohort({"source": "manual", "author_ids": ["https://openalex.org/A1"]})
         self.assertIn("run_id", str(raised.exception))
 
+    def test_cohort_filters_keep_slice_analysis_contract_fields(self) -> None:
+        filters = cohorts._filters(
+            {
+                "filter_mode": "search",
+                "keyword_id": "https://openalex.org/K1",
+                "keyword_display_name": "decision support",
+                "text_search_query": "ergodesign",
+                "author_id": "https://openalex.org/A1",
+                "author_display_name": "Author One",
+                "author_orcid": "0000-0000-0000-0001",
+                "doi": "10.123/example",
+                "affiliation_mode": "historical",
+                "source_id": "https://openalex.org/S1",
+                "source_display_name": "Journal One",
+            }
+        )
+
+        self.assertEqual(filters["filter_mode"], "search")
+        self.assertEqual(filters["keyword_id"], "https://openalex.org/K1")
+        self.assertEqual(filters["keyword_display_name"], "decision support")
+        self.assertEqual(filters["text_search_query"], "ergodesign")
+        self.assertEqual(filters["author_id"], "https://openalex.org/A1")
+        self.assertEqual(filters["author_display_name"], "Author One")
+        self.assertEqual(filters["author_orcid"], "0000-0000-0000-0001")
+        self.assertEqual(filters["doi"], "10.123/example")
+        self.assertEqual(filters["affiliation_mode"], "historical")
+        self.assertEqual(filters["source_id"], "https://openalex.org/S1")
+        self.assertEqual(filters["source_display_name"], "Journal One")
+
     def test_pipeline_summary_includes_analysis_eligibility(self) -> None:
         captured: dict[str, object] = {}
         eligibility = {"status": "final", "allowed_for_final_analysis": True}

@@ -280,6 +280,94 @@ class WarehouseTests(unittest.TestCase):
             self.assertEqual(detail["dump_id"], "dump_a")
             self.assertEqual([row["work_id"] for row in detail["works"]], ["https://openalex.org/W_A"])
 
+    def test_topics_any_filter_uses_work_topics_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_dump_tables(root, "dump_a", "W_A", "A_A", "Author A", 5)
+            _write_run_author_work(root, "run_a", "dump_a", "W_A", "A_A", "Author A", 5)
+            write_parquet_dicts(
+                root / "tables" / "dump_a" / "work_topics.parquet",
+                [
+                    {
+                        "work_id": "https://openalex.org/W_A",
+                        "topic_id": "https://openalex.org/T9",
+                        "topic_display_name": "Secondary topic",
+                        "score": 0.6,
+                        "subfield_id": "https://openalex.org/subfields/9999",
+                        "field_id": "https://openalex.org/fields/99",
+                        "domain_id": "https://openalex.org/domains/9",
+                        "is_primary": False,
+                    }
+                ],
+                ["work_id", "topic_id", "topic_display_name", "score", "subfield_id", "field_id", "domain_id", "is_primary"],
+            )
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
+                patch.object(warehouse, "PARQUET_TABLE_FILES", _latest_parquet_paths(root)),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+            ):
+                primary = warehouse.metric_ranking("integer", "h", {"filter_mode": "primary_topic", "subject_level": "subfield", "subject_id": "9999"}, run_id="run_a")
+                topics_any = warehouse.metric_ranking("integer", "h", {"filter_mode": "topics_any", "subject_level": "subfield", "subject_id": "9999"}, run_id="run_a")
+
+            self.assertEqual(primary["total"], 0)
+            self.assertEqual(topics_any["total"], 1)
+            self.assertEqual(topics_any["rows"][0]["author_display_name"], "Author A")
+
+    def test_text_search_filter_uses_local_work_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_dump_tables(root, "dump_a", "W_A", "A_A", "Author A", 5)
+            _write_run_author_work(root, "run_a", "dump_a", "W_A", "A_A", "Author A", 5)
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
+                patch.object(warehouse, "PARQUET_TABLE_FILES", _latest_parquet_paths(root)),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+            ):
+                matched = warehouse.metric_ranking("integer", "h", {"filter_mode": "search", "text_search_query": "Work W_A"}, run_id="run_a")
+                missing = warehouse.metric_ranking("integer", "h", {"filter_mode": "search", "text_search_query": "no such title"}, run_id="run_a")
+
+            self.assertEqual(matched["total"], 1)
+            self.assertEqual(missing["total"], 0)
+
+    def test_doi_filter_matches_normalized_local_work_doi(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_dump_tables(root, "dump_a", "W_A", "A_A", "Author A", 5)
+            _write_run_author_work(root, "run_a", "dump_a", "W_A", "A_A", "Author A", 5)
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
+                patch.object(warehouse, "PARQUET_TABLE_FILES", _latest_parquet_paths(root)),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+            ):
+                matched = warehouse.metric_ranking("integer", "h", {"doi": "doi:10.123/w_a"}, run_id="run_a")
+                missing = warehouse.metric_ranking("integer", "h", {"doi": "10.999/missing"}, run_id="run_a")
+
+            self.assertEqual(matched["total"], 1)
+            self.assertEqual(missing["total"], 0)
+
+    def test_current_affiliation_filter_is_not_silently_applied_to_historical_authorships(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_dump_tables(root, "dump_a", "W_A", "A_A", "Author A", 5)
+            _write_run_author_work(root, "run_a", "dump_a", "W_A", "A_A", "Author A", 5)
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
+                patch.object(warehouse, "PARQUET_TABLE_FILES", _latest_parquet_paths(root)),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+            ):
+                with self.assertRaises(ValueError) as raised:
+                    warehouse.metric_ranking("integer", "h", {"affiliation_mode": "current", "country_code": "RU"}, run_id="run_a")
+
+            self.assertIn("affiliation_mode=current", str(raised.exception))
+
 def _write_dump_tables(root: Path, dump_id: str, work_id: str, author_id: str, author_name: str, citations: int) -> None:
     base = root / "tables" / dump_id
     write_parquet_dicts(
@@ -287,6 +375,7 @@ def _write_dump_tables(root: Path, dump_id: str, work_id: str, author_id: str, a
         [
             {
                 "work_id": f"https://openalex.org/{work_id}",
+                "doi": f"https://doi.org/10.123/{work_id.lower()}",
                 "publication_date": "2024-01-01",
                 "publication_year": 2024,
                 "type": "article",
@@ -302,6 +391,7 @@ def _write_dump_tables(root: Path, dump_id: str, work_id: str, author_id: str, a
         ],
         [
             "work_id",
+            "doi",
             "publication_date",
             "publication_year",
             "type",

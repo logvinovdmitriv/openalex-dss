@@ -153,7 +153,16 @@ class AuthorCohortCreateRequest(BaseModel):
     subject_level: str | None = None
     subject_id: str | None = None
     filter_mode: str | None = None
+    keyword_id: str | None = None
+    keyword_display_name: str | None = None
+    text_search_query: str | None = None
+    author_id: str | None = None
+    author_display_name: str | None = None
+    author_orcid: str | None = None
+    doi: str | None = None
+    affiliation_mode: str | None = None
     source_id: str | None = None
+    source_display_name: str | None = None
     source_type: str | None = None
     language: str | None = None
     open_access_is_oa: str | None = None
