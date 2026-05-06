@@ -233,7 +233,7 @@ class AnalyticsRouteTests(unittest.TestCase):
                     ],
                 }
             },
-            "boxplots": {"c": {"outlier_rule": "iqr_1_5"}},
+            "boxplots": {"c": {"outlier_rule": "iqr_1_5", "lower_fence": 0, "upper_fence": 10}},
             "outliers": {"c": [{"author_id": "https://openalex.org/A2", "author_display_name": "Author Two", "value": 99}]},
         }
         full_rank_shift_rows = [
@@ -292,7 +292,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertIn("h,g,https://openalex.org/A1", largest_rank_shifts.body.decode("utf-8"))
         self.assertIn("metric,author_id,author_display_name,value,rule,lower_fence,upper_fence", outliers.body.decode("utf-8"))
         self.assertIn("c,https://openalex.org/A2,Author Two,99,iqr_1_5,0,10", outliers.body.decode("utf-8"))
-        self.assertIn("c,https://openalex.org/A2,Author Two,99,iqr_1_5", top_outliers.body.decode("utf-8"))
+        self.assertIn("c,https://openalex.org/A2,Author Two,99,iqr_1_5,0,10", top_outliers.body.decode("utf-8"))
 
     def test_cohort_statistics_route_forwards_analysis_scope(self) -> None:
         captured: dict[str, object] = {}

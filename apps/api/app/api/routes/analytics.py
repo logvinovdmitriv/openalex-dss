@@ -712,7 +712,10 @@ def _scientometric_top_outlier_rows(payload: dict[str, Any]) -> list[dict[str, A
     boxplots = payload.get("boxplots") or {}
     rows: list[dict[str, Any]] = []
     for metric, metric_outliers in outliers.items():
-        rule = (boxplots.get(metric) or {}).get("outlier_rule") or "iqr_1_5"
+        boxplot = boxplots.get(metric) or {}
+        rule = boxplot.get("outlier_rule") or "iqr_1_5"
+        lower_fence = boxplot.get("lower_fence")
+        upper_fence = boxplot.get("upper_fence")
         for row in metric_outliers or []:
             rows.append(
                 {
@@ -721,8 +724,8 @@ def _scientometric_top_outlier_rows(payload: dict[str, Any]) -> list[dict[str, A
                     "author_display_name": row.get("author_display_name"),
                     "value": row.get("value"),
                     "rule": rule,
-                    "lower_fence": row.get("lower_fence"),
-                    "upper_fence": row.get("upper_fence"),
+                    "lower_fence": lower_fence,
+                    "upper_fence": upper_fence,
                 }
             )
     return rows
