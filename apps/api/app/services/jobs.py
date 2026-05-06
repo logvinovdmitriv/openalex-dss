@@ -97,37 +97,6 @@ def list_runs(limit: int = 20) -> dict[str, Any]:
     return {"runs": docs, "total": len(docs), "limit": limit}
 
 
-def table_for_run(
-    run_id: str,
-    table_name: str,
-    *,
-    q: str = "",
-    fraction_mode: str = "",
-    metric: str = "",
-    limit: int = 100,
-    offset: int = 0,
-) -> dict[str, Any]:
-    get_run(run_id)
-    return warehouse.query_table(
-        table_name,
-        run_id=run_id,
-        q=q,
-        fraction_mode=fraction_mode,
-        metric=metric,
-        limit=limit,
-        offset=offset,
-    )
-
-
-def _run_table_path(run_id: str, table_name: str) -> Path | None:
-    run_dir = _run_path(run_id).parent / "tables"
-    for suffix in (".parquet", ".csv"):
-        candidate = run_dir / f"{table_name}{suffix}"
-        if candidate.is_file():
-            return candidate
-    return None
-
-
 def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
     doc = get_run(run_id)
     doc.update({"status": "running", "progress_percent": 10, "progress_stage": "preparing", "started_at": _now(), "error": None})

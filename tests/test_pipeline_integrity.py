@@ -107,18 +107,6 @@ class PipelineIntegrityTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 jobs.create_run("fetch_slice_dump", {})
 
-    def test_run_table_path_uses_sanitized_run_path(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            archived = root / "runabc" / "tables" / "works.csv"
-            archived.parent.mkdir(parents=True)
-            archived.write_text("work_id\nW1\n", encoding="utf-8")
-
-            with patch.object(jobs, "RUNS_DIR", root):
-                resolved = jobs._run_table_path("run/abc", "works")
-
-        self.assertEqual(resolved, archived)
-
     def test_cli_origin_fetch_meta_keeps_dump_manifest_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
