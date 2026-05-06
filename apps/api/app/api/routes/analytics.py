@@ -506,25 +506,49 @@ def scientometric_correlations_csv(request: Request) -> Response:
 @router.get("/analytics/scientometrics/rank-shifts.csv")
 def scientometric_rank_shifts_csv(request: Request) -> Response:
     try:
-        payload = _scientometric_payload_from_request(request)
+        rows = scientometrics.build_rank_shift_export_rows(**_scientometric_kwargs_from_request(request))
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"]
-    return _csv_response(fields, _scientometric_rank_shift_rows(payload), filename="openalex_dss_scientometrics_rank_shifts.csv")
+    return _csv_response(fields, rows, filename="openalex_dss_scientometrics_rank_shifts.csv")
 
 
-@router.get("/analytics/scientometrics/outliers.csv")
-def scientometric_outliers_csv(request: Request) -> Response:
+@router.get("/analytics/scientometrics/largest-rank-shifts.csv")
+def scientometric_largest_rank_shifts_csv(request: Request) -> Response:
     try:
         payload = _scientometric_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    fields = ["metric", "author_id", "author_display_name", "value", "rule"]
-    return _csv_response(fields, _scientometric_outlier_rows(payload), filename="openalex_dss_scientometrics_outliers.csv")
+    fields = ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"]
+    return _csv_response(fields, _scientometric_largest_rank_shift_rows(payload), filename="openalex_dss_scientometrics_largest_rank_shifts.csv")
+
+
+@router.get("/analytics/scientometrics/outliers.csv")
+def scientometric_outliers_csv(request: Request) -> Response:
+    try:
+        rows = scientometrics.build_outlier_export_rows(**_scientometric_kwargs_from_request(request))
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    fields = ["metric", "author_id", "author_display_name", "value", "rule", "lower_fence", "upper_fence"]
+    return _csv_response(fields, rows, filename="openalex_dss_scientometrics_outliers.csv")
+
+
+@router.get("/analytics/scientometrics/top-outliers.csv")
+def scientometric_top_outliers_csv(request: Request) -> Response:
+    try:
+        payload = _scientometric_payload_from_request(request)
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    fields = ["metric", "author_id", "author_display_name", "value", "rule", "lower_fence", "upper_fence"]
+    return _csv_response(fields, _scientometric_top_outlier_rows(payload), filename="openalex_dss_scientometrics_top_outliers.csv")
 
 
 def _slice_filters(
@@ -588,6 +612,10 @@ def _metric_list(metrics: str) -> list[str] | None:
 
 
 def _scientometric_payload_from_request(request: Request) -> dict[str, Any]:
+    return scientometrics.build_scientometric_analysis(**_scientometric_kwargs_from_request(request))
+
+
+def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
     query = request.query_params
     filters = _slice_filters(
         country_code=query.get("country_code", ""),
@@ -614,17 +642,17 @@ def _scientometric_payload_from_request(request: Request) -> dict[str, Any]:
         to_publication_date=query.get("to_publication_date", ""),
         work_type=query.get("work_type", ""),
     )
-    return scientometrics.build_scientometric_analysis(
-        fraction_mode=query.get("fraction_mode", "strict_authors_count"),
-        metrics=_metric_list(query.get("metrics", "")),
-        baseline_metric=query.get("baseline_metric", "h"),
-        filters=filters,
-        run_id=query.get("run_id", ""),
-        dump_id=query.get("dump_id", ""),
-        cohort_id=query.get("cohort_id", ""),
-        cohort_filter_policy=query.get("cohort_filter_policy", "membership"),
-        top_n=max(1, min(_int_query(query.get("top_n"), 100), 1000)),
-    )
+    return {
+        "fraction_mode": query.get("fraction_mode", "strict_authors_count"),
+        "metrics": _metric_list(query.get("metrics", "")),
+        "baseline_metric": query.get("baseline_metric", "h"),
+        "filters": filters,
+        "run_id": query.get("run_id", ""),
+        "dump_id": query.get("dump_id", ""),
+        "cohort_id": query.get("cohort_id", ""),
+        "cohort_filter_policy": query.get("cohort_filter_policy", "membership"),
+        "top_n": max(1, min(_int_query(query.get("top_n"), 100), 1000)),
+    }
 
 
 def _csv_response(fields: list[str], rows: list[dict[str, Any]], *, filename: str) -> Response:
@@ -659,7 +687,7 @@ def _scientometric_correlation_rows(payload: dict[str, Any]) -> list[dict[str, A
     return rows
 
 
-def _scientometric_rank_shift_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _scientometric_largest_rank_shift_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     comparisons = payload.get("rank_comparisons") or {}
     rows: list[dict[str, Any]] = []
     for compare_metric, comparison in comparisons.items():
@@ -679,7 +707,7 @@ def _scientometric_rank_shift_rows(payload: dict[str, Any]) -> list[dict[str, An
     return rows
 
 
-def _scientometric_outlier_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _scientometric_top_outlier_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     outliers = payload.get("outliers") or {}
     boxplots = payload.get("boxplots") or {}
     rows: list[dict[str, Any]] = []
@@ -693,6 +721,8 @@ def _scientometric_outlier_rows(payload: dict[str, Any]) -> list[dict[str, Any]]
                     "author_display_name": row.get("author_display_name"),
                     "value": row.get("value"),
                     "rule": rule,
+                    "lower_fence": row.get("lower_fence"),
+                    "upper_fence": row.get("upper_fence"),
                 }
             )
     return rows

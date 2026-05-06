@@ -39,43 +39,27 @@ def build_scientometric_analysis(
     cohort_filter_policy: str = "membership",
     top_n: int = 100,
 ) -> dict[str, Any]:
-    selected_metrics = _select_metrics(metrics)
-    baseline_metric = str(baseline_metric or "h").strip() or "h"
-    if baseline_metric not in warehouse.INDEX_NUMERIC_FIELDS:
-        raise ValueError(f"Unsupported baseline_metric: {baseline_metric}")
-    if baseline_metric not in selected_metrics:
-        selected_metrics = [baseline_metric, *selected_metrics]
-
-    request_filters = clean_analysis_filters(filters or {})
-    author_ids = None
-    cohort_context = None
-    if cohort_id:
-        ctx = cohorts.resolve_cohort_context(
-            cohort_id,
-            run_id=run_id,
-            dump_id=dump_id,
-            fraction_mode=fraction_mode,
-            filters=request_filters,
-            filter_policy=cohort_filter_policy,
-        )
-        run_id = str(ctx.get("run_id") or "")
-        dump_id = str(ctx.get("dump_id") or "")
-        fraction_mode = str(ctx.get("fraction_mode") or fraction_mode or "strict_authors_count")
-        resolved_filters = clean_analysis_filters(ctx.get("filters") or {})
-        author_ids = ctx.get("author_ids")
-        cohort_context = cohorts.cohort_context_summary(ctx)
-        cohort_filter_policy = str(ctx.get("filter_policy") or cohort_filter_policy or "membership")
-    else:
-        scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
-        run_id = scope["run_id"]
-        dump_id = scope["dump_id"]
-        fraction_mode = str(fraction_mode or "strict_authors_count")
-        resolved_filters = request_filters
-
-    rank_top_n = max(1, min(int(top_n or 100), 1000))
-    rows = warehouse.filtered_author_indices(fraction_mode, resolved_filters, run_id=run_id, dump_id=dump_id)
-    rows = warehouse.filter_rows_by_author_ids(rows, author_ids)
-    selected_metrics = [metric for metric in selected_metrics if _has_metric_data(rows, metric) or metric in warehouse.INDEX_NUMERIC_FIELDS]
+    context = _analysis_context(
+        fraction_mode=fraction_mode,
+        metrics=metrics,
+        baseline_metric=baseline_metric,
+        filters=filters,
+        run_id=run_id,
+        dump_id=dump_id,
+        cohort_id=cohort_id,
+        cohort_filter_policy=cohort_filter_policy,
+        top_n=top_n,
+    )
+    selected_metrics = context["metrics"]
+    baseline_metric = context["baseline_metric"]
+    run_id = context["run_id"]
+    dump_id = context["dump_id"]
+    fraction_mode = context["fraction_mode"]
+    resolved_filters = context["filters"]
+    cohort_context = context["cohort_context"]
+    cohort_filter_policy = context["cohort_filter_policy"]
+    rank_top_n = context["rank_top_n"]
+    rows = context["rows"]
 
     descriptive = describe_metrics(rows, selected_metrics)
     boxplots = boxplot_metrics(rows, selected_metrics)
@@ -181,25 +165,15 @@ def rank_comparisons(
     ranks = {metric: _competition_ranks(rows, metric) for metric in selected}
     overlap_cuts = _overlap_cuts(rank_top_n)
     top_overlap = _top_overlap_matrix(ranks, overlap_cuts)
-    baseline_ranks = ranks.get(baseline_metric, {})
+    full_shift_rows = rank_shift_rows(rows, selected, baseline_metric=baseline_metric)
     comparisons: dict[str, Any] = {}
     for metric in selected:
         if metric == baseline_metric:
             continue
-        metric_ranks = ranks.get(metric, {})
-        common = sorted(set(baseline_ranks) & set(metric_ranks))
-        deltas = [
-            {
-                "author_id": author_id,
-                "author_display_name": _author_name(rows, author_id),
-                "baseline_rank": baseline_ranks[author_id],
-                "metric_rank": metric_ranks[author_id],
-                "rank_delta": metric_ranks[author_id] - baseline_ranks[author_id],
-                "abs_rank_delta": abs(metric_ranks[author_id] - baseline_ranks[author_id]),
-            }
-            for author_id in common
-        ]
+        deltas = [row for row in full_shift_rows if row["compare_metric"] == metric]
         abs_values = [float(item["abs_rank_delta"]) for item in deltas]
+        baseline_ranks = ranks.get(baseline_metric, {})
+        metric_ranks = ranks.get(metric, {})
         top_base = _top_exact_set(baseline_ranks, rank_top_n)
         top_metric = _top_exact_set(metric_ranks, rank_top_n)
         top_overlap_exact = len(top_base & top_metric)
@@ -207,7 +181,7 @@ def rank_comparisons(
         comparisons[metric] = {
             "baseline_metric": baseline_metric,
             "metric": metric,
-            "n_common_authors": len(common),
+            "n_common_authors": len(deltas),
             "median_abs_delta": _quantile(abs_values, 0.5) if abs_values else None,
             "p90_abs_delta": _quantile(abs_values, 0.9) if abs_values else None,
             "max_abs_delta": max(abs_values) if abs_values else None,
@@ -216,9 +190,95 @@ def rank_comparisons(
             "top_overlap": top_overlap_exact,
             "jaccard_top_n_exact": jaccard_exact,
             "jaccard_top_n": jaccard_exact,
+            "rank_shift_count": len(deltas),
             "largest_shifts": sorted(deltas, key=lambda item: (-item["abs_rank_delta"], item["author_id"]))[:20],
         }
     return {"comparisons": comparisons, "top_overlap": top_overlap}
+
+
+def build_rank_shift_export_rows(
+    *,
+    fraction_mode: str,
+    metrics: list[str] | tuple[str, ...] | None = None,
+    baseline_metric: str = "h",
+    filters: dict[str, Any] | None = None,
+    run_id: str = "",
+    dump_id: str = "",
+    cohort_id: str = "",
+    cohort_filter_policy: str = "membership",
+    top_n: int = 100,
+) -> list[dict[str, Any]]:
+    context = _analysis_context(
+        fraction_mode=fraction_mode,
+        metrics=metrics,
+        baseline_metric=baseline_metric,
+        filters=filters,
+        run_id=run_id,
+        dump_id=dump_id,
+        cohort_id=cohort_id,
+        cohort_filter_policy=cohort_filter_policy,
+        top_n=top_n,
+    )
+    return rank_shift_rows(context["rows"], context["metrics"], baseline_metric=context["baseline_metric"])
+
+
+def build_outlier_export_rows(
+    *,
+    fraction_mode: str,
+    metrics: list[str] | tuple[str, ...] | None = None,
+    baseline_metric: str = "h",
+    filters: dict[str, Any] | None = None,
+    run_id: str = "",
+    dump_id: str = "",
+    cohort_id: str = "",
+    cohort_filter_policy: str = "membership",
+    top_n: int = 100,
+) -> list[dict[str, Any]]:
+    context = _analysis_context(
+        fraction_mode=fraction_mode,
+        metrics=metrics,
+        baseline_metric=baseline_metric,
+        filters=filters,
+        run_id=run_id,
+        dump_id=dump_id,
+        cohort_id=cohort_id,
+        cohort_filter_policy=cohort_filter_policy,
+        top_n=top_n,
+    )
+    return outlier_rows(context["rows"], context["metrics"])
+
+
+def rank_shift_rows(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...], *, baseline_metric: str = "h") -> list[dict[str, Any]]:
+    selected = list(metrics)
+    ranks = {metric: _competition_ranks(rows, metric) for metric in selected}
+    baseline_ranks = ranks.get(baseline_metric, {})
+    payload: list[dict[str, Any]] = []
+    for metric in selected:
+        if metric == baseline_metric:
+            continue
+        metric_ranks = ranks.get(metric, {})
+        for author_id in sorted(set(baseline_ranks) & set(metric_ranks)):
+            rank_delta = metric_ranks[author_id] - baseline_ranks[author_id]
+            payload.append(
+                {
+                    "baseline_metric": baseline_metric,
+                    "compare_metric": metric,
+                    "author_id": author_id,
+                    "author_display_name": _author_name(rows, author_id),
+                    "baseline_rank": baseline_ranks[author_id],
+                    "metric_rank": metric_ranks[author_id],
+                    "rank_delta": rank_delta,
+                    "abs_rank_delta": abs(rank_delta),
+                }
+            )
+    return sorted(payload, key=lambda item: (str(item["compare_metric"]), -int(item["abs_rank_delta"]), str(item["author_id"])))
+
+
+def outlier_rows(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for metric in metrics:
+        payload.extend(_metric_outlier_rows(rows, metric))
+    return sorted(payload, key=lambda item: (str(item["metric"]), -float(item["value"]), str(item["author_id"])))
 
 
 def metric_scorecard(
@@ -253,6 +313,69 @@ def metric_scorecard(
         )
         payload[metric] = metric_payload
     return payload
+
+
+def _analysis_context(
+    *,
+    fraction_mode: str,
+    metrics: list[str] | tuple[str, ...] | None = None,
+    baseline_metric: str = "h",
+    filters: dict[str, Any] | None = None,
+    run_id: str = "",
+    dump_id: str = "",
+    cohort_id: str = "",
+    cohort_filter_policy: str = "membership",
+    top_n: int = 100,
+) -> dict[str, Any]:
+    selected_metrics = _select_metrics(metrics)
+    baseline_metric = str(baseline_metric or "h").strip() or "h"
+    if baseline_metric not in warehouse.INDEX_NUMERIC_FIELDS:
+        raise ValueError(f"Unsupported baseline_metric: {baseline_metric}")
+    if baseline_metric not in selected_metrics:
+        selected_metrics = [baseline_metric, *selected_metrics]
+
+    request_filters = clean_analysis_filters(filters or {})
+    author_ids = None
+    cohort_context = None
+    if cohort_id:
+        ctx = cohorts.resolve_cohort_context(
+            cohort_id,
+            run_id=run_id,
+            dump_id=dump_id,
+            fraction_mode=fraction_mode,
+            filters=request_filters,
+            filter_policy=cohort_filter_policy,
+        )
+        run_id = str(ctx.get("run_id") or "")
+        dump_id = str(ctx.get("dump_id") or "")
+        fraction_mode = str(ctx.get("fraction_mode") or fraction_mode or "strict_authors_count")
+        resolved_filters = clean_analysis_filters(ctx.get("filters") or {})
+        author_ids = ctx.get("author_ids")
+        cohort_context = cohorts.cohort_context_summary(ctx)
+        cohort_filter_policy = str(ctx.get("filter_policy") or cohort_filter_policy or "membership")
+    else:
+        scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+        run_id = scope["run_id"]
+        dump_id = scope["dump_id"]
+        fraction_mode = str(fraction_mode or "strict_authors_count")
+        resolved_filters = request_filters
+
+    rank_top_n = max(1, min(int(top_n or 100), 1000))
+    rows = warehouse.filtered_author_indices(fraction_mode, resolved_filters, run_id=run_id, dump_id=dump_id)
+    rows = warehouse.filter_rows_by_author_ids(rows, author_ids)
+    selected_metrics = [metric for metric in selected_metrics if _has_metric_data(rows, metric) or metric in warehouse.INDEX_NUMERIC_FIELDS]
+    return {
+        "metrics": selected_metrics,
+        "baseline_metric": baseline_metric,
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "fraction_mode": fraction_mode,
+        "filters": resolved_filters,
+        "cohort_context": cohort_context,
+        "cohort_filter_policy": cohort_filter_policy,
+        "rank_top_n": rank_top_n,
+        "rows": rows,
+    }
 
 
 def _select_metrics(metrics: list[str] | tuple[str, ...] | None) -> list[str]:
@@ -698,6 +821,34 @@ def _overlap_cuts(top_n: int) -> list[int]:
 
 def _outlier_table(boxplots: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     return {metric: list((payload or {}).get("outliers") or []) for metric, payload in boxplots.items()}
+
+
+def _metric_outlier_rows(rows: list[dict[str, Any]], metric: str) -> list[dict[str, Any]]:
+    pairs = _metric_pairs(rows, metric)
+    values = sorted(value for _, value in pairs)
+    if not values:
+        return []
+    q1 = _quantile(values, 0.25)
+    q3 = _quantile(values, 0.75)
+    iqr = q3 - q1
+    if iqr == 0.0:
+        return []
+    lower_fence = q1 - 1.5 * iqr
+    upper_fence = q3 + 1.5 * iqr
+    payload = [
+        {
+            "metric": metric,
+            "author_id": str(row.get("author_id") or ""),
+            "author_display_name": row.get("author_display_name") or row.get("display_name") or "",
+            "value": value,
+            "rule": "iqr_1_5",
+            "lower_fence": lower_fence,
+            "upper_fence": upper_fence,
+        }
+        for row, value in pairs
+        if value < lower_fence or value > upper_fence
+    ]
+    return sorted(payload, key=lambda item: (-float(item["value"]), str(item["author_id"])))
 
 
 def _metric_values(rows: list[dict[str, Any]], metric: str) -> list[float]:

@@ -1859,7 +1859,9 @@ function ReportsPage({
   const scientometricsDescriptiveUrl = `${API_BASE}/analytics/scientometrics/descriptive.csv?${scientometricParams.toString()}`;
   const scientometricsCorrelationsUrl = `${API_BASE}/analytics/scientometrics/correlations.csv?${scientometricParams.toString()}`;
   const scientometricsRankShiftsUrl = `${API_BASE}/analytics/scientometrics/rank-shifts.csv?${scientometricParams.toString()}`;
+  const scientometricsLargestRankShiftsUrl = `${API_BASE}/analytics/scientometrics/largest-rank-shifts.csv?${scientometricParams.toString()}`;
   const scientometricsOutliersUrl = `${API_BASE}/analytics/scientometrics/outliers.csv?${scientometricParams.toString()}`;
+  const scientometricsTopOutliersUrl = `${API_BASE}/analytics/scientometrics/top-outliers.csv?${scientometricParams.toString()}`;
   const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "csv", cohortFilterPolicy)}` : "";
   const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "json", cohortFilterPolicy)}` : "";
   const cohortStatsUrl = cohortId ? `${API_BASE}${cohortStatisticsUrl(cohortId, filters, fractionMode, runId, dumpId, cohortFilterPolicy)}` : "";
@@ -1900,8 +1902,10 @@ function ReportsPage({
           <a href={scientometricsJsonUrl}>JSON полного анализа</a>
           <a href={scientometricsDescriptiveUrl}>CSV описательной статистики</a>
           <a href={scientometricsCorrelationsUrl}>CSV корреляций</a>
-          <a href={scientometricsRankShiftsUrl}>CSV сдвигов рангов</a>
-          <a href={scientometricsOutliersUrl}>CSV выбросов</a>
+          <a href={scientometricsRankShiftsUrl}>CSV всех сдвигов рангов</a>
+          <a href={scientometricsLargestRankShiftsUrl}>CSV крупнейших сдвигов рангов</a>
+          <a href={scientometricsOutliersUrl}>CSV всех выбросов</a>
+          <a href={scientometricsTopOutliersUrl}>CSV top-выбросов</a>
         </div>
         <div className="notice">
           <b>Параметры пакета</b>

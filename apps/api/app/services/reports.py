@@ -11,7 +11,7 @@ from app.services import cohorts, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
-REPORT_BUNDLE_VERSION = "report_bundle_v3"
+REPORT_BUNDLE_VERSION = "report_bundle_v4"
 DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "islv")
 
 
@@ -206,12 +206,20 @@ def build_report_bundle(
             "scientometrics_descriptive_csv": f"/api/v1/analytics/scientometrics/descriptive.csv?{scientometric_query}",
             "scientometrics_correlations_csv": f"/api/v1/analytics/scientometrics/correlations.csv?{scientometric_query}",
             "scientometrics_rank_shifts_csv": f"/api/v1/analytics/scientometrics/rank-shifts.csv?{scientometric_query}",
+            "scientometrics_largest_rank_shifts_csv": f"/api/v1/analytics/scientometrics/largest-rank-shifts.csv?{scientometric_query}",
             "scientometrics_outliers_csv": f"/api/v1/analytics/scientometrics/outliers.csv?{scientometric_query}",
+            "scientometrics_top_outliers_csv": f"/api/v1/analytics/scientometrics/top-outliers.csv?{scientometric_query}",
             "authors_local_metrics_csv": f"/api/v1/exports/authors_local_metrics.csv?run_id={run_id}" if run_id else "/api/v1/exports/authors_local_metrics.csv",
             "works_csv": f"/api/v1/exports/works.csv?run_id={run_id}" if run_id else "/api/v1/exports/works.csv",
             "authorships_csv": f"/api/v1/exports/authorships.csv?run_id={run_id}" if run_id else "/api/v1/exports/authorships.csv",
             "report_bundle_json": f"/api/v1/reports/bundle.json?{bundle_query}" if bundle_query else "/api/v1/reports/bundle.json",
             "sha256_manifest": checksums.get("sha256_manifest"),
+        },
+        "export_notes": {
+            "scientometrics_rank_shifts_csv": "Contains all rank deltas for every author present in both baseline and comparison metric ranks.",
+            "scientometrics_largest_rank_shifts_csv": "Contains the compact largest-shifts table used by the UI panel.",
+            "scientometrics_outliers_csv": "Contains all IQR outliers for the selected scientometric metrics.",
+            "scientometrics_top_outliers_csv": "Contains the compact top outlier rows exposed in the scientometric JSON/boxplot payload.",
         },
         "mvp_protocol": {
             "source_mode": "openalex_cli_filtered_metadata",
@@ -374,7 +382,7 @@ def _report_scope(
     membership_filters = _clean_filters(cohort_membership_filters or {})
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     canonical = {
-        "version": "report_scope_v3",
+        "version": "report_scope_v4",
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),
@@ -388,6 +396,7 @@ def _report_scope(
         "fraction_mode": str(fraction_mode or "").strip(),
         "limit": int(limit or 0),
         "scientometric_metrics": scientometric_metric_list,
+        "scientometric_analysis_version": scientometrics.SCIENTOMETRIC_ANALYSIS_VERSION,
         "baseline_metric": str(baseline_metric or "h").strip() or "h",
         "rank_top_n": max(1, min(int(rank_top_n or 100), 1000)),
     }
@@ -410,12 +419,20 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
 def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = "") -> bool:
     if cached.get("bundle_version") != REPORT_BUNDLE_VERSION:
         return False
-    for key in ("report_scope", "cohort_context", "warnings", "exports", "scientometric_analysis"):
+    for key in ("report_scope", "cohort_context", "warnings", "exports", "export_notes", "scientometric_analysis"):
         if key not in cached:
             return False
     if cohort_id and not ((cached.get("exports") or {}).get("cohort_statistics_json")):
         return False
-    for key in ("scientometrics_json", "scientometrics_descriptive_csv", "scientometrics_correlations_csv", "scientometrics_rank_shifts_csv", "scientometrics_outliers_csv"):
+    for key in (
+        "scientometrics_json",
+        "scientometrics_descriptive_csv",
+        "scientometrics_correlations_csv",
+        "scientometrics_rank_shifts_csv",
+        "scientometrics_largest_rank_shifts_csv",
+        "scientometrics_outliers_csv",
+        "scientometrics_top_outliers_csv",
+    ):
         if not ((cached.get("exports") or {}).get(key)):
             return False
     return True

@@ -437,7 +437,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 bundle = reports.build_report_bundle(run_id="run_missing", dump_id="dump_missing")
 
         self.assertEqual(bundle["status"], "incomplete_run_artifacts")
-        self.assertEqual(bundle["bundle_version"], "report_bundle_v3")
+        self.assertEqual(bundle["bundle_version"], "report_bundle_v4")
         self.assertEqual(bundle["no_latest_fallback"], True)
         self.assertIn("pipeline", bundle["missing_artifacts"])
         self.assertIn("quality", bundle["missing_artifacts"])
@@ -488,7 +488,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 }),
                 encoding="utf-8",
             )
-            rebuilt = {"bundle_version": "report_bundle_v3", "status": "ok", "run_id": "run_a", "dump_id": "dump_a", "rebuilt": True}
+            rebuilt = {"bundle_version": "report_bundle_v4", "status": "ok", "run_id": "run_a", "dump_id": "dump_a", "rebuilt": True}
 
             with (
                 patch.object(reports, "DATA", root),
@@ -660,10 +660,10 @@ class PipelineIntegrityTests(unittest.TestCase):
                     cohort_filter_policy="none",
                 )
 
-        self.assertEqual(bundle["bundle_version"], "report_bundle_v3")
+        self.assertEqual(bundle["bundle_version"], "report_bundle_v4")
         self.assertEqual(captured["filters"], {})
         self.assertEqual(bundle["filters"], {})
-        self.assertEqual(bundle["report_scope"]["version"], "report_scope_v3")
+        self.assertEqual(bundle["report_scope"]["version"], "report_scope_v4")
         self.assertEqual(bundle["report_scope"]["filters"], {})
         self.assertEqual(bundle["report_scope"]["cohort_filter_policy"], "none")
         self.assertEqual(bundle["report_scope"]["cohort_membership_filters"], {"country_code": "RU"})
@@ -785,11 +785,15 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(captured["top_n"], 25)
         self.assertEqual(captured["filters"], {"country_code": "RU"})
         self.assertEqual(bundle["report_scope"]["scientometric_metrics"], ["h", "g", "islv"])
+        self.assertEqual(bundle["report_scope"]["scientometric_analysis_version"], reports.scientometrics.SCIENTOMETRIC_ANALYSIS_VERSION)
         self.assertEqual(bundle["report_scope"]["baseline_metric"], "g")
         self.assertEqual(bundle["report_scope"]["rank_top_n"], 25)
         self.assertIn("metrics=h%2Cg%2Cislv", bundle["exports"]["scientometrics_json"])
         self.assertIn("baseline_metric=g", bundle["exports"]["scientometrics_correlations_csv"])
         self.assertIn("top_n=25", bundle["exports"]["scientometrics_rank_shifts_csv"])
+        self.assertIn("largest-rank-shifts.csv", bundle["exports"]["scientometrics_largest_rank_shifts_csv"])
+        self.assertIn("top-outliers.csv", bundle["exports"]["scientometrics_top_outliers_csv"])
+        self.assertEqual(bundle["export_notes"]["scientometrics_rank_shifts_csv"], "Contains all rank deltas for every author present in both baseline and comparison metric ranks.")
 
     def test_empty_cohort_report_has_empty_rank_table(self) -> None:
         cohort_ctx = {
@@ -947,7 +951,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         other_top_n = reports._report_scope(run_id="run_a", dump_id="dump_a", filters={}, cohort_id="", cohort_checksum="", cohort_n_authors=0, metric="h", fraction_mode="integer", limit=50, scientometric_metrics=["h", "g"], baseline_metric="h", rank_top_n=50)
         other_metrics = reports._report_scope(run_id="run_a", dump_id="dump_a", filters={}, cohort_id="", cohort_checksum="", cohort_n_authors=0, metric="h", fraction_mode="integer", limit=50, scientometric_metrics=["h", "g", "islv"], baseline_metric="h", rank_top_n=20)
 
-        self.assertEqual(base["version"], "report_scope_v3")
+        self.assertEqual(base["version"], "report_scope_v4")
         self.assertNotEqual(base["report_scope_hash"], other_baseline["report_scope_hash"])
         self.assertNotEqual(base["report_scope_hash"], other_top_n["report_scope_hash"])
         self.assertNotEqual(base["report_scope_hash"], other_metrics["report_scope_hash"])
@@ -955,10 +959,10 @@ class PipelineIntegrityTests(unittest.TestCase):
     def test_report_build_requires_explicit_run_or_dump_for_final_report(self) -> None:
         bundle = reports.build_report_bundle(metric="h", fraction_mode="integer", filters={"country_code": "RU"})
         self.assertEqual(bundle["status"], "preview_not_reproducible")
-        self.assertEqual(bundle["bundle_version"], "report_bundle_v3")
+        self.assertEqual(bundle["bundle_version"], "report_bundle_v4")
         dump_only = reports.build_report_bundle(metric="h", fraction_mode="integer", dump_id="dump_a")
         self.assertEqual(dump_only["status"], "preview_not_reproducible")
-        self.assertEqual(dump_only["bundle_version"], "report_bundle_v3")
+        self.assertEqual(dump_only["bundle_version"], "report_bundle_v4")
 
     def test_report_bundle_json_without_run_does_not_return_cached_latest_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

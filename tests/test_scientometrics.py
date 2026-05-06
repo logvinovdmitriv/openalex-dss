@@ -107,6 +107,38 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(overlap["right_n"], 2)
         self.assertLessEqual(overlap["overlap"], 2)
 
+    def test_rank_shift_rows_export_all_authors_while_payload_keeps_largest_subset(self) -> None:
+        rows = [
+            {"author_id": f"A{index:02d}", "author_display_name": f"Author {index}", "h": index, "g": 40 - index}
+            for index in range(25)
+        ]
+
+        payload = scientometrics.rank_comparisons(rows, ["h", "g"], baseline_metric="h", rank_top_n=10)
+        export_rows = scientometrics.rank_shift_rows(rows, ["h", "g"], baseline_metric="h")
+
+        self.assertEqual(payload["comparisons"]["g"]["rank_shift_count"], 25)
+        self.assertEqual(len(payload["comparisons"]["g"]["largest_shifts"]), 20)
+        self.assertEqual(len(export_rows), 25)
+        self.assertEqual(export_rows[0]["baseline_metric"], "h")
+        self.assertEqual(export_rows[0]["compare_metric"], "g")
+
+    def test_outlier_rows_export_all_iqr_outliers_while_boxplot_keeps_top_subset(self) -> None:
+        rows = (
+            [{"author_id": f"A{index:02d}", "author_display_name": f"Base {index}", "c": 0} for index in range(30)]
+            + [{"author_id": f"B{index:02d}", "author_display_name": f"Middle {index}", "c": 1} for index in range(15)]
+            + [{"author_id": f"C{index:02d}", "author_display_name": f"High {index}", "c": 100 + index} for index in range(12)]
+        )
+
+        boxplot = scientometrics.boxplot_metrics(rows, ["c"])["c"]
+        export_rows = scientometrics.outlier_rows(rows, ["c"])
+
+        self.assertEqual(boxplot["outlier_count"], 12)
+        self.assertEqual(len(boxplot["outliers"]), 10)
+        self.assertEqual(len(export_rows), 12)
+        self.assertEqual(export_rows[0]["metric"], "c")
+        self.assertEqual(export_rows[0]["rule"], "iqr_1_5")
+        self.assertIn("upper_fence", export_rows[0])
+
     def test_kendall_tau_b_skips_large_inputs_instead_of_truncating_silently(self) -> None:
         rows = [{"author_id": f"A{index}", "h": index, "g": index} for index in range(1001)]
 
