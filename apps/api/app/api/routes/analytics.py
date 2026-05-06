@@ -18,7 +18,7 @@ def analytics(
     run_id: str = "",
     dump_id: str = "",
     cohort_id: str = "",
-    cohort_filter_policy: str = "auto",
+    cohort_filter_policy: str = "membership",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -128,7 +128,7 @@ def distribution(
     run_id: str = "",
     dump_id: str = "",
     cohort_id: str = "",
-    cohort_filter_policy: str = "auto",
+    cohort_filter_policy: str = "membership",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -203,7 +203,7 @@ def ranking_json(
     run_id: str = "",
     dump_id: str = "",
     cohort_id: str = "",
-    cohort_filter_policy: str = "auto",
+    cohort_filter_policy: str = "membership",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -279,7 +279,7 @@ def ranking_csv(
     run_id: str = "",
     dump_id: str = "",
     cohort_id: str = "",
-    cohort_filter_policy: str = "auto",
+    cohort_filter_policy: str = "membership",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -412,7 +412,7 @@ def _slice_filters(
     )
 
 
-def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode: str, filters: dict[str, Any], filter_policy: str = "auto") -> dict[str, Any]:
+def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode: str, filters: dict[str, Any], filter_policy: str = "membership") -> dict[str, Any]:
     if not cohort_id:
         return {"run_id": run_id, "dump_id": dump_id, "filters": filters, "author_ids": None, "cohort": None}
     ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=filter_policy)
@@ -430,7 +430,8 @@ def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode:
             "checksum": cohort.get("checksum"),
             "membership_filters": ctx.get("membership_filters") or {},
             "analysis_filters": ctx.get("analysis_filters") or ctx.get("filters") or {},
-            "filter_policy": ctx.get("filter_policy") or "auto",
+            "filter_policy": ctx.get("filter_policy") or "membership",
+            "resolved_filter_mode": ctx.get("resolved_filter_mode") or ctx.get("filter_mode"),
             "filter_mode": ctx.get("filter_mode"),
         },
     }

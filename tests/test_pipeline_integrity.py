@@ -786,21 +786,29 @@ class PipelineIntegrityTests(unittest.TestCase):
             with patch.object(cohorts, "COHORTS_DIR", Path(tmp)):
                 cohorts._write(cohort)
 
+                default_ctx = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"})
                 membership = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"}, filter_policy="membership")
                 current = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"}, filter_policy="current")
                 current_empty = cohorts.resolve_cohort_context("cohort_a", filters={}, filter_policy="current")
                 none = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"}, filter_policy="none")
                 auto = cohorts.resolve_cohort_context("cohort_a", filters={}, filter_policy="auto")
+                with self.assertRaises(ValueError):
+                    cohorts.resolve_cohort_context("cohort_a", filter_policy="surprise")
 
+        self.assertEqual(default_ctx["filters"], {"country_code": "RU"})
+        self.assertEqual(default_ctx["filter_policy"], "membership")
         self.assertEqual(membership["filters"], {"country_code": "RU"})
         self.assertEqual(membership["filter_policy"], "membership")
+        self.assertEqual(membership["resolved_filter_mode"], "membership_filters")
         self.assertEqual(current["filters"], {"country_code": "DE"})
         self.assertEqual(current["filter_policy"], "current")
+        self.assertEqual(current["resolved_filter_mode"], "analysis_override")
         self.assertEqual(current_empty["filters"], {})
-        self.assertEqual(current_empty["filter_mode"], "no_analysis_filters")
+        self.assertEqual(current_empty["resolved_filter_mode"], "no_analysis_filters")
         self.assertEqual(none["filters"], {})
         self.assertEqual(none["filter_policy"], "none")
         self.assertEqual(auto["filters"], {"country_code": "RU"})
+        self.assertEqual(auto["filter_policy"], "auto")
 
     def test_cohort_filters_keep_slice_analysis_contract_fields(self) -> None:
         filters = cohorts._filters(

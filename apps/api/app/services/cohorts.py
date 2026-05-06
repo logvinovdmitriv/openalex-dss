@@ -105,7 +105,7 @@ def get_cohort(cohort_id: str) -> dict[str, Any]:
 
 
 def _cohort_filter_policy(value: str) -> str:
-    policy = str(value or "auto").strip().lower()
+    policy = str(value or "membership").strip().lower()
     if policy not in COHORT_FILTER_POLICIES:
         raise ValueError(f"Unsupported cohort_filter_policy: {policy}")
     return policy
@@ -118,7 +118,7 @@ def resolve_cohort_context(
     dump_id: str = "",
     fraction_mode: str = "",
     filters: dict[str, Any] | None = None,
-    filter_policy: str = "auto",
+    filter_policy: str = "membership",
 ) -> dict[str, Any]:
     try:
         cohort = get_cohort(cohort_id)
@@ -161,6 +161,7 @@ def resolve_cohort_context(
         "membership_filters": cohort_filters,
         "request_filters": request_filters,
         "filter_policy": policy,
+        "resolved_filter_mode": filter_mode_label,
         "filter_mode": filter_mode_label,
     }
 
@@ -179,7 +180,8 @@ def cohort_context_summary(ctx: dict[str, Any]) -> dict[str, Any]:
         "checksum": cohort.get("checksum"),
         "membership_filters": membership_filters,
         "analysis_filters": analysis_filters,
-        "filter_policy": ctx.get("filter_policy") or "auto",
+        "filter_policy": ctx.get("filter_policy") or "membership",
+        "resolved_filter_mode": ctx.get("resolved_filter_mode") or ctx.get("filter_mode") or "membership_filters",
         "filter_mode": ctx.get("filter_mode") or "membership_filters",
     }
 
@@ -191,7 +193,7 @@ def cohort_author_metrics(
     dump_id: str = "",
     fraction_mode: str = "",
     filters: dict[str, Any] | None = None,
-    filter_policy: str = "auto",
+    filter_policy: str = "membership",
     metric: str = "",
     limit: int = 100_000,
     offset: int = 0,
@@ -245,7 +247,7 @@ def cohort_statistics(
     dump_id: str = "",
     fraction_mode: str = "",
     filters: dict[str, Any] | None = None,
-    filter_policy: str = "auto",
+    filter_policy: str = "membership",
 ) -> dict[str, Any]:
     ctx = resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=filter_policy)
     resolved_fraction_mode = str(ctx.get("fraction_mode") or "strict_authors_count")

@@ -20,7 +20,7 @@ def build_report_bundle(
     dump_id: str = "",
     filters: dict[str, Any] | None = None,
     cohort_id: str = "",
-    cohort_filter_policy: str = "auto",
+    cohort_filter_policy: str = "membership",
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
     cohort: dict[str, Any] = {}
@@ -33,7 +33,7 @@ def build_report_bundle(
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
         filters = cohort_ctx["filters"]
-        cohort_filter_policy = str(cohort_ctx.get("filter_policy") or cohort_filter_policy or "auto")
+        cohort_filter_policy = str(cohort_ctx.get("filter_policy") or cohort_filter_policy or "membership")
     scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
@@ -99,6 +99,15 @@ def build_report_bundle(
             "cohort_filter_policy": cohort_filter_policy,
         }
     )
+    statistics_query = _query_params(
+        {
+            **filters,
+            "fraction_mode": fraction_mode,
+            "run_id": run_id,
+            "dump_id": resolved_dump_id,
+            "cohort_filter_policy": cohort_filter_policy,
+        }
+    )
     bundle_query = _query_params(
         {
             **filters,
@@ -122,6 +131,7 @@ def build_report_bundle(
         "cohort_id": cohort_id,
         "cohort": _cohort_summary(cohort),
         "cohort_context": cohorts.cohort_context_summary(cohort_ctx) if cohort_ctx else None,
+        "warnings": _report_warnings(cohort_filter_policy),
         "interpretation_policy": {
             "strict_mode": "Математические выводы строятся только по локально пересчитанным works-based индексам.",
             "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения; корпус Works скачивается через OpenAlex CLI.",
@@ -147,7 +157,7 @@ def build_report_bundle(
             "ranking_csv": f"/api/v1/analytics/ranking.csv?{export_query}",
             "cohort_author_metrics_csv": f"/api/v1/cohorts/{cohort_id}/author-metrics.csv?{export_query}" if cohort_id else None,
             "cohort_author_metrics_json": f"/api/v1/cohorts/{cohort_id}/author-metrics.json?{export_query}" if cohort_id else None,
-            "cohort_statistics_json": f"/api/v1/cohorts/{cohort_id}/statistics?{export_query}" if cohort_id else None,
+            "cohort_statistics_json": f"/api/v1/cohorts/{cohort_id}/statistics?{statistics_query}" if cohort_id else None,
             "authors_local_metrics_csv": f"/api/v1/exports/authors_local_metrics.csv?run_id={run_id}" if run_id else "/api/v1/exports/authors_local_metrics.csv",
             "works_csv": f"/api/v1/exports/works.csv?run_id={run_id}" if run_id else "/api/v1/exports/works.csv",
             "authorships_csv": f"/api/v1/exports/authorships.csv?run_id={run_id}" if run_id else "/api/v1/exports/authorships.csv",
@@ -176,7 +186,7 @@ def report_bundle_json(
     limit: int = 50,
     filters: dict[str, Any] | None = None,
     cohort_id: str = "",
-    cohort_filter_policy: str = "auto",
+    cohort_filter_policy: str = "membership",
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
     cohort: dict[str, Any] = {}
@@ -187,7 +197,7 @@ def report_bundle_json(
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
         filters = cohort_ctx["filters"]
-        cohort_filter_policy = str(cohort_ctx.get("filter_policy") or cohort_filter_policy or "auto")
+        cohort_filter_policy = str(cohort_ctx.get("filter_policy") or cohort_filter_policy or "membership")
     scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
@@ -296,7 +306,7 @@ def _report_scope(
     fraction_mode: str,
     limit: int,
     cohort_membership_filters: dict[str, Any] | None = None,
-    cohort_filter_policy: str = "auto",
+    cohort_filter_policy: str = "membership",
 ) -> dict[str, Any]:
     membership_filters = _clean_filters(cohort_membership_filters or {})
     canonical = {
@@ -309,7 +319,7 @@ def _report_scope(
         "cohort_n_authors": int(cohort_n_authors or 0),
         "cohort_membership_filters": membership_filters,
         "cohort_membership_filters_hash": _hash_dict(membership_filters),
-        "cohort_filter_policy": str(cohort_filter_policy or "auto").strip().lower(),
+        "cohort_filter_policy": str(cohort_filter_policy or "membership").strip().lower(),
         "metric": str(metric or "").strip(),
         "fraction_mode": str(fraction_mode or "").strip(),
         "limit": int(limit or 0),
@@ -328,6 +338,12 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
         "message": "Final report build requires explicit run_id. Dump-only and latest-view report modes are development previews because they do not have run-scoped passports, statistics and checksums.",
         "no_latest_fallback": False,
     }
+
+
+def _report_warnings(cohort_filter_policy: str) -> list[str]:
+    if str(cohort_filter_policy or "").strip().lower() == "auto":
+        return ["cohort_filter_policy=auto is a legacy compatibility mode and should not be used for final analysis."]
+    return []
 
 
 def _cohort_summary(cohort: dict[str, Any]) -> dict[str, Any] | None:

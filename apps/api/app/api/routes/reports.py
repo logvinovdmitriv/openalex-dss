@@ -45,7 +45,7 @@ def build_report(
     to_publication_date: str = "",
     work_type: str = "",
     cohort_id: str = "",
-    cohort_filter_policy: str = "auto",
+    cohort_filter_policy: str = "membership",
     limit: int = Query(50, ge=1, le=500),
 ) -> dict[str, Any]:
     filters = build_analysis_filters(
@@ -114,7 +114,7 @@ def report_bundle(
     to_publication_date: str = "",
     work_type: str = "",
     cohort_id: str = "",
-    cohort_filter_policy: str = "auto",
+    cohort_filter_policy: str = "membership",
     limit: int = Query(50, ge=1, le=500),
 ) -> Response:
     filters = build_analysis_filters(

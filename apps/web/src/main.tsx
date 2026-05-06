@@ -1423,8 +1423,8 @@ function PassportsPage({ state, sliceDoc, estimate, materialization }: { state: 
 }
 
 function CohortContextPanel({ context }: { context: any }) {
-  const mode = context?.filter_mode ?? "membership_filters";
-  const policy = context?.filter_policy ?? "auto";
+  const mode = context?.resolved_filter_mode ?? context?.filter_mode ?? "membership_filters";
+  const policy = context?.filter_policy ?? "membership";
   const membership = context?.membership_filters ?? {};
   const analysis = context?.analysis_filters ?? membership;
   return (
@@ -1451,6 +1451,7 @@ function storedCohortContext(cohort: any) {
     membership_filters: filters,
     analysis_filters: filters,
     filter_policy: "membership",
+    resolved_filter_mode: "membership_filters",
     filter_mode: "membership_filters",
   };
 }
