@@ -15,7 +15,7 @@ for path in (API, SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.services import cohorts, jobs, materialization_jobs, metadata_store, pipeline, reports, warehouse  # noqa: E402
+from app.services import artifact_context, cohorts, jobs, materialization_jobs, metadata_store, pipeline, reports, warehouse  # noqa: E402
 
 
 class PipelineIntegrityTests(unittest.TestCase):
@@ -223,6 +223,7 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertEqual(result["analysis_eligibility"]["status"], "dev_only_not_for_final_analysis")
         self.assertEqual(captured["analysis_eligibility"]["status"], "dev_only_not_for_final_analysis")
+        self.assertEqual(captured["active_context_source"], "materialization")
 
     def test_jobs_dispatch_delegates_analysis_actions_to_analysis_jobs(self) -> None:
         with patch.object(jobs.analysis_jobs, "recalculate", return_value={"status": "ok"}) as recalculate:
@@ -446,6 +447,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertNotIn("unknown_legacy", captured["recalculate"])
         self.assertEqual(captured["import_file"]["run_id"], "run_scope_import")
         self.assertEqual(captured["import_file"]["source_path"], "/tmp/works.jsonl.gz")
+        self.assertEqual(captured["import_file"]["active_context_source"], "dev_import_file")
         self.assertNotIn("unknown_legacy", captured["import_file"])
 
     def test_archive_does_not_overwrite_existing_dump_manifest_on_recalculate(self) -> None:
@@ -480,6 +482,52 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(kept, original)
         self.assertFalse(recovered_path.exists())
         self.assertEqual(archive["dump_id"], "dump_keep")
+
+    def test_active_context_helper_roundtrips_pointer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            written = artifact_context.write_active_context(
+                run_id="run_active",
+                dump_id="dump_active",
+                source="test",
+                data_dir=root,
+                extra={"note": "ok"},
+            )
+            read_back = artifact_context.read_active_context(data_dir=root)
+
+        self.assertEqual(written["active_run_id"], "run_active")
+        self.assertEqual(read_back["active_dump_id"], "dump_active")
+        self.assertEqual(read_back["source"], "test")
+        self.assertEqual(read_back["note"], "ok")
+        self.assertIn("updated_at_utc", read_back)
+
+    def test_archive_writes_active_context_pointer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = SimpleNamespace(slice_name="slice_active")
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "TABLE_FILES", {}),
+                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
+                patch.object(pipeline, "JSON_FILES", {}),
+            ):
+                archive = pipeline._archive_run_artifacts(
+                    cfg,
+                    {
+                        "run_id": "run_active",
+                        "dump_id": "dump_active",
+                        "active_context_source": "test_archive",
+                        "input_tables": {},
+                        "input_table_checksums": {},
+                    },
+                )
+                active = artifact_context.read_active_context(data_dir=root)
+
+        self.assertEqual(archive["active_context"]["active_run_id"], "run_active")
+        self.assertEqual(active["active_run_id"], "run_active")
+        self.assertEqual(active["active_dump_id"], "dump_active")
+        self.assertEqual(active["source"], "test_archive")
+        self.assertEqual(active["run_dir"], str(root / "runs" / "run_active"))
 
     def test_run_scoped_report_does_not_fallback_to_latest_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

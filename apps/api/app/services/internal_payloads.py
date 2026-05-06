@@ -32,6 +32,7 @@ class InternalPipelinePayload(SliceDefinitionPayload):
     dump_manifest: dict[str, Any] | None = None
     analysis_eligibility: dict[str, Any] | None = None
     import_mode: str | None = None
+    active_context_source: str | None = None
     accepted_estimate_signature: str | None = None
     accepted_download_signature: str | None = None
 

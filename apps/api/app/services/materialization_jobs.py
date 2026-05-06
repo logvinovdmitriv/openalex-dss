@@ -43,7 +43,15 @@ def dispatch(
             allow_unchecked_download=allow_unchecked_download,
         )
     if action == "import_file":
-        return pipeline.import_local_file(normalize_internal_pipeline_payload({**payload, "run_id": run_id}))
+        return pipeline.import_local_file(
+            normalize_internal_pipeline_payload(
+                {
+                    **payload,
+                    "run_id": run_id,
+                    "active_context_source": "dev_import_file",
+                }
+            )
+        )
     raise ValueError(f"Unsupported materialization job action: {action}")
 
 
@@ -80,6 +88,7 @@ def _build_from_openalex(
                 "dump_manifest": dump,
                 "analysis_eligibility": analysis_eligibility,
                 "import_mode": "final_reproducible" if analysis_eligibility["allowed_for_final_analysis"] else "exploratory",
+                "active_context_source": "materialization",
             }
         )
     )

@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from app.core.paths import DATA, JSON_FILES, PARQUET_TABLE_FILES, ROOT, SRC, TABLE_FILES
 from app.providers import openalex_cli_provider
-from app.services import author_slice
+from app.services import artifact_context, author_slice
 from app.services.filesystem import file_profile, resolve_safe_path
 from app.services import metadata_store, query_planner, reports
 
@@ -46,7 +46,7 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     analysis_eligibility = _recover_analysis_eligibility(payload, dump_id=dump_id, run_id=run_id)
     compute = _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
     _write_pipeline_summary("recalculate", cfg, {**payload, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
-    archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, **compute})
+    archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, "active_context_source": "recalculate", **compute})
     report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
     return {"status": "ok", "mode": "recalculate", "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
 
@@ -175,7 +175,17 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     )
     compute = _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
     _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
-    archive = _archive_run_artifacts(cfg, {**payload, "source_file": profile, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, **compute})
+    archive = _archive_run_artifacts(
+        cfg,
+        {
+            **payload,
+            "source_file": profile,
+            "dump_id": dump_id,
+            "analysis_eligibility": analysis_eligibility,
+            "active_context_source": str(payload.get("active_context_source") or "import_local_file"),
+            **compute,
+        },
+    )
     report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
     return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
 
@@ -465,12 +475,21 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
             shutil.copy2(source, target)
             copied[f"tables_by_dump/{rel}"] = str(target)
 
+    active_context = artifact_context.write_active_context(
+        run_id=run_id,
+        dump_id=dump_id,
+        source=str(payload.get("active_context_source") or "pipeline"),
+        data_dir=DATA,
+        extra={"run_dir": str(run_dir), "dump_dir": str(dump_dir), "tables_dir": str(tables_dir)},
+    )
+
     return {
         "run_id": run_id,
         "dump_id": dump_id,
         "run_dir": str(run_dir),
         "dump_dir": str(dump_dir),
         "tables_dir": str(tables_dir),
+        "active_context": active_context,
         "copied": copied,
     }
 

@@ -113,6 +113,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertIn("download_policy", internal_props)
         self.assertIn("dump_manifest", internal_props)
         self.assertIn("analysis_eligibility", internal_props)
+        self.assertIn("active_context_source", internal_props)
         self.assertIn("run_id", internal_props)
         self.assertIn("dump_id", internal_props)
         internal = InternalPipelinePayload(filter_mode="all", api_key="secret", workflow_mode="strict_works", extra_legacy="ignored")
@@ -130,6 +131,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
                 "dump_id": "dump_a",
                 "dump_manifest": {"dump_id": "dump_a"},
                 "analysis_eligibility": {"status": "final", "allowed_for_final_analysis": True},
+                "active_context_source": "materialization",
                 "unknown_legacy": "drop-me",
             }
         )
@@ -141,6 +143,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertEqual(normalized["dump_id"], "dump_a")
         self.assertEqual(normalized["dump_manifest"], {"dump_id": "dump_a"})
         self.assertEqual(normalized["analysis_eligibility"]["status"], "final")
+        self.assertEqual(normalized["active_context_source"], "materialization")
         self.assertNotIn("unknown_legacy", normalized)
 
     def test_run_request_exposes_only_recalculate_action(self) -> None:
