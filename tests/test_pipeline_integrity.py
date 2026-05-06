@@ -437,6 +437,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 bundle = reports.build_report_bundle(run_id="run_missing", dump_id="dump_missing")
 
         self.assertEqual(bundle["status"], "incomplete_run_artifacts")
+        self.assertEqual(bundle["bundle_version"], "report_bundle_v2")
         self.assertEqual(bundle["no_latest_fallback"], True)
         self.assertIn("pipeline", bundle["missing_artifacts"])
         self.assertIn("quality", bundle["missing_artifacts"])
@@ -561,6 +562,130 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(bundle["report_scope"]["cohort_checksum"], "sha-a")
         self.assertEqual(bundle["cohort_context"]["membership_filters"], {"country_code": "RU"})
         self.assertEqual(bundle["cohort_context"]["analysis_filters"], {"country_code": "RU"})
+
+    def test_report_with_cohort_policy_none_keeps_empty_analysis_context(self) -> None:
+        cohort = {
+            "cohort_id": "cohort_a",
+            "run_id": "run_a",
+            "dump_id": "dump_a",
+            "fraction_mode": "integer",
+            "filters": {"country_code": "RU"},
+            "author_ids": ["https://openalex.org/A2"],
+            "checksum": "sha-a",
+            "n_authors": 1,
+            "source": "top_n",
+            "metric": "h",
+        }
+        captured: dict[str, object] = {}
+
+        def fake_ranking(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> dict[str, object]:
+            captured["filters"] = filters
+            captured["kwargs"] = kwargs
+            return {"fields": ["author_id", "h"], "rows": [], "total": 0, "dump_id": "dump_a"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                patch.object(cohorts, "COHORTS_DIR", root / "cohorts"),
+                patch.object(reports, "DATA", root),
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": "dump_a"}),
+                patch.object(reports, "_run_report_artifacts", return_value={
+                    "pipeline": {"current_slice": {"slice_id": "slice_a"}},
+                    "quality": {"raw_works": 1},
+                    "stats": {"fraction_modes": {"integer": {}}},
+                    "theory": {"top1_sensitivity": {}},
+                    "checksums": {"sha256_manifest": "checksums.json"},
+                    "slice_passport": {"slice_id": "slice_a"},
+                    "calculation_passport": {"dump_id": "dump_a"},
+                }),
+                patch.object(warehouse, "metric_ranking", side_effect=fake_ranking),
+                patch.object(warehouse, "metric_distribution", return_value={"rows": [], "n": 0, "dump_id": "dump_a"}),
+                patch.object(warehouse, "read_json_doc", return_value={}),
+                patch.object(warehouse, "count_rows", return_value=1),
+            ):
+                cohorts._write(cohort)
+                bundle = reports.build_report_bundle(
+                    metric="h",
+                    fraction_mode="integer",
+                    run_id="run_a",
+                    dump_id="dump_a",
+                    filters={"country_code": "DE"},
+                    cohort_id="cohort_a",
+                    cohort_filter_policy="none",
+                )
+
+        self.assertEqual(bundle["bundle_version"], "report_bundle_v2")
+        self.assertEqual(captured["filters"], {})
+        self.assertEqual(bundle["filters"], {})
+        self.assertEqual(bundle["report_scope"]["version"], "report_scope_v2")
+        self.assertEqual(bundle["report_scope"]["filters"], {})
+        self.assertEqual(bundle["report_scope"]["cohort_filter_policy"], "none")
+        self.assertEqual(bundle["report_scope"]["cohort_membership_filters"], {"country_code": "RU"})
+        self.assertEqual(bundle["cohort_context"]["analysis_filters"], {})
+        self.assertEqual(bundle["cohort_context"]["membership_filters"], {"country_code": "RU"})
+        self.assertEqual(bundle["cohort_context"]["filter_policy"], "none")
+        self.assertEqual(bundle["cohort_context"]["resolved_filter_mode"], "no_analysis_filters")
+
+    def test_report_with_cohort_policy_current_empty_filters_keeps_empty_analysis_context(self) -> None:
+        cohort = {
+            "cohort_id": "cohort_a",
+            "run_id": "run_a",
+            "dump_id": "dump_a",
+            "fraction_mode": "integer",
+            "filters": {"country_code": "RU"},
+            "author_ids": ["https://openalex.org/A2"],
+            "checksum": "sha-a",
+            "n_authors": 1,
+            "source": "top_n",
+            "metric": "h",
+        }
+        captured: dict[str, object] = {}
+
+        def fake_ranking(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> dict[str, object]:
+            captured["filters"] = filters
+            return {"fields": ["author_id", "h"], "rows": [], "total": 0, "dump_id": "dump_a"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                patch.object(cohorts, "COHORTS_DIR", root / "cohorts"),
+                patch.object(reports, "DATA", root),
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": "dump_a"}),
+                patch.object(reports, "_run_report_artifacts", return_value={
+                    "pipeline": {"current_slice": {"slice_id": "slice_a"}},
+                    "quality": {"raw_works": 1},
+                    "stats": {"fraction_modes": {"integer": {}}},
+                    "theory": {"top1_sensitivity": {}},
+                    "checksums": {"sha256_manifest": "checksums.json"},
+                    "slice_passport": {"slice_id": "slice_a"},
+                    "calculation_passport": {"dump_id": "dump_a"},
+                }),
+                patch.object(warehouse, "metric_ranking", side_effect=fake_ranking),
+                patch.object(warehouse, "metric_distribution", return_value={"rows": [], "n": 0, "dump_id": "dump_a"}),
+                patch.object(warehouse, "read_json_doc", return_value={}),
+                patch.object(warehouse, "count_rows", return_value=1),
+            ):
+                cohorts._write(cohort)
+                bundle = reports.build_report_bundle(
+                    metric="h",
+                    fraction_mode="integer",
+                    run_id="run_a",
+                    dump_id="dump_a",
+                    filters={},
+                    cohort_id="cohort_a",
+                    cohort_filter_policy="current",
+                )
+
+        self.assertEqual(captured["filters"], {})
+        self.assertEqual(bundle["filters"], {})
+        self.assertEqual(bundle["report_scope"]["cohort_filter_policy"], "current")
+        self.assertEqual(bundle["report_scope"]["cohort_membership_filters"], {"country_code": "RU"})
+        self.assertEqual(bundle["cohort_context"]["analysis_filters"], {})
+        self.assertEqual(bundle["cohort_context"]["membership_filters"], {"country_code": "RU"})
+        self.assertEqual(bundle["cohort_context"]["filter_policy"], "current")
+        self.assertEqual(bundle["cohort_context"]["resolved_filter_mode"], "no_analysis_filters")
 
     def test_empty_cohort_report_has_empty_rank_table(self) -> None:
         cohort_ctx = {
@@ -715,8 +840,10 @@ class PipelineIntegrityTests(unittest.TestCase):
     def test_report_build_requires_explicit_run_or_dump_for_final_report(self) -> None:
         bundle = reports.build_report_bundle(metric="h", fraction_mode="integer", filters={"country_code": "RU"})
         self.assertEqual(bundle["status"], "preview_not_reproducible")
+        self.assertEqual(bundle["bundle_version"], "report_bundle_v2")
         dump_only = reports.build_report_bundle(metric="h", fraction_mode="integer", dump_id="dump_a")
         self.assertEqual(dump_only["status"], "preview_not_reproducible")
+        self.assertEqual(dump_only["bundle_version"], "report_bundle_v2")
 
     def test_report_bundle_json_without_run_does_not_return_cached_latest_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

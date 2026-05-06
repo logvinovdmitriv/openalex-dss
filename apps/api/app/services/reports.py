@@ -121,7 +121,7 @@ def build_report_bundle(
         }
     )
     report = {
-        "bundle_version": "report_bundle_v1",
+        "bundle_version": "report_bundle_v2",
         "status": "ok",
         "no_latest_fallback": bool(run_id),
         "run_id": run_id,
@@ -279,7 +279,7 @@ def _read_run_json(run_id: str, filename: str) -> dict[str, Any]:
 
 def _incomplete_run_report(*, run_id: str, dump_id: str, missing: list[str], report_scope: dict[str, Any]) -> dict[str, Any]:
     return {
-        "bundle_version": "report_bundle_v1",
+        "bundle_version": "report_bundle_v2",
         "status": "incomplete_run_artifacts",
         "run_id": run_id,
         "dump_id": dump_id,
@@ -330,7 +330,7 @@ def _report_scope(
 
 def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
     return {
-        "bundle_version": "report_bundle_v1",
+        "bundle_version": "report_bundle_v2",
         "status": "preview_not_reproducible",
         "run_id": str(report_scope.get("run_id") or ""),
         "dump_id": str(report_scope.get("dump_id") or ""),

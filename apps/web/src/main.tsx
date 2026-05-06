@@ -1405,6 +1405,12 @@ function ReportsPage({
           <a href={`${API_BASE}/state`}>JSON состояния</a>
           <a href={`${API_BASE}/catalog`}>Каталог конфигураций</a>
         </div>
+        {cohortMetricsCsvUrl && (
+          <div className="notice">
+            <b>CSV когорты требует контекст</b>
+            <span>Интерпретируйте таблицу вместе с JSON метрик, JSON статистики и JSON-пакетом отчета: там зафиксированы run, dump, режим анализа и фильтры.</span>
+          </div>
+        )}
       </section>
       {cohortContext && <CohortContextPanel context={cohortContext} />}
     </div>
