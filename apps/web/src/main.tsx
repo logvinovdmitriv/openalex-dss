@@ -1990,6 +1990,10 @@ function ReportsPage({
   const scientometricsTopOutliersUrl = `${API_BASE}/analytics/scientometrics/top-outliers.csv?${scientometricParams.toString()}`;
   const scientometricsFindingsUrl = `${API_BASE}/analytics/scientometrics/findings.csv?${scientometricParams.toString()}`;
   const scientometricsConclusionUrl = `${API_BASE}/analytics/scientometrics/conclusion.md?${scientometricParams.toString()}`;
+  const localIndicesUrl = `${API_BASE}${localDataPreviewCsvUrl("indices", { runId, dumpId, limit: 100_000 })}`;
+  const localWorksUrl = `${API_BASE}${localDataPreviewCsvUrl("works", { runId, dumpId, limit: 100_000 })}`;
+  const localAuthorshipsUrl = `${API_BASE}${localDataPreviewCsvUrl("authorships", { runId, dumpId, limit: 100_000 })}`;
+  const localWorkTopicsUrl = `${API_BASE}${localDataPreviewCsvUrl("work_topics", { runId, dumpId, limit: 100_000 })}`;
   const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "csv", cohortFilterPolicy)}` : "";
   const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "json", cohortFilterPolicy)}` : "";
   const cohortStatsUrl = cohortId ? `${API_BASE}${cohortStatisticsUrl(cohortId, filters, fractionMode, runId, dumpId, cohortFilterPolicy)}` : "";
@@ -2010,6 +2014,10 @@ function ReportsPage({
           {cohortMetricsJsonUrl && <a href={cohortMetricsJsonUrl}>JSON метрик когорты</a>}
           {cohortStatsUrl && <a href={cohortStatsUrl}>JSON статистики когорты</a>}
           <a href={bundleUrl}>JSON-пакет отчета</a>
+          <a href={localIndicesUrl}>CSV локальных индексов авторов</a>
+          <a href={localWorksUrl}>CSV локальных работ</a>
+          <a href={localAuthorshipsUrl}>CSV локальных авторств</a>
+          <a href={localWorkTopicsUrl}>CSV тематических связей работ</a>
           <a href={`${API_BASE}/workbench`}>JSON workbench</a>
           <a href={`${API_BASE}/catalog`}>Каталог конфигураций</a>
         </div>

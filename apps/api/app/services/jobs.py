@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.paths import DATA
-from app.services import pipeline, query_planner, warehouse
+from app.services import pipeline, query_planner
 
 
 RUNS_DIR = DATA / "runs"

@@ -11,7 +11,7 @@ from app.services import cohorts, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
-REPORT_BUNDLE_VERSION = "report_bundle_v10"
+REPORT_BUNDLE_VERSION = "report_bundle_v11"
 DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "islv")
 
 
@@ -211,9 +211,10 @@ def build_report_bundle(
             "scientometrics_top_outliers_csv": f"/api/v1/analytics/scientometrics/top-outliers.csv?{scientometric_query}",
             "scientometrics_findings_csv": f"/api/v1/analytics/scientometrics/findings.csv?{scientometric_query}",
             "scientometrics_conclusion_md": f"/api/v1/analytics/scientometrics/conclusion.md?{scientometric_query}",
-            "authors_local_metrics_csv": _local_data_csv_export("indices", run_id=run_id, dump_id=resolved_dump_id),
-            "works_csv": _local_data_csv_export("works", run_id=run_id, dump_id=resolved_dump_id),
-            "authorships_csv": _local_data_csv_export("authorships", run_id=run_id, dump_id=resolved_dump_id),
+            "local_indices_csv": _local_data_csv_export("indices", run_id=run_id, dump_id=resolved_dump_id),
+            "local_works_csv": _local_data_csv_export("works", run_id=run_id, dump_id=resolved_dump_id),
+            "local_authorships_csv": _local_data_csv_export("authorships", run_id=run_id, dump_id=resolved_dump_id),
+            "local_work_topics_csv": _local_data_csv_export("work_topics", run_id=run_id, dump_id=resolved_dump_id),
             "report_bundle_json": f"/api/v1/reports/bundle.json?{bundle_query}" if bundle_query else "/api/v1/reports/bundle.json",
             "sha256_manifest": checksums.get("sha256_manifest"),
         },
@@ -386,7 +387,7 @@ def _report_scope(
     membership_filters = _clean_filters(cohort_membership_filters or {})
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     canonical = {
-        "version": "report_scope_v10",
+        "version": "report_scope_v11",
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),
@@ -440,6 +441,10 @@ def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = ""
         "scientometrics_top_outliers_csv",
         "scientometrics_findings_csv",
         "scientometrics_conclusion_md",
+        "local_indices_csv",
+        "local_works_csv",
+        "local_authorships_csv",
+        "local_work_topics_csv",
     ):
         if not ((cached.get("exports") or {}).get(key)):
             return False
