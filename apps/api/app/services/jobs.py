@@ -165,7 +165,6 @@ def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _progress_before_dispatch(action: str) -> int:
     return {
-        "plan": 25,
         "fetch_slice_dump": 25,
         "build_from_openalex": 20,
         "import_file": 35,
@@ -175,7 +174,6 @@ def _progress_before_dispatch(action: str) -> int:
 
 def _stage_for_action(action: str) -> str:
     return {
-        "plan": "estimating slice",
         "fetch_slice_dump": "fetching mini-dump",
         "build_from_openalex": "fetching and building local mart",
         "import_file": "normalizing local file",

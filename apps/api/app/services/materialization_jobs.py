@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from app.services import pipeline, query_planner
+from app.services import pipeline
 from app.services.internal_payloads import normalize_internal_pipeline_payload
 
 
-MATERIALIZATION_ACTIONS = {"plan", "fetch_slice_dump", "build_from_openalex", "import_file"}
+MATERIALIZATION_ACTIONS = {"fetch_slice_dump", "build_from_openalex", "import_file"}
 REQUIRES_ACCEPTED_SIGNATURE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
 MATERIALIZATION_LIFECYCLE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
 
@@ -25,8 +25,6 @@ def dispatch(
     allow_unchecked_download: bool = False,
 ) -> dict[str, Any]:
     payload = normalize_internal_pipeline_payload(payload)
-    if action == "plan":
-        return query_planner.plan_slice(payload)
     if action == "fetch_slice_dump":
         return pipeline.fetch_slice_dump(
             payload,

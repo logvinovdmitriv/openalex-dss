@@ -220,6 +220,12 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIn("download_progress_callback", dispatch.call_args.kwargs)
         self.assertIn("update_progress_callback", dispatch.call_args.kwargs)
 
+    def test_internal_plan_job_action_is_not_supported(self) -> None:
+        with self.assertRaises(ValueError) as raised:
+            jobs._dispatch("run_plan", "plan", {"filter_mode": "all"})
+
+        self.assertIn("Unsupported run action: plan", str(raised.exception))
+
     def test_materialization_lifecycle_hooks_delegate_to_slice_workbench(self) -> None:
         result = {"status": "ok"}
         payload = {"materialization_id": "mat_a"}
