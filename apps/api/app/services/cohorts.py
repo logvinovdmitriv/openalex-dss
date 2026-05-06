@@ -168,8 +168,16 @@ def resolve_cohort_context(
 
 def cohort_context_summary(ctx: dict[str, Any]) -> dict[str, Any]:
     cohort = ctx.get("cohort") or {}
-    membership_filters = ctx.get("membership_filters") or clean_analysis_filters(cohort.get("filters") or {}) or ctx.get("filters") or {}
-    analysis_filters = ctx.get("analysis_filters") or ctx.get("filters") or membership_filters
+    if "membership_filters" in ctx and ctx.get("membership_filters") is not None:
+        membership_filters = clean_analysis_filters(ctx.get("membership_filters") or {})
+    else:
+        membership_filters = clean_analysis_filters(cohort.get("filters") or {})
+    if "analysis_filters" in ctx and ctx.get("analysis_filters") is not None:
+        analysis_filters = clean_analysis_filters(ctx.get("analysis_filters") or {})
+    elif "filters" in ctx and ctx.get("filters") is not None:
+        analysis_filters = clean_analysis_filters(ctx.get("filters") or {})
+    else:
+        analysis_filters = membership_filters
     return {
         "cohort_id": cohort.get("cohort_id"),
         "name": cohort.get("name"),

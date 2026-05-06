@@ -310,7 +310,7 @@ def _report_scope(
 ) -> dict[str, Any]:
     membership_filters = _clean_filters(cohort_membership_filters or {})
     canonical = {
-        "version": "report_scope_v1",
+        "version": "report_scope_v2",
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),

@@ -527,6 +527,10 @@ class PipelineIntegrityTests(unittest.TestCase):
             "dump_id": "dump_a",
             "fraction_mode": "integer",
             "filters": {"country_code": "RU"},
+            "analysis_filters": {"country_code": "RU"},
+            "membership_filters": {"country_code": "RU"},
+            "filter_policy": "membership",
+            "resolved_filter_mode": "membership_filters",
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -792,6 +796,8 @@ class PipelineIntegrityTests(unittest.TestCase):
                 current_empty = cohorts.resolve_cohort_context("cohort_a", filters={}, filter_policy="current")
                 none = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"}, filter_policy="none")
                 auto = cohorts.resolve_cohort_context("cohort_a", filters={}, filter_policy="auto")
+                current_empty_summary = cohorts.cohort_context_summary(current_empty)
+                none_summary = cohorts.cohort_context_summary(none)
                 with self.assertRaises(ValueError):
                     cohorts.resolve_cohort_context("cohort_a", filter_policy="surprise")
 
@@ -805,8 +811,16 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(current["resolved_filter_mode"], "analysis_override")
         self.assertEqual(current_empty["filters"], {})
         self.assertEqual(current_empty["resolved_filter_mode"], "no_analysis_filters")
+        self.assertEqual(current_empty_summary["analysis_filters"], {})
+        self.assertEqual(current_empty_summary["membership_filters"], {"country_code": "RU"})
+        self.assertEqual(current_empty_summary["filter_policy"], "current")
+        self.assertEqual(current_empty_summary["resolved_filter_mode"], "no_analysis_filters")
         self.assertEqual(none["filters"], {})
         self.assertEqual(none["filter_policy"], "none")
+        self.assertEqual(none_summary["analysis_filters"], {})
+        self.assertEqual(none_summary["membership_filters"], {"country_code": "RU"})
+        self.assertEqual(none_summary["filter_policy"], "none")
+        self.assertEqual(none_summary["resolved_filter_mode"], "no_analysis_filters")
         self.assertEqual(auto["filters"], {"country_code": "RU"})
         self.assertEqual(auto["filter_policy"], "auto")
 
