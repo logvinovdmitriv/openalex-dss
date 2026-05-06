@@ -11,6 +11,9 @@ from app.services import cohorts, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
+REPORT_BUNDLE_VERSION = "report_bundle_v2"
+
+
 def build_report_bundle(
     metric: str = "islv",
     fraction_mode: str = "strict_authors_count",
@@ -121,7 +124,7 @@ def build_report_bundle(
         }
     )
     report = {
-        "bundle_version": "report_bundle_v2",
+        "bundle_version": REPORT_BUNDLE_VERSION,
         "status": "ok",
         "no_latest_fallback": bool(run_id),
         "run_id": run_id,
@@ -224,6 +227,8 @@ def report_bundle_json(
             if cached_dump_id:
                 raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
             return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
+        if not _cached_report_bundle_current(cached, cohort_id=cohort_id):
+            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
         if not run_id or cached.get("status") != "incomplete_run_artifacts":
             return cached
     legacy_path = _report_bundle_path(run_id)
@@ -279,7 +284,7 @@ def _read_run_json(run_id: str, filename: str) -> dict[str, Any]:
 
 def _incomplete_run_report(*, run_id: str, dump_id: str, missing: list[str], report_scope: dict[str, Any]) -> dict[str, Any]:
     return {
-        "bundle_version": "report_bundle_v2",
+        "bundle_version": REPORT_BUNDLE_VERSION,
         "status": "incomplete_run_artifacts",
         "run_id": run_id,
         "dump_id": dump_id,
@@ -330,7 +335,7 @@ def _report_scope(
 
 def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
     return {
-        "bundle_version": "report_bundle_v2",
+        "bundle_version": REPORT_BUNDLE_VERSION,
         "status": "preview_not_reproducible",
         "run_id": str(report_scope.get("run_id") or ""),
         "dump_id": str(report_scope.get("dump_id") or ""),
@@ -338,6 +343,17 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
         "message": "Final report build requires explicit run_id. Dump-only and latest-view report modes are development previews because they do not have run-scoped passports, statistics and checksums.",
         "no_latest_fallback": False,
     }
+
+
+def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = "") -> bool:
+    if cached.get("bundle_version") != REPORT_BUNDLE_VERSION:
+        return False
+    for key in ("report_scope", "cohort_context", "warnings", "exports"):
+        if key not in cached:
+            return False
+    if cohort_id and not ((cached.get("exports") or {}).get("cohort_statistics_json")):
+        return False
+    return True
 
 
 def _report_warnings(cohort_filter_policy: str) -> list[str]:

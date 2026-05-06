@@ -461,6 +461,51 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertIn("incompatible", str(raised.exception))
 
+    def test_report_bundle_json_rebuilds_stale_bundle_version_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scope = reports._report_scope(
+                run_id="run_a",
+                dump_id="dump_a",
+                filters={"country_code": "RU"},
+                cohort_id="",
+                cohort_checksum="",
+                cohort_n_authors=0,
+                metric="h",
+                fraction_mode="integer",
+                limit=50,
+            )
+            cached_path = root / "runs" / "run_a" / "reports" / f"report_{scope['report_scope_hash']}.json"
+            cached_path.parent.mkdir(parents=True)
+            cached_path.write_text(
+                json.dumps({
+                    "bundle_version": "report_bundle_v1",
+                    "status": "ok",
+                    "run_id": "run_a",
+                    "dump_id": "dump_a",
+                    "report_scope": scope,
+                    "exports": {},
+                }),
+                encoding="utf-8",
+            )
+            rebuilt = {"bundle_version": "report_bundle_v2", "status": "ok", "run_id": "run_a", "dump_id": "dump_a", "rebuilt": True}
+
+            with (
+                patch.object(reports, "DATA", root),
+                patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": "dump_a"}),
+                patch.object(reports, "build_report_bundle", return_value=rebuilt) as build,
+            ):
+                payload = reports.report_bundle_json(
+                    run_id="run_a",
+                    dump_id="dump_a",
+                    metric="h",
+                    fraction_mode="integer",
+                    filters={"country_code": "RU"},
+                )
+
+        self.assertTrue(payload["rebuilt"])
+        build.assert_called_once()
+
     def test_report_build_forwards_filters_to_metric_ranking_and_scopes_cache(self) -> None:
         captured: dict[str, object] = {}
 
