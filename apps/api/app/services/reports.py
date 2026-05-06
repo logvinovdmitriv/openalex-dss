@@ -7,11 +7,12 @@ from typing import Any
 from urllib.parse import urlencode
 
 from app.core.paths import DATA, JSON_FILES
-from app.services import cohorts, warehouse
+from app.services import cohorts, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
-REPORT_BUNDLE_VERSION = "report_bundle_v2"
+REPORT_BUNDLE_VERSION = "report_bundle_v3"
+DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "islv")
 
 
 def build_report_bundle(
@@ -24,8 +25,14 @@ def build_report_bundle(
     filters: dict[str, Any] | None = None,
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
+    scientometric_metrics: list[str] | tuple[str, ...] | str | None = None,
+    baseline_metric: str = "h",
+    rank_top_n: int = 100,
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
+    scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
+    baseline_metric = str(baseline_metric or "h").strip() or "h"
+    rank_top_n = max(1, min(int(rank_top_n or 100), 1000))
     cohort: dict[str, Any] = {}
     cohort_ctx: dict[str, Any] = {}
     cohort_author_ids: set[str] | None = None
@@ -53,6 +60,9 @@ def build_report_bundle(
             metric=metric,
             fraction_mode=fraction_mode,
             limit=limit,
+            scientometric_metrics=scientometric_metric_list,
+            baseline_metric=baseline_metric,
+            rank_top_n=rank_top_n,
         )
         return _preview_report(report_scope)
     report_scope = _report_scope(
@@ -67,6 +77,9 @@ def build_report_bundle(
         metric=metric,
         fraction_mode=fraction_mode,
         limit=limit,
+        scientometric_metrics=scientometric_metric_list,
+        baseline_metric=baseline_metric,
+        rank_top_n=rank_top_n,
     )
     scope_hash = report_scope["report_scope_hash"]
     docs = _run_report_artifacts(run_id)
@@ -90,6 +103,17 @@ def build_report_bundle(
     distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id, author_ids=cohort_author_ids)
     resolved_dump_id = dump_id or str(top.get("dump_id") or calculation_passport.get("dump_id") or "")
     report_scope["dump_id"] = resolved_dump_id
+    scientometric_analysis = scientometrics.build_scientometric_analysis(
+        fraction_mode=fraction_mode,
+        metrics=scientometric_metric_list,
+        baseline_metric=baseline_metric,
+        filters=filters,
+        run_id=run_id,
+        dump_id=resolved_dump_id,
+        cohort_id=cohort_id,
+        cohort_filter_policy=cohort_filter_policy,
+        top_n=rank_top_n,
+    )
     export_query = _query_params(
         {
             **filters,
@@ -117,6 +141,22 @@ def build_report_bundle(
             "fraction_mode": fraction_mode,
             "metric": metric,
             "limit": limit,
+            "run_id": run_id,
+            "dump_id": resolved_dump_id,
+            "cohort_id": cohort_id,
+            "cohort_filter_policy": cohort_filter_policy,
+            "scientometric_metrics": ",".join(scientometric_metric_list),
+            "baseline_metric": baseline_metric,
+            "rank_top_n": rank_top_n,
+        }
+    )
+    scientometric_query = _query_params(
+        {
+            **filters,
+            "fraction_mode": fraction_mode,
+            "metrics": ",".join(scientometric_metric_list),
+            "baseline_metric": baseline_metric,
+            "top_n": rank_top_n,
             "run_id": run_id,
             "dump_id": resolved_dump_id,
             "cohort_id": cohort_id,
@@ -149,6 +189,7 @@ def build_report_bundle(
         "funnel": _quality_funnel(quality, run_id=run_id),
         "rank_table": top,
         "distribution": distribution,
+        "scientometric_analysis": scientometric_analysis,
         "statistics": stats,
         "stability_report": {
             "top1_sensitivity": theory.get("top1_sensitivity"),
@@ -161,6 +202,11 @@ def build_report_bundle(
             "cohort_author_metrics_csv": f"/api/v1/cohorts/{cohort_id}/author-metrics.csv?{export_query}" if cohort_id else None,
             "cohort_author_metrics_json": f"/api/v1/cohorts/{cohort_id}/author-metrics.json?{export_query}" if cohort_id else None,
             "cohort_statistics_json": f"/api/v1/cohorts/{cohort_id}/statistics?{statistics_query}" if cohort_id else None,
+            "scientometrics_json": f"/api/v1/analytics/scientometrics.json?{scientometric_query}",
+            "scientometrics_descriptive_csv": f"/api/v1/analytics/scientometrics/descriptive.csv?{scientometric_query}",
+            "scientometrics_correlations_csv": f"/api/v1/analytics/scientometrics/correlations.csv?{scientometric_query}",
+            "scientometrics_rank_shifts_csv": f"/api/v1/analytics/scientometrics/rank-shifts.csv?{scientometric_query}",
+            "scientometrics_outliers_csv": f"/api/v1/analytics/scientometrics/outliers.csv?{scientometric_query}",
             "authors_local_metrics_csv": f"/api/v1/exports/authors_local_metrics.csv?run_id={run_id}" if run_id else "/api/v1/exports/authors_local_metrics.csv",
             "works_csv": f"/api/v1/exports/works.csv?run_id={run_id}" if run_id else "/api/v1/exports/works.csv",
             "authorships_csv": f"/api/v1/exports/authorships.csv?run_id={run_id}" if run_id else "/api/v1/exports/authorships.csv",
@@ -190,8 +236,14 @@ def report_bundle_json(
     filters: dict[str, Any] | None = None,
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
+    scientometric_metrics: list[str] | tuple[str, ...] | str | None = None,
+    baseline_metric: str = "h",
+    rank_top_n: int = 100,
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
+    scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
+    baseline_metric = str(baseline_metric or "h").strip() or "h"
+    rank_top_n = max(1, min(int(rank_top_n or 100), 1000))
     cohort: dict[str, Any] = {}
     cohort_ctx: dict[str, Any] = {}
     if cohort_id:
@@ -216,9 +268,12 @@ def report_bundle_json(
         metric=metric,
         fraction_mode=fraction_mode,
         limit=limit,
+        scientometric_metrics=scientometric_metric_list,
+        baseline_metric=baseline_metric,
+        rank_top_n=rank_top_n,
     )
     if not run_id:
-        return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
+        return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
     path = _report_bundle_path(run_id, report_scope["report_scope_hash"])
     if path.exists():
         cached = _read_json(path)
@@ -226,9 +281,9 @@ def report_bundle_json(
         if run_id and dump_id and cached_dump_id != dump_id:
             if cached_dump_id:
                 raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
-            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
+            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
         if not _cached_report_bundle_current(cached, cohort_id=cohort_id):
-            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
+            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
         if not run_id or cached.get("status") != "incomplete_run_artifacts":
             return cached
     legacy_path = _report_bundle_path(run_id)
@@ -237,7 +292,7 @@ def report_bundle_json(
         cached_dump_id = str(legacy.get("dump_id") or "").strip()
         if run_id and dump_id and cached_dump_id and cached_dump_id != dump_id:
             raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
-    return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
+    return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
 
 
 def _quality_funnel(quality: dict[str, Any], *, run_id: str = "") -> list[dict[str, Any]]:
@@ -312,10 +367,14 @@ def _report_scope(
     limit: int,
     cohort_membership_filters: dict[str, Any] | None = None,
     cohort_filter_policy: str = "membership",
+    scientometric_metrics: list[str] | tuple[str, ...] | None = None,
+    baseline_metric: str = "h",
+    rank_top_n: int = 100,
 ) -> dict[str, Any]:
     membership_filters = _clean_filters(cohort_membership_filters or {})
+    scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     canonical = {
-        "version": "report_scope_v2",
+        "version": "report_scope_v3",
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),
@@ -328,6 +387,9 @@ def _report_scope(
         "metric": str(metric or "").strip(),
         "fraction_mode": str(fraction_mode or "").strip(),
         "limit": int(limit or 0),
+        "scientometric_metrics": scientometric_metric_list,
+        "baseline_metric": str(baseline_metric or "h").strip() or "h",
+        "rank_top_n": max(1, min(int(rank_top_n or 100), 1000)),
     }
     blob = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return {**canonical, "report_scope_hash": hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]}
@@ -348,11 +410,14 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
 def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = "") -> bool:
     if cached.get("bundle_version") != REPORT_BUNDLE_VERSION:
         return False
-    for key in ("report_scope", "cohort_context", "warnings", "exports"):
+    for key in ("report_scope", "cohort_context", "warnings", "exports", "scientometric_analysis"):
         if key not in cached:
             return False
     if cohort_id and not ((cached.get("exports") or {}).get("cohort_statistics_json")):
         return False
+    for key in ("scientometrics_json", "scientometrics_descriptive_csv", "scientometrics_correlations_csv", "scientometrics_rank_shifts_csv", "scientometrics_outliers_csv"):
+        if not ((cached.get("exports") or {}).get(key)):
+            return False
     return True
 
 
@@ -380,6 +445,21 @@ def _cohort_summary(cohort: dict[str, Any]) -> dict[str, Any] | None:
 def _hash_dict(value: dict[str, Any]) -> str:
     blob = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _scientometric_metrics(metrics: list[str] | tuple[str, ...] | str | None) -> list[str]:
+    if isinstance(metrics, str):
+        raw = metrics.replace("|", ",").split(",")
+    else:
+        raw = list(metrics or DEFAULT_REPORT_SCIENTOMETRIC_METRICS)
+    values = [str(metric).strip() for metric in raw if str(metric).strip()]
+    if not values:
+        values = list(DEFAULT_REPORT_SCIENTOMETRIC_METRICS)
+    unique: list[str] = []
+    for metric in values:
+        if metric not in unique:
+            unique.append(metric)
+    return unique
 
 
 def _query_params(params: dict[str, Any]) -> str:

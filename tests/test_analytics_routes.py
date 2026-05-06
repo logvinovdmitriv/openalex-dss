@@ -3,7 +3,10 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from urllib.parse import urlencode
 from unittest.mock import patch
+
+from starlette.requests import Request
 
 ROOT = Path(__file__).resolve().parents[1]
 API = ROOT / "apps/api"
@@ -14,6 +17,18 @@ for path in (API, SRC):
 
 from app.api.routes import analytics as analytics_routes  # noqa: E402
 from app.api.routes import cohorts as cohort_routes  # noqa: E402
+
+
+def _request(**params: object) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "query_string": urlencode({key: value for key, value in params.items() if value is not None}).encode("utf-8"),
+            "headers": [],
+        }
+    )
 
 
 class AnalyticsRouteTests(unittest.TestCase):
@@ -174,6 +189,68 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["baseline_metric"], "h")
         self.assertEqual(captured["top_n"], 50)
         self.assertEqual(captured["filters"], {"country_code": "RU", "filter_mode": "search", "text_search_query": "ergodesign", "work_type": "article"})
+
+    def test_scientometric_export_routes_return_csv_artifacts(self) -> None:
+        payload = {
+            "analysis_version": "scientometrics_v1",
+            "descriptive": {
+                "h": {
+                    "n": 2,
+                    "missing_count": 0,
+                    "zero_count": 0,
+                    "zero_rate": 0.0,
+                    "min": 1,
+                    "q1": 1,
+                    "median": 2,
+                    "q3": 3,
+                    "max": 3,
+                    "mean": 2,
+                    "stddev": 1,
+                    "coefficient_of_variation": 0.5,
+                    "iqr": 2,
+                    "tie_rate": 0.0,
+                    "outlier_count_iqr": 0,
+                    "outlier_share_iqr": 0.0,
+                }
+            },
+            "correlations": {
+                "spearman": {"h": {"g": 0.5}},
+                "pearson_log1p": {"h": {"g": 0.6}},
+                "kendall_tau_b": {"matrix": {"h": {"g": 0.4}}, "skipped": []},
+            },
+            "rank_comparisons": {
+                "g": {
+                    "baseline_metric": "h",
+                    "largest_shifts": [
+                        {
+                            "author_id": "https://openalex.org/A1",
+                            "author_display_name": "Author One",
+                            "baseline_rank": 1,
+                            "metric_rank": 3,
+                            "rank_delta": 2,
+                            "abs_rank_delta": 2,
+                        }
+                    ],
+                }
+            },
+            "boxplots": {"c": {"outlier_rule": "iqr_1_5"}},
+            "outliers": {"c": [{"author_id": "https://openalex.org/A2", "author_display_name": "Author Two", "value": 99}]},
+        }
+
+        with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload):
+            descriptive = analytics_routes.scientometric_descriptive_csv(_request(metrics="h,g", baseline_metric="h", top_n=20))
+            correlations = analytics_routes.scientometric_correlations_csv(_request(metrics="h,g"))
+            rank_shifts = analytics_routes.scientometric_rank_shifts_csv(_request(metrics="h,g"))
+            outliers = analytics_routes.scientometric_outliers_csv(_request(metrics="h,c"))
+
+        self.assertIn("metric,n,missing_count", descriptive.body.decode("utf-8"))
+        self.assertIn("h,2,0", descriptive.body.decode("utf-8"))
+        self.assertIn("method,left_metric,right_metric,value", correlations.body.decode("utf-8"))
+        self.assertIn("kendall_tau_b,h,g,0.4", correlations.body.decode("utf-8"))
+        self.assertIn("baseline_metric,compare_metric,author_id", rank_shifts.body.decode("utf-8"))
+        self.assertIn("h,g,https://openalex.org/A1", rank_shifts.body.decode("utf-8"))
+        self.assertIn("metric,author_id,author_display_name,value,rule", outliers.body.decode("utf-8"))
+        self.assertIn("c,https://openalex.org/A2,Author Two,99,iqr_1_5", outliers.body.decode("utf-8"))
 
     def test_cohort_statistics_route_forwards_analysis_scope(self) -> None:
         captured: dict[str, object] = {}

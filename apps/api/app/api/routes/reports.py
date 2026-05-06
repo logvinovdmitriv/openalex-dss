@@ -47,6 +47,9 @@ def build_report(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     limit: int = Query(50, ge=1, le=500),
+    scientometric_metrics: str = "p,c,c_frac,h,i10,g,islv",
+    baseline_metric: str = "h",
+    rank_top_n: int = Query(100, ge=1, le=1000),
 ) -> dict[str, Any]:
     filters = build_analysis_filters(
         country_code=country_code,
@@ -74,7 +77,19 @@ def build_report(
         work_type=work_type,
     )
     try:
-        return reports.build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
+        return reports.build_report_bundle(
+            metric=metric,
+            fraction_mode=fraction_mode,
+            limit=limit,
+            run_id=run_id,
+            dump_id=dump_id,
+            filters=filters,
+            cohort_id=cohort_id,
+            cohort_filter_policy=cohort_filter_policy,
+            scientometric_metrics=scientometric_metrics,
+            baseline_metric=baseline_metric,
+            rank_top_n=rank_top_n,
+        )
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -116,6 +131,9 @@ def report_bundle(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     limit: int = Query(50, ge=1, le=500),
+    scientometric_metrics: str = "p,c,c_frac,h,i10,g,islv",
+    baseline_metric: str = "h",
+    rank_top_n: int = Query(100, ge=1, le=1000),
 ) -> Response:
     filters = build_analysis_filters(
         country_code=country_code,
@@ -143,7 +161,19 @@ def report_bundle(
         work_type=work_type,
     )
     try:
-        payload = reports.report_bundle_json(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
+        payload = reports.report_bundle_json(
+            metric=metric,
+            fraction_mode=fraction_mode,
+            limit=limit,
+            run_id=run_id,
+            dump_id=dump_id,
+            filters=filters,
+            cohort_id=cohort_id,
+            cohort_filter_policy=cohort_filter_policy,
+            scientometric_metrics=scientometric_metrics,
+            baseline_metric=baseline_metric,
+            rank_top_n=rank_top_n,
+        )
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:

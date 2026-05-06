@@ -261,10 +261,11 @@ function Workbench() {
   }, [topN, defaultTopN]);
 
   useEffect(() => {
-    if (baselineMetric && !scientometricMetrics.includes(baselineMetric)) {
-      setScientometricMetrics([baselineMetric, ...scientometricMetrics]);
-    }
-  }, [baselineMetric, scientometricMetrics]);
+    setScientometricMetrics((prev) => {
+      if (!baselineMetric || prev.includes(baselineMetric)) return prev;
+      return [baselineMetric, ...prev];
+    });
+  }, [baselineMetric]);
 
   const createSlice = useMutation({
     mutationFn: (body: any) => postJson<any>("/slices", body),
@@ -341,7 +342,18 @@ function Workbench() {
     },
   });
   const buildReport = useMutation({
-    mutationFn: () => postJson<any>(`/reports/build?${filterParams(filters, { metric, fraction_mode: fractionMode, run_id: runId, dump_id: activeDumpId, limit: Math.max(1, activeTopN || 1), cohort_id: selectedCohortId, cohort_filter_policy: cohortFilterPolicy }).toString()}`, {}),
+    mutationFn: () => postJson<any>(`/reports/build?${filterParams(filters, {
+      metric,
+      fraction_mode: fractionMode,
+      run_id: runId,
+      dump_id: activeDumpId,
+      limit: Math.max(1, activeTopN || 1),
+      cohort_id: selectedCohortId,
+      cohort_filter_policy: cohortFilterPolicy,
+      scientometric_metrics: scientometricMetrics.join(","),
+      baseline_metric: baselineMetric,
+      rank_top_n: rankTopN,
+    }).toString()}`, {}),
     onSuccess: () => qc.invalidateQueries(),
   });
   const createCohort = useMutation({
@@ -605,7 +617,7 @@ function Workbench() {
         )}
 
         {view === "reports" && (
-          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={runId} dumpId={activeDumpId} cohortId={selectedCohortId} cohortFilterPolicy={cohortFilterPolicy} cohortContext={cohortStats.data?.cohort_context ?? analytics.data?.cohort} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
+          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={runId} dumpId={activeDumpId} cohortId={selectedCohortId} cohortFilterPolicy={cohortFilterPolicy} cohortContext={cohortStats.data?.cohort_context ?? analytics.data?.cohort} topN={activeTopN} scientometricMetrics={scientometricMetrics} baselineMetric={baselineMetric} rankTopN={rankTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
         )}
 
         {view === "passports" && (
@@ -1797,6 +1809,9 @@ function ReportsPage({
   cohortFilterPolicy,
   cohortContext,
   topN,
+  scientometricMetrics,
+  baselineMetric,
+  rankTopN,
   onBuild,
   building,
 }: {
@@ -1809,12 +1824,42 @@ function ReportsPage({
   cohortFilterPolicy: CohortFilterPolicy;
   cohortContext: any;
   topN: number;
+  scientometricMetrics: string[];
+  baselineMetric: string;
+  rankTopN: number;
   onBuild: () => void;
   building: boolean;
 }) {
-  const reportParams = filterParams(filters, { fraction_mode: fractionMode, metric, limit: topN, run_id: runId, dump_id: dumpId, cohort_id: cohortId, cohort_filter_policy: cohortFilterPolicy });
+  const scientometricMetricParam = scientometricMetrics.join(",");
+  const reportParams = filterParams(filters, {
+    fraction_mode: fractionMode,
+    metric,
+    limit: topN,
+    run_id: runId,
+    dump_id: dumpId,
+    cohort_id: cohortId,
+    cohort_filter_policy: cohortFilterPolicy,
+    scientometric_metrics: scientometricMetricParam,
+    baseline_metric: baselineMetric,
+    rank_top_n: rankTopN,
+  });
+  const scientometricParams = filterParams(filters, {
+    fraction_mode: fractionMode,
+    metrics: scientometricMetricParam,
+    baseline_metric: baselineMetric,
+    top_n: rankTopN,
+    run_id: runId,
+    dump_id: dumpId,
+    cohort_id: cohortId,
+    cohort_filter_policy: cohortFilterPolicy,
+  });
   const rankingUrl = `${API_BASE}/analytics/ranking.csv?${reportParams.toString()}`;
   const bundleUrl = `${API_BASE}/reports/bundle.json?${reportParams.toString()}`;
+  const scientometricsJsonUrl = `${API_BASE}/analytics/scientometrics.json?${scientometricParams.toString()}`;
+  const scientometricsDescriptiveUrl = `${API_BASE}/analytics/scientometrics/descriptive.csv?${scientometricParams.toString()}`;
+  const scientometricsCorrelationsUrl = `${API_BASE}/analytics/scientometrics/correlations.csv?${scientometricParams.toString()}`;
+  const scientometricsRankShiftsUrl = `${API_BASE}/analytics/scientometrics/rank-shifts.csv?${scientometricParams.toString()}`;
+  const scientometricsOutliersUrl = `${API_BASE}/analytics/scientometrics/outliers.csv?${scientometricParams.toString()}`;
   const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "csv", cohortFilterPolicy)}` : "";
   const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "json", cohortFilterPolicy)}` : "";
   const cohortStatsUrl = cohortId ? `${API_BASE}${cohortStatisticsUrl(cohortId, filters, fractionMode, runId, dumpId, cohortFilterPolicy)}` : "";
@@ -1844,6 +1889,24 @@ function ReportsPage({
             <span>Интерпретируйте таблицу вместе с JSON метрик, JSON статистики и JSON-пакетом отчета: там зафиксированы run, dump, режим анализа и фильтры.</span>
           </div>
         )}
+      </section>
+      <section className="panel">
+        <div className="panel-head">
+          <span className="step-badge">Scientometrics</span>
+          <h2>Аналитический пакет сравнения индексов</h2>
+          <p>Выгрузки соответствуют текущему run/dump/cohort scope, режиму дробления, выбранным метрикам, baseline и Top-N для сравнения рангов.</p>
+        </div>
+        <div className="download-grid">
+          <a href={scientometricsJsonUrl}>JSON полного анализа</a>
+          <a href={scientometricsDescriptiveUrl}>CSV описательной статистики</a>
+          <a href={scientometricsCorrelationsUrl}>CSV корреляций</a>
+          <a href={scientometricsRankShiftsUrl}>CSV сдвигов рангов</a>
+          <a href={scientometricsOutliersUrl}>CSV выбросов</a>
+        </div>
+        <div className="notice">
+          <b>Параметры пакета</b>
+          <span>Метрики: {scientometricMetrics.map(metricLabel).join(", ")}. Baseline: {metricLabel(baselineMetric)}. Top-N рангов: {rankTopN}.</span>
+        </div>
       </section>
       {cohortContext && <CohortContextPanel context={cohortContext} />}
     </div>
