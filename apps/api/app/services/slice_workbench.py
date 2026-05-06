@@ -367,14 +367,14 @@ def _workbench_workflow(
 ) -> dict[str, Any]:
     rows = {name: int((info or {}).get("rows") or 0) for name, info in tables.items()}
     active_stage = "idle"
-    if rows.get("indices", 0) > 0 or rows.get("ratings", 0) > 0:
+    if any(str(item.get("state") or "") == "materializing" for item in materializations):
+        active_stage = "materializing"
+    elif rows.get("indices", 0) > 0 or rows.get("ratings", 0) > 0:
         active_stage = "analyzed"
     elif rows.get("works", 0) > 0 and rows.get("authorships", 0) > 0:
         active_stage = "tables"
     elif dumps:
         active_stage = "ready"
-    elif any(str(item.get("state") or "") == "materializing" for item in materializations):
-        active_stage = "materializing"
     elif slices:
         active_stage = str(slices[0].get("state") or "slice")
 
