@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import sys
+import inspect
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import get_type_hints
 from unittest.mock import patch
 
 from pydantic import ValidationError
@@ -18,7 +20,8 @@ for path in (API, SRC):
 
 from app.main import app  # noqa: E402
 from app.api.routes import runs as runs_routes  # noqa: E402
-from app.api.schemas import AnalysisRunRequest, RunRequest  # noqa: E402
+from app.api.routes import slices as slices_routes  # noqa: E402
+from app.api.schemas import AnalysisRunRequest, RunRequest, SliceCreateRequest  # noqa: E402
 
 
 class PublicApiSurfaceTests(unittest.TestCase):
@@ -54,6 +57,41 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertNotIn("/api/v1/exports/{table}.csv", route_paths)
         self.assertNotIn("/api/v1/exports/{table}.json", route_paths)
         self.assertNotIn("/api/v1/runs/{run_id}/tables/{table_name}", route_paths)
+
+    def test_slice_create_schema_does_not_expose_internal_pipeline_fields(self) -> None:
+        props = SliceCreateRequest.model_json_schema()["properties"]
+
+        for field in (
+            "raw_openalex_filter",
+            "api_key",
+            "source_path",
+            "source_strategy",
+            "accepted_estimate_signature",
+            "accepted_download_signature",
+            "fraction_modes",
+            "fraction_mode_default",
+            "iupv_n0",
+            "iupv_lambda",
+            "lrdi_p0",
+            "lrdi_lambda",
+            "analysis_year",
+        ):
+            self.assertNotIn(field, props)
+
+        self.assertIn("filter_mode", props)
+        self.assertIn("country_code", props)
+
+    def test_slice_create_request_rejects_internal_pipeline_fields(self) -> None:
+        for field in ("api_key", "raw_openalex_filter", "source_path", "accepted_download_signature", "lrdi_p0"):
+            with self.assertRaises(ValidationError):
+                SliceCreateRequest(filter_mode="all", **{field: "legacy"})
+
+    def test_public_slices_route_uses_slice_create_request_schema(self) -> None:
+        annotation_name = inspect.signature(slices_routes.create_slice).parameters["payload"].annotation
+        annotation = get_type_hints(slices_routes.create_slice)["payload"]
+
+        self.assertEqual(annotation_name, "SliceCreateRequest")
+        self.assertIs(annotation, SliceCreateRequest)
 
     def test_run_request_exposes_only_recalculate_action(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")

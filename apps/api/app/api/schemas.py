@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class PipelineRequest(BaseModel):
+class SliceDefinitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     slice_name: str | None = None
     workflow_mode: str | None = None
     entity_level: str | None = None
@@ -16,7 +18,6 @@ class PipelineRequest(BaseModel):
     keyword_id: str | None = None
     keyword_display_name: str | None = None
     text_search_query: str | None = None
-    raw_openalex_filter: str | None = None
     author_id: str | None = None
     author_display_name: str | None = None
     author_orcid: str | None = None
@@ -41,18 +42,6 @@ class PipelineRequest(BaseModel):
     country_code: str | None = None
     sort: str | None = None
     per_page: int | None = Field(default=None, ge=1, le=100)
-    fraction_modes: list[str] | None = None
-    fraction_mode_default: str | None = None
-    iupv_n0: float | None = None
-    iupv_lambda: float | None = None
-    lrdi_p0: float | None = None
-    lrdi_lambda: float | None = None
-    analysis_year: int | None = Field(default=None, ge=1900, le=2100)
-    api_key: str | None = None
-    source_path: str | None = None
-    source_strategy: str | None = None
-    accepted_estimate_signature: str | None = None
-    accepted_download_signature: str | None = None
 
     @field_validator("entity_level")
     @classmethod
@@ -101,6 +90,24 @@ class PipelineRequest(BaseModel):
         return text
 
 
+class PipelineRequest(SliceDefinitionRequest):
+    model_config = ConfigDict(extra="ignore")
+
+    raw_openalex_filter: str | None = None
+    fraction_modes: list[str] | None = None
+    fraction_mode_default: str | None = None
+    iupv_n0: float | None = None
+    iupv_lambda: float | None = None
+    lrdi_p0: float | None = None
+    lrdi_lambda: float | None = None
+    analysis_year: int | None = Field(default=None, ge=1900, le=2100)
+    api_key: str | None = None
+    source_path: str | None = None
+    source_strategy: str | None = None
+    accepted_estimate_signature: str | None = None
+    accepted_download_signature: str | None = None
+
+
 class AnalysisRunRequest(BaseModel):
     dump_id: str = Field(min_length=1)
     fraction_modes: list[str] | None = None
@@ -125,7 +132,7 @@ class RunRequest(BaseModel):
     payload: AnalysisRunRequest
 
 
-class SliceCreateRequest(PipelineRequest):
+class SliceCreateRequest(SliceDefinitionRequest):
     slice_id: str | None = None
     title: str | None = None
 

@@ -93,7 +93,7 @@ export type EntitySuggestion = {
   cited_by_count?: number;
 };
 
-export type PipelinePayload = {
+export type SliceDefinitionPayload = {
   slice_name: string;
   workflow_mode: "strict_works";
   entity_level: string;
@@ -104,7 +104,6 @@ export type PipelinePayload = {
   keyword_id: string;
   keyword_display_name: string;
   text_search_query: string;
-  raw_openalex_filter?: string;
   author_id: string;
   author_display_name: string;
   author_orcid: string;
@@ -128,12 +127,16 @@ export type PipelinePayload = {
   exclude_retracted: boolean;
   exclude_paratext: boolean;
   sort: string;
+};
+
+export type AnalysisRunPayload = {
   fraction_modes: readonly string[];
   fraction_mode_default: string;
+  iupv_n0: number;
+  iupv_lambda: number;
   lrdi_p0: number;
   lrdi_lambda: number;
   analysis_year: number;
-  api_key?: string;
 };
 
 export type DownloadPolicy = {
@@ -208,7 +211,7 @@ export const VIEW_DEFINITIONS: Record<View, { label: string; lead: string }> = {
   },
 };
 
-export function buildSlicePayload(filters: ActiveFilters, fractionMode: string, apiKey = "", fractionModes: readonly string[] = FRACTION_MODES): PipelinePayload {
+export function buildSliceDefinitionPayload(filters: ActiveFilters): SliceDefinitionPayload {
   return {
     slice_name: sliceName(filters),
     workflow_mode: "strict_works",
@@ -243,12 +246,18 @@ export function buildSlicePayload(filters: ActiveFilters, fractionMode: string, 
     exclude_retracted: true,
     exclude_paratext: true,
     sort: "",
+  };
+}
+
+export function buildAnalysisRunPayload(fractionMode: string, fractionModes: readonly string[] = FRACTION_MODES): AnalysisRunPayload {
+  return {
     fraction_modes: fractionModes,
     fraction_mode_default: fractionMode,
+    iupv_n0: 5,
+    iupv_lambda: 0.15,
     lrdi_p0: 5,
     lrdi_lambda: 0.15,
     analysis_year: 2026,
-    ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
   };
 }
 

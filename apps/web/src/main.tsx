@@ -40,8 +40,9 @@ import { DataGrid, DetailDrawer, EmptyState } from "./components/ui";
 import {
   analyticsRankingUrl,
   analyticsUrl,
+  buildAnalysisRunPayload,
   buildDownloadPolicy,
-  buildSlicePayload,
+  buildSliceDefinitionPayload,
   bytesToMb,
   cohortAuthorMetricsUrl,
   cohortStatisticsUrl,
@@ -254,7 +255,8 @@ function Workbench() {
   const activeStorageProfileId = storageProfileId || defaultStorageProfileId;
   const activeSourceStrategy = sourceStrategy || defaultSourceStrategy;
   const activeTopN = topN || defaultTopN;
-  const payload = useMemo(() => buildSlicePayload(filters, fractionMode, apiKey, fractionModeOptions.map((item) => item.value)), [filters, fractionMode, apiKey, fractionModeOptions]);
+  const slicePayload = useMemo(() => buildSliceDefinitionPayload(filters), [filters]);
+  const analysisRunPayload = useMemo(() => buildAnalysisRunPayload(fractionMode, fractionModeOptions.map((item) => item.value)), [fractionMode, fractionModeOptions]);
   const downloadConfigReady = Boolean(activeStorageProfileId && activeSourceStrategy);
   const downloadPolicy = useMemo(() => buildDownloadPolicy(), []);
 
@@ -286,7 +288,7 @@ function Workbench() {
   });
   const estimateSlice = useMutation({
     mutationFn: async () => {
-      const doc = await postJson<any>("/slices", { ...payload, title: humanSliceTitle(filters) });
+      const doc = await postJson<any>("/slices", { ...slicePayload, title: humanSliceTitle(filters) });
       setSliceDoc(doc);
       const result = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { download_policy: downloadPolicy });
       return { doc, result };
@@ -300,7 +302,7 @@ function Workbench() {
   });
   const createMaterialization = useMutation({
     mutationFn: async () => {
-      const doc = sliceDoc ?? (await postJson<any>("/slices", { ...payload, title: humanSliceTitle(filters) }));
+      const doc = sliceDoc ?? (await postJson<any>("/slices", { ...slicePayload, title: humanSliceTitle(filters) }));
       setSliceDoc(doc);
       return postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy });
     },
@@ -323,7 +325,7 @@ function Workbench() {
   });
   const downloadSlice = useMutation({
     mutationFn: async () => {
-      const doc = await postJson<any>("/slices", { ...payload, title: humanSliceTitle(filters) });
+      const doc = await postJson<any>("/slices", { ...slicePayload, title: humanSliceTitle(filters) });
       setSliceDoc(doc);
       const estimateResult = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { download_policy: downloadPolicy });
       setEstimate(estimateResult);
@@ -353,11 +355,7 @@ function Workbench() {
         action: "recalculate",
         payload: {
           dump_id: activeDumpId,
-          fraction_modes: payload.fraction_modes,
-          fraction_mode_default: payload.fraction_mode_default,
-          lrdi_p0: payload.lrdi_p0,
-          lrdi_lambda: payload.lrdi_lambda,
-          analysis_year: payload.analysis_year,
+          ...analysisRunPayload,
         },
       });
     },
@@ -508,7 +506,7 @@ function Workbench() {
             countryOptions={countryOptions}
             workTypeOptions={workTypeOptions}
             onOpenResolver={() => setResolverOpen(true)}
-            onSave={() => createSlice.mutate({ ...payload, title: humanSliceTitle(filters) })}
+            onSave={() => createSlice.mutate({ ...slicePayload, title: humanSliceTitle(filters) })}
             onEstimate={() => estimateSlice.mutate()}
             estimate={estimate ?? sliceDoc?.latest_estimate}
             materialization={materialization ?? sliceDoc?.latest_materialization_plan}
