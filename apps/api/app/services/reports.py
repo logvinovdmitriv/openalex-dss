@@ -11,7 +11,7 @@ from app.services import cohorts, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
-REPORT_BUNDLE_VERSION = "report_bundle_v4"
+REPORT_BUNDLE_VERSION = "report_bundle_v5"
 DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "islv")
 
 
@@ -209,6 +209,7 @@ def build_report_bundle(
             "scientometrics_largest_rank_shifts_csv": f"/api/v1/analytics/scientometrics/largest-rank-shifts.csv?{scientometric_query}",
             "scientometrics_outliers_csv": f"/api/v1/analytics/scientometrics/outliers.csv?{scientometric_query}",
             "scientometrics_top_outliers_csv": f"/api/v1/analytics/scientometrics/top-outliers.csv?{scientometric_query}",
+            "scientometrics_findings_csv": f"/api/v1/analytics/scientometrics/findings.csv?{scientometric_query}",
             "authors_local_metrics_csv": f"/api/v1/exports/authors_local_metrics.csv?run_id={run_id}" if run_id else "/api/v1/exports/authors_local_metrics.csv",
             "works_csv": f"/api/v1/exports/works.csv?run_id={run_id}" if run_id else "/api/v1/exports/works.csv",
             "authorships_csv": f"/api/v1/exports/authorships.csv?run_id={run_id}" if run_id else "/api/v1/exports/authorships.csv",
@@ -220,6 +221,7 @@ def build_report_bundle(
             "scientometrics_largest_rank_shifts_csv": "Contains the compact largest-shifts table used by the UI panel.",
             "scientometrics_outliers_csv": "Contains all IQR outliers for the selected scientometric metrics.",
             "scientometrics_top_outliers_csv": "Contains the compact top outlier rows exposed in the scientometric JSON/boxplot payload.",
+            "scientometrics_findings_csv": "Contains structured interpretation findings with evidence JSON for the selected scientometric analysis scope.",
         },
         "mvp_protocol": {
             "source_mode": "openalex_cli_filtered_metadata",
@@ -382,7 +384,7 @@ def _report_scope(
     membership_filters = _clean_filters(cohort_membership_filters or {})
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     canonical = {
-        "version": "report_scope_v4",
+        "version": "report_scope_v5",
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),
@@ -432,6 +434,7 @@ def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = ""
         "scientometrics_largest_rank_shifts_csv",
         "scientometrics_outliers_csv",
         "scientometrics_top_outliers_csv",
+        "scientometrics_findings_csv",
     ):
         if not ((cached.get("exports") or {}).get(key)):
             return False

@@ -551,6 +551,18 @@ def scientometric_top_outliers_csv(request: Request) -> Response:
     return _csv_response(fields, _scientometric_top_outlier_rows(payload), filename="openalex_dss_scientometrics_top_outliers.csv")
 
 
+@router.get("/analytics/scientometrics/findings.csv")
+def scientometric_findings_csv(request: Request) -> Response:
+    try:
+        payload = _scientometric_payload_from_request(request)
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    fields = ["id", "type", "metric", "baseline_metric", "severity", "text", "recommendation", "evidence_json"]
+    return _csv_response(fields, _scientometric_finding_rows(payload), filename="openalex_dss_scientometrics_findings.csv")
+
+
 def _slice_filters(
     *,
     country_code: str = "",
@@ -728,6 +740,24 @@ def _scientometric_top_outlier_rows(payload: dict[str, Any]) -> list[dict[str, A
                     "upper_fence": upper_fence,
                 }
             )
+    return rows
+
+
+def _scientometric_finding_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for finding in payload.get("findings") or []:
+        rows.append(
+            {
+                "id": finding.get("id"),
+                "type": finding.get("type"),
+                "metric": finding.get("metric"),
+                "baseline_metric": finding.get("baseline_metric"),
+                "severity": finding.get("severity"),
+                "text": finding.get("text"),
+                "recommendation": finding.get("recommendation"),
+                "evidence_json": json.dumps(finding.get("evidence") or {}, ensure_ascii=False, sort_keys=True),
+            }
+        )
     return rows
 
 

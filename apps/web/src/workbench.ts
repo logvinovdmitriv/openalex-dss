@@ -35,6 +35,8 @@ export type ScientometricAnalysisPayload = {
   outliers: Record<string, Array<Record<string, unknown>>>;
   metric_scorecard: Record<string, Record<string, unknown>>;
   interpretation: Record<string, unknown>;
+  findings?: Array<Record<string, unknown>>;
+  finding_summary?: Record<string, unknown>;
 };
 
 export type EntitySuggestion = {

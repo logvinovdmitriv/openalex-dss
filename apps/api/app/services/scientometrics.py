@@ -21,7 +21,25 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
     "islv",
     "lrdi",
 )
-SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v1"
+SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v2"
+SCIENTOMETRIC_FINDINGS_VERSION = "scientometric_findings_v1"
+FINDING_THRESHOLDS = {
+    "heavy_tail_skewness_medium": 1.0,
+    "heavy_tail_skewness_high": 2.0,
+    "heavy_tail_kurtosis_medium": 3.0,
+    "heavy_tail_kurtosis_high": 10.0,
+    "normality_p_medium": 0.05,
+    "normality_p_high": 0.01,
+    "zero_rate": 0.30,
+    "tie_rate": 0.30,
+    "publication_dependence": 0.70,
+    "citation_dependence": 0.80,
+    "top1_dependence": 0.50,
+    "rank_instability_share": 0.20,
+    "rank_instability_jaccard": 0.50,
+    "rank_agreement_spearman": 0.90,
+    "rank_agreement_jaccard": 0.70,
+}
 DEFAULT_OVERLAP_CUTS = (10, 20, 50)
 KENDALL_MAX_EXACT_N = 1000
 _NORMAL = NormalDist()
@@ -76,6 +94,17 @@ def build_scientometric_analysis(
         boxplots=boxplots,
         correlations=correlations,
     )
+    findings = interpretation_findings(
+        metrics=selected_metrics,
+        baseline_metric=baseline_metric,
+        rank_top_n=rank_top_n,
+        n_authors=len(rows),
+        descriptive=descriptive,
+        normality=normality,
+        correlations=correlations,
+        rank_comparisons=rank_comparison_payload["comparisons"],
+        metric_scorecard=scorecard,
+    )
 
     return {
         "analysis_version": SCIENTOMETRIC_ANALYSIS_VERSION,
@@ -107,6 +136,8 @@ def build_scientometric_analysis(
         "outliers": _outlier_table(boxplots),
         "metric_scorecard": scorecard,
         "interpretation": _interpretation(rows, selected_metrics, baseline_metric, scorecard, warnings),
+        "findings": findings,
+        "finding_summary": finding_summary(findings, metrics=selected_metrics, baseline_metric=baseline_metric),
         "warnings": warnings,
     }
 
@@ -313,6 +344,332 @@ def metric_scorecard(
         )
         payload[metric] = metric_payload
     return payload
+
+
+def interpretation_findings(
+    *,
+    metrics: list[str],
+    baseline_metric: str,
+    n_authors: int,
+    descriptive: dict[str, Any],
+    normality: dict[str, Any],
+    correlations: dict[str, Any],
+    rank_comparisons: dict[str, Any],
+    metric_scorecard: dict[str, Any],
+    rank_top_n: int = 100,
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    findings.extend(_distribution_findings(metrics, descriptive, normality))
+    findings.extend(_scorecard_findings(metrics, metric_scorecard))
+    findings.extend(_rank_findings(metrics, baseline_metric, n_authors, correlations, rank_comparisons, rank_top_n=rank_top_n))
+    findings.extend(_candidate_metric_findings(metrics, metric_scorecard))
+    return sorted(findings, key=_finding_sort_key)
+
+
+def finding_summary(findings: list[dict[str, Any]], *, metrics: list[str], baseline_metric: str) -> dict[str, Any]:
+    limitations = [
+        {
+            "id": finding.get("id"),
+            "type": finding.get("type"),
+            "metric": finding.get("metric"),
+            "baseline_metric": finding.get("baseline_metric"),
+            "severity": finding.get("severity"),
+        }
+        for finding in findings
+        if finding.get("severity") in {"high", "medium"} and finding.get("type") != "balanced_candidate_metric"
+    ][:8]
+    discussion_points = []
+    if any(finding.get("type") == "heavy_tail_distribution" for finding in findings):
+        discussion_points.append("Обсудить тяжелые хвосты распределений и использовать ранговые/логарифмические сравнения.")
+    if any(finding.get("type") == "high_tie_rate" for finding in findings):
+        discussion_points.append("Отдельно указать индексы с высокой долей совпадающих значений.")
+    if any(finding.get("type") == "top1_dominance_dependence" for finding in findings):
+        discussion_points.append("Проверить влияние одной сверхцитируемой работы через top1_share.")
+    if any(finding.get("type") == "rank_instability" for finding in findings):
+        discussion_points.append(f"Разобрать крупнейшие сдвиги рангов относительно {baseline_metric}.")
+    if "islv" in metrics:
+        discussion_points.append("Описывать ISLV как кандидатную сбалансированную модификацию, а не как автоматически лучший индекс.")
+    return {
+        "findings_version": SCIENTOMETRIC_FINDINGS_VERSION,
+        "n_findings": len(findings),
+        "high_count": sum(1 for finding in findings if finding.get("severity") == "high"),
+        "medium_count": sum(1 for finding in findings if finding.get("severity") == "medium"),
+        "candidate_metric": "islv" if any(finding.get("type") == "balanced_candidate_metric" for finding in findings) else None,
+        "candidate_metric_claim": "balanced_candidate_not_proven_best" if "islv" in metrics else None,
+        "primary_limitations": limitations,
+        "recommended_discussion_points": discussion_points,
+        "notes": [
+            "Findings are descriptive and scoped to the resolved local author set.",
+            "Findings do not replace expert research assessment.",
+        ],
+    }
+
+
+def _distribution_findings(metrics: list[str], descriptive: dict[str, Any], normality: dict[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for metric in metrics:
+        summary = descriptive.get(metric) or {}
+        normality_raw = (normality.get(metric) or {}).get("raw") or {}
+        skewness = _number(normality_raw.get("skewness"))
+        if skewness is None:
+            skewness = _number(summary.get("skewness"))
+        kurtosis = _number(normality_raw.get("excess_kurtosis"))
+        if kurtosis is None:
+            kurtosis = _number(summary.get("excess_kurtosis"))
+        p_value = _number(normality_raw.get("jarque_bera_p_approx"))
+        if _is_heavy_tail(skewness, kurtosis, p_value):
+            high = (
+                (skewness is not None and abs(skewness) >= FINDING_THRESHOLDS["heavy_tail_skewness_high"])
+                or (kurtosis is not None and kurtosis >= FINDING_THRESHOLDS["heavy_tail_kurtosis_high"])
+                or (p_value is not None and p_value < FINDING_THRESHOLDS["normality_p_high"])
+            )
+            findings.append(
+                _finding(
+                    id=f"heavy_tail:{metric}",
+                    type="heavy_tail_distribution",
+                    metric=metric,
+                    severity="high" if high else "medium",
+                    evidence={
+                        "skewness": skewness,
+                        "excess_kurtosis": kurtosis,
+                        "jarque_bera_p_approx": p_value,
+                        "thresholds": {
+                            "abs_skewness": FINDING_THRESHOLDS["heavy_tail_skewness_medium"],
+                            "excess_kurtosis": FINDING_THRESHOLDS["heavy_tail_kurtosis_medium"],
+                            "jarque_bera_p_approx": FINDING_THRESHOLDS["normality_p_medium"],
+                        },
+                    },
+                    text=f"Метрика {metric} имеет выраженное асимметричное или тяжелохвостое распределение; raw-сравнение и средние значения чувствительны к выбросам.",
+                    recommendation="Использовать ранговые сравнения, log1p-визуализацию и проверять таблицу выбросов.",
+                )
+            )
+
+        zero_rate = _number(summary.get("zero_rate"))
+        if zero_rate is not None and zero_rate >= FINDING_THRESHOLDS["zero_rate"]:
+            findings.append(
+                _finding(
+                    id=f"zero_inflation:{metric}",
+                    type="zero_inflation",
+                    metric=metric,
+                    severity="high" if zero_rate >= 0.60 else "medium",
+                    evidence={"zero_rate": zero_rate, "threshold": FINDING_THRESHOLDS["zero_rate"]},
+                    text=f"Метрика {metric} имеет высокую долю нулевых значений; она слабо различает нижнюю часть выборки.",
+                    recommendation="Не использовать этот показатель как единственный критерий тонкого ранжирования.",
+                )
+            )
+
+        tie_rate = _number(summary.get("tie_rate"))
+        if tie_rate is not None and tie_rate >= FINDING_THRESHOLDS["tie_rate"]:
+            findings.append(
+                _finding(
+                    id=f"tie_rate:{metric}",
+                    type="high_tie_rate",
+                    metric=metric,
+                    severity="high" if tie_rate >= 0.60 else "medium",
+                    evidence={"tie_rate": tie_rate, "threshold": FINDING_THRESHOLDS["tie_rate"]},
+                    text=f"Метрика {metric} дает много одинаковых значений; она полезна как грубый показатель, но хуже подходит для тонкого ранжирования.",
+                    recommendation="Сопоставлять с более непрерывными индексами и rank-shift таблицами.",
+                )
+            )
+    return findings
+
+
+def _scorecard_findings(metrics: list[str], metric_scorecard: dict[str, Any]) -> list[dict[str, Any]]:
+    specs = [
+        (
+            "publication_volume_dependence",
+            "publication_volume_dependence",
+            FINDING_THRESHOLDS["publication_dependence"],
+            0.85,
+            "Индекс сильно связан с числом публикаций P; он может отражать продуктивность больше, чем цитатное влияние.",
+            "Интерпретировать вместе с цитатными и дробными показателями.",
+        ),
+        (
+            "citation_volume_dependence",
+            "citation_volume_dependence",
+            FINDING_THRESHOLDS["citation_dependence"],
+            0.90,
+            "Индекс близко следует общему цитированию; это упрощает интерпретацию влияния, но повышает чувствительность к выбросам.",
+            "Проверять heavy-tail диагностику и outliers.csv.",
+        ),
+        (
+            "top1_dominance_dependence",
+            "top1_dominance_dependence",
+            FINDING_THRESHOLDS["top1_dependence"],
+            0.70,
+            "Индекс чувствителен к концентрации цитирований в одной работе; позиция автора может быть обусловлена единичным публикационным событием.",
+            "Использовать вместе с top1_share, c_frac и индексами со штрафом концентрации.",
+        ),
+    ]
+    findings: list[dict[str, Any]] = []
+    for metric in metrics:
+        scorecard = metric_scorecard.get(metric) or {}
+        for finding_type, dependency_key, threshold, high_threshold, text, recommendation in specs:
+            dependency = scorecard.get(dependency_key) or {}
+            abs_rho = _number(dependency.get("abs_spearman_rho"))
+            if abs_rho is None or abs_rho < threshold:
+                continue
+            findings.append(
+                _finding(
+                    id=f"{finding_type}:{metric}",
+                    type=finding_type,
+                    metric=metric,
+                    severity="high" if abs_rho >= high_threshold else "medium",
+                    evidence={
+                        "abs_spearman_rho": abs_rho,
+                        "spearman_rho": dependency.get("spearman_rho"),
+                        "direction": dependency.get("direction"),
+                        "threshold": threshold,
+                    },
+                    text=f"Метрика {metric}: {text}",
+                    recommendation=recommendation,
+                )
+            )
+    return findings
+
+
+def _rank_findings(
+    metrics: list[str],
+    baseline_metric: str,
+    n_authors: int,
+    correlations: dict[str, Any],
+    rank_comparisons: dict[str, Any],
+    *,
+    rank_top_n: int,
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    spearman_matrix = correlations.get("spearman") or {}
+    baseline_spearman = spearman_matrix.get(baseline_metric) or {}
+    instability_delta_threshold = max(5.0, FINDING_THRESHOLDS["rank_instability_share"] * float(n_authors or 0))
+    for metric in metrics:
+        if metric == baseline_metric:
+            continue
+        comparison = rank_comparisons.get(metric) or {}
+        p90_abs_delta = _number(comparison.get("p90_abs_delta"))
+        jaccard = _number(comparison.get("jaccard_top_n_exact"))
+        if jaccard is None:
+            jaccard = _number(comparison.get("jaccard_top_n"))
+        spearman = _number((baseline_spearman or {}).get(metric))
+
+        unstable = (
+            (p90_abs_delta is not None and p90_abs_delta >= instability_delta_threshold)
+            or (jaccard is not None and jaccard < FINDING_THRESHOLDS["rank_instability_jaccard"])
+        )
+        if unstable:
+            high = (
+                (p90_abs_delta is not None and p90_abs_delta >= max(10.0, 0.40 * float(n_authors or 0)))
+                or (jaccard is not None and jaccard < 0.30)
+            )
+            findings.append(
+                _finding(
+                    id=f"rank_instability:{baseline_metric}:{metric}",
+                    type="rank_instability",
+                    metric=metric,
+                    baseline_metric=baseline_metric,
+                    severity="high" if high else "medium",
+                    evidence={
+                        "median_abs_delta": comparison.get("median_abs_delta"),
+                        "p90_abs_delta": p90_abs_delta,
+                        "jaccard_top_n_exact": jaccard,
+                        "rank_top_n": rank_top_n,
+                        "n_authors": n_authors,
+                        "p90_threshold": instability_delta_threshold,
+                    },
+                    text=f"Переход от {baseline_metric} к {metric} существенно меняет позиции части авторов; индекс отражает другой аспект публикационного профиля.",
+                    recommendation="Разобрать крупнейшие изменения в rank-shifts.csv и largest-rank-shifts.csv.",
+                )
+            )
+
+        if (
+            spearman is not None
+            and spearman >= FINDING_THRESHOLDS["rank_agreement_spearman"]
+            and jaccard is not None
+            and jaccard >= FINDING_THRESHOLDS["rank_agreement_jaccard"]
+        ):
+            findings.append(
+                _finding(
+                    id=f"rank_agreement:{baseline_metric}:{metric}",
+                    type="rank_agreement",
+                    metric=metric,
+                    baseline_metric=baseline_metric,
+                    severity="informational",
+                    evidence={
+                        "spearman": spearman,
+                        "jaccard_top_n_exact": jaccard,
+                        "rank_top_n": rank_top_n,
+                        "spearman_threshold": FINDING_THRESHOLDS["rank_agreement_spearman"],
+                        "jaccard_threshold": FINDING_THRESHOLDS["rank_agreement_jaccard"],
+                    },
+                    text=f"Метрика {metric} дает близкое ранжирование к {baseline_metric}; ее добавление может быть менее информативным, если нужна альтернативная перспектива.",
+                    recommendation="Использовать как подтверждающий, а не обязательно независимый показатель.",
+                )
+            )
+    return findings
+
+
+def _candidate_metric_findings(metrics: list[str], metric_scorecard: dict[str, Any]) -> list[dict[str, Any]]:
+    if "islv" not in metrics:
+        return []
+    scorecard = metric_scorecard.get("islv") or {}
+    return [
+        _finding(
+            id="balanced_candidate:islv",
+            type="balanced_candidate_metric",
+            metric="islv",
+            severity="informational",
+            evidence={
+                "uses_percentile_components": True,
+                "uses_fractional_citations": True,
+                "uses_top1_penalty": True,
+                "publication_dependence_abs": ((scorecard.get("publication_volume_dependence") or {}).get("abs_spearman_rho")),
+                "citation_dependence_abs": ((scorecard.get("citation_volume_dependence") or {}).get("abs_spearman_rho")),
+                "top1_dependence_abs": ((scorecard.get("top1_dominance_dependence") or {}).get("abs_spearman_rho")),
+            },
+            text="ISLV рассматривается как кандидатная сбалансированная модификация рейтинга внутри текущего среза, а не как автоматически доказанный лучший индекс.",
+            recommendation="Обосновывать ISLV через scorecard, rank shifts и сравнение с h, C, C_frac и g.",
+        )
+    ]
+
+
+def _finding(
+    *,
+    id: str,
+    type: str,
+    metric: str,
+    severity: str,
+    evidence: dict[str, Any],
+    text: str,
+    recommendation: str,
+    baseline_metric: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": id,
+        "type": type,
+        "metric": metric,
+        "baseline_metric": baseline_metric,
+        "severity": severity,
+        "evidence": evidence,
+        "text": text,
+        "recommendation": recommendation,
+    }
+
+
+def _finding_sort_key(finding: dict[str, Any]) -> tuple[int, str, str, str]:
+    severity_order = {"high": 0, "medium": 1, "low": 2, "informational": 3}
+    return (
+        severity_order.get(str(finding.get("severity") or ""), 9),
+        str(finding.get("type") or ""),
+        str(finding.get("metric") or ""),
+        str(finding.get("id") or ""),
+    )
+
+
+def _is_heavy_tail(skewness: float | None, kurtosis: float | None, p_value: float | None) -> bool:
+    return (
+        (skewness is not None and abs(skewness) >= FINDING_THRESHOLDS["heavy_tail_skewness_medium"])
+        or (kurtosis is not None and kurtosis >= FINDING_THRESHOLDS["heavy_tail_kurtosis_medium"])
+        or (p_value is not None and p_value < FINDING_THRESHOLDS["normality_p_medium"])
+    )
 
 
 def _analysis_context(

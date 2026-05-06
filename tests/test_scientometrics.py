@@ -163,6 +163,73 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertLess(dependence["spearman_rho"], 0)
         self.assertEqual(dependence["abs_spearman_rho"], abs(dependence["spearman_rho"]))
 
+    def test_interpretation_findings_detect_distribution_limits(self) -> None:
+        findings = scientometrics.interpretation_findings(
+            metrics=["c", "h", "i10"],
+            baseline_metric="h",
+            n_authors=10,
+            descriptive={
+                "c": {"zero_rate": 0.0, "tie_rate": 0.0},
+                "h": {"zero_rate": 0.0, "tie_rate": 0.5},
+                "i10": {"zero_rate": 0.4, "tie_rate": 0.0},
+            },
+            normality={"c": {"raw": {"skewness": 2.5, "excess_kurtosis": 11.0, "jarque_bera_p_approx": 0.001}}},
+            correlations={"spearman": {}},
+            rank_comparisons={},
+            metric_scorecard={},
+        )
+        by_type_metric = {(finding["type"], finding["metric"]): finding for finding in findings}
+
+        self.assertEqual(by_type_metric[("heavy_tail_distribution", "c")]["severity"], "high")
+        self.assertEqual(by_type_metric[("high_tie_rate", "h")]["severity"], "medium")
+        self.assertEqual(by_type_metric[("zero_inflation", "i10")]["severity"], "medium")
+
+    def test_interpretation_findings_detect_dependence_and_rank_relationships(self) -> None:
+        scorecard = {
+            "p": {"publication_volume_dependence": {"abs_spearman_rho": 0.75, "spearman_rho": 0.75, "direction": "positive"}},
+            "c": {"top1_dominance_dependence": {"abs_spearman_rho": 0.72, "spearman_rho": 0.72, "direction": "positive"}},
+            "g": {"citation_volume_dependence": {"abs_spearman_rho": 0.92, "spearman_rho": 0.92, "direction": "positive"}},
+        }
+        findings = scientometrics.interpretation_findings(
+            metrics=["h", "p", "c", "g", "islv"],
+            baseline_metric="h",
+            n_authors=100,
+            descriptive={},
+            normality={},
+            correlations={"spearman": {"h": {"g": 0.95, "islv": 0.4}}},
+            rank_comparisons={
+                "g": {"p90_abs_delta": 3, "jaccard_top_n_exact": 0.8},
+                "islv": {"median_abs_delta": 4, "p90_abs_delta": 25, "jaccard_top_n_exact": 0.4},
+            },
+            metric_scorecard=scorecard,
+            rank_top_n=50,
+        )
+        by_type_metric = {(finding["type"], finding["metric"]): finding for finding in findings}
+
+        self.assertIn(("publication_volume_dependence", "p"), by_type_metric)
+        self.assertIn(("top1_dominance_dependence", "c"), by_type_metric)
+        self.assertEqual(by_type_metric[("citation_volume_dependence", "g")]["severity"], "high")
+        self.assertIn(("rank_instability", "islv"), by_type_metric)
+        self.assertIn(("rank_agreement", "g"), by_type_metric)
+
+    def test_islv_finding_is_candidate_not_best_metric_claim(self) -> None:
+        findings = scientometrics.interpretation_findings(
+            metrics=["h", "islv"],
+            baseline_metric="h",
+            n_authors=20,
+            descriptive={},
+            normality={},
+            correlations={"spearman": {}},
+            rank_comparisons={},
+            metric_scorecard={"islv": {}},
+        )
+        candidate = next(finding for finding in findings if finding["type"] == "balanced_candidate_metric")
+
+        self.assertEqual(candidate["severity"], "informational")
+        self.assertEqual(candidate["evidence"]["uses_fractional_citations"], True)
+        self.assertNotIn("best metric", str(candidate["text"]).lower())
+        self.assertNotIn("best metric", str(candidate["recommendation"]).lower())
+
     def test_build_analysis_applies_cohort_scope_and_policy(self) -> None:
         captured: dict[str, object] = {}
         cohort_ctx = {
@@ -230,7 +297,9 @@ class ScientometricServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["n_authors"], 0)
+        self.assertEqual(payload["analysis_version"], "scientometrics_v2")
         self.assertEqual(payload["descriptive"]["h"]["n"], 0)
+        self.assertEqual(payload["finding_summary"]["findings_version"], "scientometric_findings_v1")
         self.assertTrue(payload["warnings"])
         self.assertIsNone(payload["interpretation"]["candidate_balanced_metric"])
         self.assertNotIn("best_balanced_metric", payload["interpretation"])

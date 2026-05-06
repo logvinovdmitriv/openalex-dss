@@ -161,7 +161,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         def fake_analysis(**kwargs: object) -> dict[str, object]:
             captured.update(kwargs)
-            return {"analysis_version": "scientometrics_v1", "n_authors": 2}
+            return {"analysis_version": "scientometrics_v2", "n_authors": 2}
 
         with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", side_effect=fake_analysis):
             payload = analytics_routes.scientometric_analysis(
@@ -179,7 +179,7 @@ class AnalyticsRouteTests(unittest.TestCase):
                 work_type="article",
             )
 
-        self.assertEqual(payload["analysis_version"], "scientometrics_v1")
+        self.assertEqual(payload["analysis_version"], "scientometrics_v2")
         self.assertEqual(captured["run_id"], "run_a")
         self.assertEqual(captured["dump_id"], "dump_a")
         self.assertEqual(captured["cohort_id"], "cohort_a")
@@ -192,7 +192,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
     def test_scientometric_export_routes_return_csv_artifacts(self) -> None:
         payload = {
-            "analysis_version": "scientometrics_v1",
+            "analysis_version": "scientometrics_v2",
             "descriptive": {
                 "h": {
                     "n": 2,
@@ -235,6 +235,18 @@ class AnalyticsRouteTests(unittest.TestCase):
             },
             "boxplots": {"c": {"outlier_rule": "iqr_1_5", "lower_fence": 0, "upper_fence": 10}},
             "outliers": {"c": [{"author_id": "https://openalex.org/A2", "author_display_name": "Author Two", "value": 99}]},
+            "findings": [
+                {
+                    "id": "heavy_tail:c",
+                    "type": "heavy_tail_distribution",
+                    "metric": "c",
+                    "baseline_metric": None,
+                    "severity": "high",
+                    "text": "Метрика C имеет тяжелый хвост.",
+                    "recommendation": "Использовать log1p.",
+                    "evidence": {"skewness": 2.5},
+                }
+            ],
         }
         full_rank_shift_rows = [
             {
@@ -281,6 +293,7 @@ class AnalyticsRouteTests(unittest.TestCase):
             largest_rank_shifts = analytics_routes.scientometric_largest_rank_shifts_csv(_request(metrics="h,g"))
             outliers = analytics_routes.scientometric_outliers_csv(_request(metrics="h,c"))
             top_outliers = analytics_routes.scientometric_top_outliers_csv(_request(metrics="h,c"))
+            findings = analytics_routes.scientometric_findings_csv(_request(metrics="h,c"))
 
         self.assertIn("metric,n,missing_count", descriptive.body.decode("utf-8"))
         self.assertIn("h,2,0", descriptive.body.decode("utf-8"))
@@ -293,6 +306,9 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertIn("metric,author_id,author_display_name,value,rule,lower_fence,upper_fence", outliers.body.decode("utf-8"))
         self.assertIn("c,https://openalex.org/A2,Author Two,99,iqr_1_5,0,10", outliers.body.decode("utf-8"))
         self.assertIn("c,https://openalex.org/A2,Author Two,99,iqr_1_5,0,10", top_outliers.body.decode("utf-8"))
+        self.assertIn("id,type,metric,baseline_metric,severity,text,recommendation,evidence_json", findings.body.decode("utf-8"))
+        self.assertIn("heavy_tail:c,heavy_tail_distribution,c,,high", findings.body.decode("utf-8"))
+        self.assertIn('"{""skewness"": 2.5}"', findings.body.decode("utf-8"))
 
     def test_cohort_statistics_route_forwards_analysis_scope(self) -> None:
         captured: dict[str, object] = {}

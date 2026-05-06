@@ -1488,6 +1488,7 @@ function StatisticsPage({
             <TopOverlapPanel payload={scientometrics} baselineMetric={baselineMetric} />
             <ScorecardTable payload={scientometrics} metrics={metrics} />
           </section>
+          <FindingsPanel payload={scientometrics} />
           <InterpretationPanel payload={scientometrics} />
         </>
       )}
@@ -1799,6 +1800,54 @@ function InterpretationPanel({ payload }: { payload: any }) {
   );
 }
 
+function FindingsPanel({ payload }: { payload: ScientometricAnalysisPayload }) {
+  const findings = payload?.findings ?? [];
+  const summary = payload?.finding_summary ?? {};
+  if (!findings.length) return null;
+  const groups: Array<[string, string]> = [
+    ["high", "Критические ограничения"],
+    ["medium", "Средние ограничения"],
+    ["low", "Низкие ограничения"],
+    ["informational", "Информационные выводы"],
+  ];
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Findings</span>
+        <h2>Автоматизированный вывод по индексам</h2>
+        <p>Каждый вывод строится по текущему scope и содержит численное основание. Это описательная интерпретация, не экспертное заключение.</p>
+      </div>
+      <div className="metric-grid">
+        <MetricCard label="Выводов" value={fmt(Number(summary.n_findings ?? findings.length))} />
+        <MetricCard label="High" value={fmt(Number(summary.high_count ?? 0))} />
+        <MetricCard label="Medium" value={fmt(Number(summary.medium_count ?? 0))} />
+        <MetricCard label="Кандидат" value={summary.candidate_metric ? metricLabel(String(summary.candidate_metric)) : "—"} />
+      </div>
+      {groups.map(([severity, title]) => {
+        const items = findings.filter((item) => item.severity === severity);
+        if (!items.length) return null;
+        return (
+          <div key={severity} className="stack compact-stack">
+            <h3>{title}</h3>
+            {items.map((item) => (
+              <div key={String(item.id)} className={findingNoticeClass(severity)}>
+                <b>{findingTitle(item)}</b>
+                <span>{String(item.text ?? "")}</span>
+                {item.recommendation ? <small>{String(item.recommendation)}</small> : null}
+                <div className="method-grid">
+                  {findingEvidenceEntries(item.evidence).map(([key, value]) => (
+                    <span key={key} className="check-pill">{evidenceLabel(key)}: {formatEvidenceValue(value)}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 function ReportsPage({
   filters,
   metric,
@@ -1862,6 +1911,7 @@ function ReportsPage({
   const scientometricsLargestRankShiftsUrl = `${API_BASE}/analytics/scientometrics/largest-rank-shifts.csv?${scientometricParams.toString()}`;
   const scientometricsOutliersUrl = `${API_BASE}/analytics/scientometrics/outliers.csv?${scientometricParams.toString()}`;
   const scientometricsTopOutliersUrl = `${API_BASE}/analytics/scientometrics/top-outliers.csv?${scientometricParams.toString()}`;
+  const scientometricsFindingsUrl = `${API_BASE}/analytics/scientometrics/findings.csv?${scientometricParams.toString()}`;
   const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "csv", cohortFilterPolicy)}` : "";
   const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "json", cohortFilterPolicy)}` : "";
   const cohortStatsUrl = cohortId ? `${API_BASE}${cohortStatisticsUrl(cohortId, filters, fractionMode, runId, dumpId, cohortFilterPolicy)}` : "";
@@ -1906,6 +1956,7 @@ function ReportsPage({
           <a href={scientometricsLargestRankShiftsUrl}>CSV крупнейших сдвигов рангов</a>
           <a href={scientometricsOutliersUrl}>CSV всех выбросов</a>
           <a href={scientometricsTopOutliersUrl}>CSV top-выбросов</a>
+          <a href={scientometricsFindingsUrl}>CSV автоматизированных выводов</a>
         </div>
         <div className="notice">
           <b>Параметры пакета</b>
@@ -2781,6 +2832,74 @@ function formatScorecardCell(value: unknown) {
     return `${fmt(payload.abs_spearman_rho)} ${arrow}`;
   }
   return formatAnalysisValue(value, true);
+}
+
+function findingNoticeClass(severity: string) {
+  if (severity === "high") return "notice error";
+  if (severity === "medium") return "notice warn";
+  return "notice";
+}
+
+function findingTitle(finding: Record<string, unknown>) {
+  const metric = finding.metric ? metricLabel(String(finding.metric)) : "scope";
+  const baseline = finding.baseline_metric ? `${metricLabel(String(finding.baseline_metric))} → ` : "";
+  return `${findingSeverityLabel(String(finding.severity ?? ""))} · ${baseline}${metric} · ${findingTypeLabel(String(finding.type ?? ""))}`;
+}
+
+function findingSeverityLabel(value: string) {
+  const labels: Record<string, string> = {
+    high: "High",
+    medium: "Medium",
+    low: "Low",
+    informational: "Info",
+  };
+  return labels[value] ?? value;
+}
+
+function findingTypeLabel(value: string) {
+  const labels: Record<string, string> = {
+    heavy_tail_distribution: "тяжелый хвост",
+    zero_inflation: "нулевая инфляция",
+    high_tie_rate: "много ties",
+    publication_volume_dependence: "зависимость от P",
+    citation_volume_dependence: "зависимость от C",
+    top1_dominance_dependence: "зависимость от top1",
+    rank_instability: "сдвиг рангов",
+    rank_agreement: "согласованность рангов",
+    balanced_candidate_metric: "кандидатный индекс",
+  };
+  return labels[value] ?? value;
+}
+
+function findingEvidenceEntries(value: unknown) {
+  if (!value || typeof value !== "object") return [] as Array<[string, unknown]>;
+  return Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) => item === null || ["string", "number", "boolean"].includes(typeof item))
+    .slice(0, 5);
+}
+
+function evidenceLabel(value: string) {
+  const labels: Record<string, string> = {
+    skewness: "skew",
+    excess_kurtosis: "kurtosis",
+    jarque_bera_p_approx: "JB p",
+    zero_rate: "zero",
+    tie_rate: "tie",
+    abs_spearman_rho: "|rho|",
+    spearman_rho: "rho",
+    direction: "sign",
+    p90_abs_delta: "p90 Δ",
+    median_abs_delta: "median Δ",
+    jaccard_top_n_exact: "Jaccard",
+    rank_top_n: "Top-N",
+  };
+  return labels[value] ?? value;
+}
+
+function formatEvidenceValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "да" : "нет";
+  return formatAnalysisValue(value);
 }
 
 function metricShortLabel(value: string) {
