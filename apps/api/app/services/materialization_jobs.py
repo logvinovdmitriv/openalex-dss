@@ -9,6 +9,7 @@ from app.services.internal_payloads import normalize_internal_pipeline_payload
 
 MATERIALIZATION_ACTIONS = {"plan", "fetch_slice_dump", "build_from_openalex", "import_file"}
 REQUIRES_ACCEPTED_SIGNATURE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
+MATERIALIZATION_LIFECYCLE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
 
 DownloadProgressCallback = Callable[[dict[str, Any]], None]
 StageProgressCallback = Callable[[int, str, dict[str, Any] | None], None]
@@ -82,3 +83,25 @@ def _build_from_openalex(
         )
     )
     return {"fetch": fetched, "build": built, "no_data": False, "analysis_eligibility": analysis_eligibility}
+
+
+def mark_completed(run_id: str, action: str, result: dict[str, Any], payload: dict[str, Any]) -> None:
+    if action not in MATERIALIZATION_LIFECYCLE_ACTIONS:
+        return
+    try:
+        from app.services import slice_workbench
+
+        slice_workbench.mark_materialization_run_completed(run_id, result, materialization_id=str(payload.get("materialization_id") or ""))
+    except Exception:
+        return
+
+
+def mark_failed(run_id: str, action: str, error: str, payload: dict[str, Any]) -> None:
+    if action not in MATERIALIZATION_LIFECYCLE_ACTIONS:
+        return
+    try:
+        from app.services import slice_workbench
+
+        slice_workbench.mark_materialization_run_failed(run_id, error, materialization_id=str(payload.get("materialization_id") or ""))
+    except Exception:
+        return

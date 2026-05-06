@@ -107,10 +107,10 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
         doc.update({"progress_percent": _progress_before_dispatch(action), "progress_stage": _stage_for_action(action)})
         _save(doc)
         result = _dispatch(run_id, action, payload)
-        _mark_dependent_state_completed(run_id, action, result, payload)
+        materialization_jobs.mark_completed(run_id, action, result, payload)
         doc.update({"status": "completed", "progress_percent": 100, "progress_stage": "completed", "finished_at": _now(), "result": result, "artifacts": _artifact_links()})
     except Exception as exc:  # pragma: no cover - defensive job boundary
-        _mark_dependent_state_failed(run_id, action, str(exc), payload)
+        materialization_jobs.mark_failed(run_id, action, str(exc), payload)
         doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
     _save(doc)
     with _LOCK:
@@ -196,28 +196,6 @@ def _download_progress(run_id: str, progress: dict[str, Any]) -> None:
     else:
         stage = str(progress.get("stage") or "OpenAlex CLI is running; exact progress is unavailable until local files are packed")
     update_progress(run_id, bounded, stage, progress)
-
-
-def _mark_dependent_state_completed(run_id: str, action: str, result: dict[str, Any], payload: dict[str, Any]) -> None:
-    if action not in {"build_from_openalex", "fetch_slice_dump"}:
-        return
-    try:
-        from app.services import slice_workbench
-
-        slice_workbench.mark_materialization_run_completed(run_id, result, materialization_id=str(payload.get("materialization_id") or ""))
-    except Exception:
-        return
-
-
-def _mark_dependent_state_failed(run_id: str, action: str, error: str, payload: dict[str, Any]) -> None:
-    if action not in {"build_from_openalex", "fetch_slice_dump"}:
-        return
-    try:
-        from app.services import slice_workbench
-
-        slice_workbench.mark_materialization_run_failed(run_id, error, materialization_id=str(payload.get("materialization_id") or ""))
-    except Exception:
-        return
 
 
 def _allow_unchecked_download() -> bool:

@@ -15,7 +15,7 @@ for path in (API, SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.services import cohorts, jobs, metadata_store, pipeline, reports, warehouse  # noqa: E402
+from app.services import cohorts, jobs, materialization_jobs, metadata_store, pipeline, reports, warehouse  # noqa: E402
 
 
 class PipelineIntegrityTests(unittest.TestCase):
@@ -219,6 +219,21 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertNotIn("unknown_legacy", dispatch.call_args.args[2])
         self.assertIn("download_progress_callback", dispatch.call_args.kwargs)
         self.assertIn("update_progress_callback", dispatch.call_args.kwargs)
+
+    def test_materialization_lifecycle_hooks_delegate_to_slice_workbench(self) -> None:
+        result = {"status": "ok"}
+        payload = {"materialization_id": "mat_a"}
+        with (
+            patch("app.services.slice_workbench.mark_materialization_run_completed") as completed,
+            patch("app.services.slice_workbench.mark_materialization_run_failed") as failed,
+        ):
+            materialization_jobs.mark_completed("run_mat", "build_from_openalex", result, payload)
+            materialization_jobs.mark_failed("run_mat", "fetch_slice_dump", "boom", payload)
+            materialization_jobs.mark_completed("run_analysis", "recalculate", result, payload)
+            materialization_jobs.mark_failed("run_analysis", "recalculate", "boom", payload)
+
+        completed.assert_called_once_with("run_mat", result, materialization_id="mat_a")
+        failed.assert_called_once_with("run_mat", "boom", materialization_id="mat_a")
 
     def test_recalculate_recovers_analysis_eligibility_from_dump_manifest(self) -> None:
         captured: dict[str, object] = {}
