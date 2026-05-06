@@ -27,6 +27,11 @@ class PublicApiSurfaceTests(unittest.TestCase):
 
         self.assertFalse(any(path.startswith("/api/v1/pipeline") for path in route_paths))
 
+    def test_legacy_slice_plan_route_is_not_public(self) -> None:
+        route_paths = {getattr(route, "path", "") for route in app.routes}
+
+        self.assertNotIn("/api/v1/slices/plan", route_paths)
+
     def test_run_request_exposes_only_recalculate_action(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")
         self.assertEqual(RunRequest(action="recalculate", payload={"dump_id": "dump_a"}).action, "recalculate")

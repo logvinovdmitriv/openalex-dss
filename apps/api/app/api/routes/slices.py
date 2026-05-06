@@ -4,19 +4,11 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from app.api.schemas import MaterializationPlanRequest, MaterializationRunRequest, PipelineRequest, SliceCreateRequest, SliceEstimateRequest
-from app.services import query_planner, slice_workbench
+from app.api.schemas import MaterializationPlanRequest, MaterializationRunRequest, SliceCreateRequest, SliceEstimateRequest
+from app.services import slice_workbench
 
 
 router = APIRouter(tags=["slices"])
-
-
-@router.post("/slices/plan")
-def plan_slice(request: PipelineRequest) -> dict[str, Any]:
-    try:
-        return query_planner.plan_slice(request.model_dump(exclude_none=True))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/slices")

@@ -122,7 +122,7 @@ def build_passports(
         },
         "optimization_policy": {
             "principle": "download minimum, store once, compute locally, cache repeated OpenAlex calls",
-            "estimate_endpoint": "POST /api/v1/slices/plan",
+            "estimate_endpoint": "POST /api/v1/slices/{slice_id}/estimate",
             "api_cache": "data/cache/openalex_api",
             "limits_config": "configs/execution_limits.yaml",
             "filter_registry": "configs/openalex_filter_registry.yaml",
