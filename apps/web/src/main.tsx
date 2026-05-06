@@ -1951,6 +1951,7 @@ function ReportsPage({
   const scientometricsOutliersUrl = `${API_BASE}/analytics/scientometrics/outliers.csv?${scientometricParams.toString()}`;
   const scientometricsTopOutliersUrl = `${API_BASE}/analytics/scientometrics/top-outliers.csv?${scientometricParams.toString()}`;
   const scientometricsFindingsUrl = `${API_BASE}/analytics/scientometrics/findings.csv?${scientometricParams.toString()}`;
+  const scientometricsConclusionUrl = `${API_BASE}/analytics/scientometrics/conclusion.md?${scientometricParams.toString()}`;
   const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "csv", cohortFilterPolicy)}` : "";
   const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "json", cohortFilterPolicy)}` : "";
   const cohortStatsUrl = cohortId ? `${API_BASE}${cohortStatisticsUrl(cohortId, filters, fractionMode, runId, dumpId, cohortFilterPolicy)}` : "";
@@ -1996,6 +1997,7 @@ function ReportsPage({
           <a href={scientometricsOutliersUrl}>CSV всех выбросов</a>
           <a href={scientometricsTopOutliersUrl}>CSV top-выбросов</a>
           <a href={scientometricsFindingsUrl}>CSV автоматизированных выводов</a>
+          <a href={scientometricsConclusionUrl}>Markdown черновика вывода</a>
         </div>
         <div className="notice">
           <b>Параметры пакета</b>

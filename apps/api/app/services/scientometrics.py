@@ -23,7 +23,7 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
 )
 SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v4"
 SCIENTOMETRIC_FINDINGS_VERSION = "scientometric_findings_v2"
-SCIENTOMETRIC_CONCLUSION_VERSION = "scientometric_conclusion_v2"
+SCIENTOMETRIC_CONCLUSION_VERSION = "scientometric_conclusion_v3"
 FINDING_THRESHOLDS = {
     "heavy_tail_skewness_medium": 1.0,
     "heavy_tail_skewness_high": 2.0,
@@ -601,6 +601,45 @@ def conclusion_draft(
             "metrics": metrics,
         },
     }
+
+
+def scientometric_conclusion_markdown(payload: dict[str, Any]) -> str:
+    conclusion = payload.get("conclusion_draft") or {}
+    title = str(conclusion.get("title") or "Вывод по сравнению наукометрических индексов").strip()
+    lines = [f"# {title or 'Вывод по сравнению наукометрических индексов'}", ""]
+    for paragraph in conclusion.get("paragraphs") or []:
+        if not isinstance(paragraph, dict):
+            continue
+        role = str(paragraph.get("role") or "paragraph")
+        text = str(paragraph.get("text") or "").strip()
+        lines.extend([f"## {_conclusion_role_label(role)}", "", text or "Нет текста.", ""])
+        evidence_ids = [str(item) for item in paragraph.get("evidence_finding_ids") or [] if str(item).strip()]
+        evidence_metrics = [str(item) for item in paragraph.get("evidence_metrics") or [] if str(item).strip()]
+        if evidence_ids:
+            lines.extend([f"Основания: {', '.join(evidence_ids)}", ""])
+        if evidence_metrics:
+            lines.extend([f"Метрики: {', '.join(_metric_label(metric) for metric in evidence_metrics)}", ""])
+    limitations = [str(item) for item in conclusion.get("limitations") or [] if str(item).strip()]
+    if limitations:
+        lines.extend(["## Ограничения вывода", ""])
+        lines.extend([f"- {item}" for item in limitations])
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+def _conclusion_role_label(role: str) -> str:
+    labels = {
+        "scope": "Область анализа",
+        "distribution_limits": "Распределения",
+        "index_limitations": "Различающая способность",
+        "dependence_limits": "Зависимости индексов",
+        "correction_effects": "Корректирующие эффекты",
+        "rank_comparison": "Сравнение рангов",
+        "candidate_metric": "Кандидатная формула",
+        "no_data": "Нет данных",
+        "final_caution": "Ограничение интерпретации",
+    }
+    return labels.get(role, role.replace("_", " ").strip().title() or "Абзац")
 
 
 def _distribution_findings(metrics: list[str], descriptive: dict[str, Any], normality: dict[str, Any]) -> list[dict[str, Any]]:

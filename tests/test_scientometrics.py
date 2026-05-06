@@ -318,7 +318,7 @@ class ScientometricServiceTests(unittest.TestCase):
         distribution = next(paragraph for paragraph in draft["paragraphs"] if paragraph["role"] == "distribution_limits")
         candidate = next(paragraph for paragraph in draft["paragraphs"] if paragraph["role"] == "candidate_metric")
 
-        self.assertEqual(draft["version"], "scientometric_conclusion_v2")
+        self.assertEqual(draft["version"], "scientometric_conclusion_v3")
         self.assertIn("distribution_limits", roles)
         self.assertIn("index_limitations", roles)
         self.assertIn("candidate_metric", roles)
@@ -329,6 +329,39 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertIn("baseline h-index", text)
         self.assertNotIn("лучший индекс", text.lower())
         self.assertIn("не заменяют экспертную оценку", " ".join(draft["limitations"]).lower())
+
+    def test_scientometric_conclusion_markdown_contains_traceable_evidence(self) -> None:
+        payload = {
+            "conclusion_draft": {
+                "title": "Вывод по сравнению наукометрических индексов",
+                "paragraphs": [
+                    {
+                        "role": "distribution_limits",
+                        "text": "Метрика C имеет тяжелый хвост.",
+                        "evidence_finding_ids": ["heavy_tail:c"],
+                        "evidence_metrics": ["c"],
+                    },
+                    {
+                        "role": "candidate_metric",
+                        "text": "ISLV рассматривается как кандидатная формула.",
+                        "evidence_finding_ids": ["balanced_candidate:islv"],
+                        "evidence_metrics": ["islv"],
+                    },
+                ],
+                "limitations": ["Метрики не заменяют экспертную оценку."],
+            }
+        }
+
+        markdown = scientometrics.scientometric_conclusion_markdown(payload)
+
+        self.assertIn("# Вывод по сравнению наукометрических индексов", markdown)
+        self.assertIn("## Распределения", markdown)
+        self.assertIn("## Кандидатная формула", markdown)
+        self.assertIn("Основания: heavy_tail:c", markdown)
+        self.assertIn("Метрики: C", markdown)
+        self.assertIn("Метрики: ISLV", markdown)
+        self.assertIn("## Ограничения вывода", markdown)
+        self.assertIn("- Метрики не заменяют экспертную оценку.", markdown)
 
     def test_conclusion_draft_traces_rank_and_correction_evidence(self) -> None:
         findings = [
@@ -451,7 +484,7 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(payload["analysis_version"], "scientometrics_v4")
         self.assertEqual(payload["descriptive"]["h"]["n"], 0)
         self.assertEqual(payload["finding_summary"]["findings_version"], "scientometric_findings_v2")
-        self.assertEqual(payload["conclusion_draft"]["version"], "scientometric_conclusion_v2")
+        self.assertEqual(payload["conclusion_draft"]["version"], "scientometric_conclusion_v3")
         self.assertEqual(payload["finding_thresholds"]["tie_rate"], 0.30)
         self.assertTrue(payload["warnings"])
         self.assertIsNone(payload["interpretation"]["candidate_balanced_metric"])

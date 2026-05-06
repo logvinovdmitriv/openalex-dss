@@ -563,6 +563,22 @@ def scientometric_findings_csv(request: Request) -> Response:
     return _csv_response(fields, _scientometric_finding_rows(payload), filename="openalex_dss_scientometrics_findings.csv")
 
 
+@router.get("/analytics/scientometrics/conclusion.md")
+def scientometric_conclusion_markdown(request: Request) -> Response:
+    try:
+        payload = _scientometric_payload_from_request(request)
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    markdown = scientometrics.scientometric_conclusion_markdown(payload)
+    return Response(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="openalex_dss_scientometrics_conclusion.md"'},
+    )
+
+
 def _slice_filters(
     *,
     country_code: str = "",

@@ -247,6 +247,18 @@ class AnalyticsRouteTests(unittest.TestCase):
                     "evidence": {"skewness": 2.5},
                 }
             ],
+            "conclusion_draft": {
+                "title": "Вывод по сравнению наукометрических индексов",
+                "paragraphs": [
+                    {
+                        "role": "distribution_limits",
+                        "text": "Метрика C имеет тяжелый хвост.",
+                        "evidence_finding_ids": ["heavy_tail:c"],
+                        "evidence_metrics": ["c"],
+                    }
+                ],
+                "limitations": ["Метрики не заменяют экспертную оценку."],
+            },
         }
         full_rank_shift_rows = [
             {
@@ -294,6 +306,7 @@ class AnalyticsRouteTests(unittest.TestCase):
             outliers = analytics_routes.scientometric_outliers_csv(_request(metrics="h,c"))
             top_outliers = analytics_routes.scientometric_top_outliers_csv(_request(metrics="h,c"))
             findings = analytics_routes.scientometric_findings_csv(_request(metrics="h,c"))
+            conclusion = analytics_routes.scientometric_conclusion_markdown(_request(metrics="h,c"))
 
         self.assertIn("metric,n,missing_count", descriptive.body.decode("utf-8"))
         self.assertIn("h,2,0", descriptive.body.decode("utf-8"))
@@ -309,6 +322,13 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertIn("id,type,metric,baseline_metric,severity,text,recommendation,evidence_json", findings.body.decode("utf-8"))
         self.assertIn("heavy_tail:c,heavy_tail_distribution,c,,high", findings.body.decode("utf-8"))
         self.assertIn('"{""skewness"": 2.5}"', findings.body.decode("utf-8"))
+        conclusion_text = conclusion.body.decode("utf-8")
+        self.assertEqual(conclusion.media_type, "text/markdown; charset=utf-8")
+        self.assertIn("# Вывод по сравнению наукометрических индексов", conclusion_text)
+        self.assertIn("## Распределения", conclusion_text)
+        self.assertIn("Основания: heavy_tail:c", conclusion_text)
+        self.assertIn("Метрики: C", conclusion_text)
+        self.assertIn("- Метрики не заменяют экспертную оценку.", conclusion_text)
 
     def test_cohort_statistics_route_forwards_analysis_scope(self) -> None:
         captured: dict[str, object] = {}
