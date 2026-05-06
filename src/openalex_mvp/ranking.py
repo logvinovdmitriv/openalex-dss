@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .io_utils import as_float, as_int, read_csv_dicts, write_csv_dicts, write_parquet_dicts
+from .io_utils import as_float, as_int, read_table_dicts, write_csv_dicts, write_parquet_dicts
 
 CORE_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local")
 EXPERIMENTAL_METRICS = ("f5", "fm5", "iupv", "islv", "lrdi")
@@ -31,7 +31,7 @@ def build_ratings(
     out_path: str | Path = "data/results/rating_positions.csv",
     metrics: tuple[str, ...] = METRICS,
 ) -> list[dict[str, Any]]:
-    rows = read_csv_dicts(indices_path)
+    rows = read_table_dicts(indices_path)
     by_run_mode: defaultdict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         by_run_mode[(row["run_id"], row["fraction_mode"])].append(row)

@@ -5,7 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .io_utils import as_float, as_int, read_csv_dicts, truthy, write_csv_dicts, write_parquet_dicts
+from .io_utils import as_float, as_int, read_table_dicts, truthy, write_csv_dicts, write_parquet_dicts
 from .normalize import DELETED_AUTHOR_ID, NULL_AUTHOR_ID
 
 AUTHOR_WORK_FIELDS = [
@@ -179,8 +179,8 @@ def build_author_work_metrics(
     fraction_modes: tuple[str, ...] = ("strict_authors_count", "renorm_valid_authors", "integer"),
     run_id: str = "base",
 ) -> list[dict[str, Any]]:
-    works = {row["work_id"]: row for row in read_csv_dicts(works_path)}
-    authorships = read_csv_dicts(authorships_path)
+    works = {row["work_id"]: row for row in read_table_dicts(works_path)}
+    authorships = read_table_dicts(authorships_path)
     rows: list[dict[str, Any]] = []
     seen_work_author: set[tuple[str, str]] = set()
 
@@ -255,7 +255,7 @@ def compute_indices(
     lrdi_lambda: float = 0.15,
     analysis_year: int = 2026,
 ) -> list[dict[str, Any]]:
-    rows = read_csv_dicts(author_work_path)
+    rows = read_table_dicts(author_work_path)
     groups: defaultdict[tuple[str, str, str], list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         groups[(row["run_id"], row["fraction_mode"], row["author_id"])].append(row)

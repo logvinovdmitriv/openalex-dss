@@ -17,7 +17,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from openalex_mvp.config import replace_config, write_config  # noqa: E402
-from openalex_mvp.io_utils import write_json  # noqa: E402
+from openalex_mvp.io_utils import sha256_file, write_json  # noqa: E402
 from openalex_mvp.metrics import build_author_work_metrics, compute_indices  # noqa: E402
 from openalex_mvp.normalize import normalize_raw  # noqa: E402
 from openalex_mvp.passports import build_passports  # noqa: E402
@@ -42,11 +42,12 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     _write_runtime_config(cfg)
     run_id = str(payload.get("run_id") or cfg.slice_name or "recalculate")
     dump_id = str(payload.get("dump_id") or _dump_id_from_payload(payload) or cfg.slice_name)
+    input_tables = resolve_dump_tables(dump_id, required=True)
     analysis_eligibility = _recover_analysis_eligibility(payload, dump_id=dump_id, run_id=run_id)
-    _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility)
-    archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility})
+    compute = _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
+    archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, **compute})
     _write_pipeline_summary("recalculate", cfg, {**payload, "analysis_eligibility": analysis_eligibility})
-    return {"status": "ok", "mode": "recalculate", "archive": archive, "analysis_eligibility": analysis_eligibility}
+    return {"status": "ok", "mode": "recalculate", "archive": archive, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
 
 
 def fetch_slice_dump(
@@ -149,6 +150,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         DATA / "passports/quality_report.json",
         DATA / "normalized/work_topics_flat.csv",
     )
+    input_tables = _materialize_dump_tables(dump_id)
     source_type = "openalex_cli_dump_import" if dump_manifest else "local_file"
     write_json(
         DATA / "passports/fetch_meta.json",
@@ -170,10 +172,10 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             "used_api_key": bool(dump_manifest.get("used_api_key")) if dump_manifest else False,
         },
     )
-    _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id, analysis_eligibility=analysis_eligibility)
-    archive = _archive_run_artifacts(cfg, {**payload, "source_file": profile, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility})
+    compute = _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
+    archive = _archive_run_artifacts(cfg, {**payload, "source_file": profile, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, **compute})
     _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "archive": archive, "analysis_eligibility": analysis_eligibility})
-    return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive, "analysis_eligibility": analysis_eligibility}
+    return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
 
 
 def preview(payload: dict[str, Any]) -> dict[str, Any]:
@@ -200,24 +202,78 @@ def clear_generated_data() -> dict[str, Any]:
     return {"status": "ok", "mode": "clear_generated_data", "removed": removed}
 
 
-def _run_compute(cfg: Any, *, run_id: str = "base", dump_id: str = "", analysis_eligibility: dict[str, Any] | None = None) -> None:
-    build_author_work_metrics(DATA / "normalized/works_flat.csv", DATA / "normalized/authorships_flat.csv", DATA / "marts/author_work_metrics.csv", cfg.fraction_modes, run_id=run_id)
+def resolve_dump_tables(dump_id: str, *, required: bool = True) -> dict[str, Path]:
+    safe_dump_id = _safe_id(str(dump_id or ""))
+    base = DATA / "tables" / safe_dump_id
+    tables = {
+        "works": base / "works.parquet",
+        "authorships": base / "authorships.parquet",
+        "work_topics": base / "work_topics.parquet",
+    }
+    missing = [name for name, path in tables.items() if not path.is_file()]
+    if required and missing:
+        missing_text = ", ".join(f"{name}={tables[name]}" for name in missing)
+        raise FileNotFoundError(f"Локальные таблицы для dump_id={dump_id} не найдены: {missing_text}. Сначала импортируйте или пересоберите дамп.")
+    return {name: path for name, path in tables.items() if path.is_file()}
+
+
+def _materialize_dump_tables(dump_id: str) -> dict[str, Path]:
+    safe_dump_id = _safe_id(str(dump_id or ""))
+    target_dir = DATA / "tables" / safe_dump_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    mapping = {
+        "works": "works.parquet",
+        "authorships": "authorships.parquet",
+        "work_topics": "work_topics.parquet",
+    }
+    for name, filename in mapping.items():
+        source = PARQUET_TABLE_FILES.get(name)
+        if not source or not Path(source).is_file():
+            raise FileNotFoundError(f"Не удалось материализовать dump_id={dump_id}: отсутствует parquet-таблица {name}.")
+        shutil.copy2(Path(source), target_dir / filename)
+    return resolve_dump_tables(safe_dump_id, required=True)
+
+
+def _run_compute(
+    cfg: Any,
+    *,
+    run_id: str = "base",
+    dump_id: str = "",
+    analysis_eligibility: dict[str, Any] | None = None,
+    input_tables: dict[str, Path] | None = None,
+) -> dict[str, Any]:
+    input_tables = input_tables or resolve_dump_tables(dump_id, required=True)
+    input_table_checksums = _table_checksums(input_tables)
+    run_dir = DATA / "runs" / _safe_id(run_id)
+    run_tables = run_dir / "tables"
+    run_results = run_dir / "results"
+    run_figures = run_results / "figures"
+    run_tables.mkdir(parents=True, exist_ok=True)
+    run_results.mkdir(parents=True, exist_ok=True)
+
+    author_work_csv = run_tables / "author_work.csv"
+    indices_csv = run_tables / "author_indices.csv"
+    ratings_csv = run_tables / "rating_positions.csv"
+    stats_json = run_results / "stats_summary.json"
+    theory_json = run_results / "theory_validation.json"
+
+    build_author_work_metrics(input_tables["works"], input_tables["authorships"], author_work_csv, cfg.fraction_modes, run_id=run_id)
     compute_indices(
-        DATA / "marts/author_work_metrics.csv",
-        DATA / "results/author_indices.csv",
+        author_work_csv,
+        indices_csv,
         cfg.iupv_n0,
         cfg.iupv_lambda,
         cfg.lrdi_p0,
         cfg.lrdi_lambda,
         cfg.analysis_year,
     )
-    build_ratings(DATA / "results/author_indices.csv", DATA / "results/rating_positions.csv")
-    analyze_stats(DATA / "results/author_indices.csv", DATA / "results/rating_positions.csv", DATA / "results/figures", DATA / "results/stats_summary.json")
+    build_ratings(indices_csv, ratings_csv)
+    analyze_stats(indices_csv, ratings_csv, run_figures, stats_json)
     analyze_theory(
-        DATA / "marts/author_work_metrics.csv",
-        DATA / "results/author_indices.csv",
-        DATA / "results/theory_validation.json",
-        DATA / "results",
+        author_work_csv,
+        indices_csv,
+        theory_json,
+        run_results,
         cfg.iupv_n0,
         cfg.iupv_lambda,
         cfg.lrdi_p0,
@@ -225,8 +281,102 @@ def _run_compute(cfg: Any, *, run_id: str = "base", dump_id: str = "", analysis_
         cfg.analysis_year,
         cfg.fraction_mode_default,
     )
-    build_passports(cfg, ROOT, DATA / "passports", run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility)
+    run_table_outputs = {
+        "author_work": author_work_csv,
+        "author_indices": indices_csv,
+        "rating_positions": ratings_csv,
+    }
+    run_result_outputs = {
+        "stats_summary": stats_json,
+        "theory_validation": theory_json,
+        "theory_top1_sensitivity": run_results / "theory_top1_sensitivity.csv",
+        "theory_fraction_mode_sensitivity": run_results / "theory_fraction_mode_sensitivity.csv",
+    }
+    _publish_latest_view(input_tables, run_table_outputs, run_result_outputs)
+    input_table_manifest = _table_manifest(input_tables, input_table_checksums)
+    build_passports(
+        cfg,
+        ROOT,
+        DATA / "passports",
+        run_id=run_id,
+        dump_id=dump_id,
+        analysis_eligibility=analysis_eligibility,
+        input_tables=input_table_manifest,
+    )
     reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100)
+    return {
+        "input_dump_id": dump_id,
+        "input_tables": input_table_manifest,
+        "input_table_checksums": input_table_checksums,
+        "run_table_outputs": {key: str(path) for key, path in run_table_outputs.items()},
+        "run_result_outputs": {key: str(path) for key, path in run_result_outputs.items()},
+    }
+
+
+def _publish_latest_view(input_tables: dict[str, Path], run_tables: dict[str, Path], run_results: dict[str, Path]) -> None:
+    for name in ("works", "authorships", "work_topics"):
+        target = PARQUET_TABLE_FILES.get(name)
+        source = input_tables.get(name)
+        if source and target:
+            Path(target).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+    table_pairs = {
+        "author_work": "author_work",
+        "author_indices": "indices",
+        "rating_positions": "ratings",
+    }
+    for source_key, table_key in table_pairs.items():
+        source_csv = run_tables[source_key]
+        csv_target = TABLE_FILES.get(table_key)
+        if csv_target:
+            Path(csv_target).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_csv, csv_target)
+        source_parquet = source_csv.with_suffix(".parquet")
+        parquet_target = PARQUET_TABLE_FILES.get(table_key)
+        if source_parquet.is_file() and parquet_target:
+            Path(parquet_target).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_parquet, parquet_target)
+        if table_key == "indices":
+            local_metrics_target = TABLE_FILES.get("authors_local_metrics")
+            local_metrics_parquet_target = PARQUET_TABLE_FILES.get("authors_local_metrics")
+            if local_metrics_target:
+                Path(local_metrics_target).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_csv, local_metrics_target)
+            if source_parquet.is_file() and local_metrics_parquet_target:
+                Path(local_metrics_parquet_target).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_parquet, local_metrics_parquet_target)
+
+    for name, source in run_results.items():
+        if not source.is_file():
+            continue
+        if name == "stats_summary":
+            target = DATA / "results" / "stats_summary.json"
+        elif name == "theory_validation":
+            target = DATA / "results" / "theory_validation.json"
+        elif name == "theory_top1_sensitivity":
+            target = DATA / "results" / "theory_top1_sensitivity.csv"
+        elif name == "theory_fraction_mode_sensitivity":
+            target = DATA / "results" / "theory_fraction_mode_sensitivity.csv"
+        else:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
+def _table_checksums(paths: dict[str, Path]) -> dict[str, str]:
+    return {name: sha256_file(path) for name, path in paths.items() if path.is_file()}
+
+
+def _table_manifest(paths: dict[str, Path], checksums: dict[str, str]) -> dict[str, dict[str, Any]]:
+    return {
+        name: {
+            "path": str(path),
+            "sha256": checksums.get(name, ""),
+            "bytes": path.stat().st_size if path.is_file() else 0,
+        }
+        for name, path in paths.items()
+    }
 
 
 def _cfg(payload: dict[str, Any]) -> Any:
@@ -274,6 +424,9 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "source_file": payload.get("source_file"),
         "dump_manifest": payload.get("dump_manifest"),
         "analysis_eligibility": payload.get("analysis_eligibility"),
+        "input_dump_id": payload.get("input_dump_id") or dump_id,
+        "input_tables": payload.get("input_tables") or {},
+        "input_table_checksums": payload.get("input_table_checksums") or {},
         "latest_view_note": "Global normalized/results paths are only the UI latest-view; reproducible artifacts are archived under this run_id and dump_id.",
     }
     write_json(run_dir / "metric_run.json", manifest)

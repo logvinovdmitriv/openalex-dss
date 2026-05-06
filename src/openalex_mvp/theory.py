@@ -5,7 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .io_utils import as_float, as_int, ensure_dir, read_csv_dicts, write_csv_dicts, write_json
+from .io_utils import as_float, as_int, ensure_dir, read_table_dicts, write_csv_dicts, write_json
 from .metrics import AUTHOR_INDEX_FIELDS, assign_iupv_percentiles, g_index, h_index, i10_index, lrdi
 from .ranking import CORE_METRICS, EXPERIMENTAL_METRICS, METRICS
 from .stats import spearman_from_ranks, top_n_overlap
@@ -40,8 +40,8 @@ def analyze_theory(
     default_mode: str = "strict_authors_count",
 ) -> dict[str, Any]:
     ensure_dir(out_dir)
-    awm = read_csv_dicts(author_work_path)
-    indices = read_csv_dicts(indices_path)
+    awm = read_table_dicts(author_work_path)
+    indices = read_table_dicts(indices_path)
 
     top1_rows, top1_summary = _top1_sensitivity(awm, n0=n0, lam=lam, lrdi_p0=lrdi_p0, lrdi_lambda=lrdi_lambda, analysis_year=analysis_year)
     mode_rows, mode_summary = _fraction_mode_sensitivity(indices)

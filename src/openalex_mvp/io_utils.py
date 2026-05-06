@@ -48,6 +48,17 @@ def read_csv_dicts(path: str | Path) -> list[dict[str, str]]:
         return list(csv.DictReader(f))
 
 
+def read_table_dicts(path: str | Path) -> list[dict]:
+    p = Path(path)
+    if p.suffix == ".parquet":
+        try:
+            import polars as pl
+        except ImportError as exc:
+            raise RuntimeError("Reading Parquet tables requires polars to be installed") from exc
+        return pl.read_parquet(p).to_dicts()
+    return read_csv_dicts(p)
+
+
 def write_csv_dicts(path: str | Path, rows: Iterable[dict], fieldnames: list[str]) -> int:
     p = ensure_parent(path)
     opener = gzip.open if p.suffix == ".gz" else open

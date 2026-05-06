@@ -140,7 +140,8 @@ class PipelineIntegrityTests(unittest.TestCase):
                 patch.object(pipeline, "DATA", root / "data"),
                 patch.object(pipeline, "resolve_safe_path", return_value=raw),
                 patch.object(pipeline, "file_profile", return_value=profile),
-                patch.object(pipeline, "_run_compute", return_value=None),
+                patch.object(pipeline, "_materialize_dump_tables", return_value={"works": raw, "authorships": raw, "work_topics": raw}),
+                patch.object(pipeline, "_run_compute", return_value={"input_tables": {}, "input_table_checksums": {}}),
                 patch.object(pipeline, "_archive_run_artifacts", return_value={}),
                 patch.object(pipeline, "_write_pipeline_summary", return_value=None),
             ):
@@ -206,8 +207,9 @@ class PipelineIntegrityTests(unittest.TestCase):
     def test_recalculate_recovers_analysis_eligibility_from_dump_manifest(self) -> None:
         captured: dict[str, object] = {}
 
-        def fake_run_compute(*args: object, **kwargs: object) -> None:
+        def fake_run_compute(*args: object, **kwargs: object) -> dict[str, object]:
             captured.update(kwargs)
+            return {"input_tables": {}, "input_table_checksums": {}}
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -232,6 +234,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             )
             with (
                 patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "resolve_dump_tables", return_value={"works": root / "works.parquet", "authorships": root / "authorships.parquet", "work_topics": root / "work_topics.parquet"}),
                 patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
                 patch.object(pipeline, "_archive_run_artifacts", return_value={}),
                 patch.object(pipeline, "_write_pipeline_summary", return_value=None),
@@ -247,6 +250,70 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertEqual(captured["analysis_eligibility"]["status"], "final")
         self.assertEqual(result["analysis_eligibility"]["allowed_for_final_analysis"], True)
+
+    def test_recalculate_requires_dump_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(pipeline, "DATA", Path(tmp)):
+                with self.assertRaises(FileNotFoundError):
+                    pipeline.recalculate(
+                        {
+                            "dump_id": "missing_dump",
+                            "entity_level": "subfield",
+                            "entity_id_short": "1706",
+                            "entity_display_name": "Computer Science Applications",
+                        }
+                    )
+
+    def test_recalculate_uses_requested_dump_tables_not_latest_view(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_author_work_metrics(works_path: object, authorships_path: object, *args: object, **kwargs: object) -> list[dict[str, object]]:
+            captured["works_path"] = works_path
+            captured["authorships_path"] = authorships_path
+            return []
+
+        def fake_build_passports(*args: object, **kwargs: object) -> dict[str, object]:
+            captured["passport_input_tables"] = kwargs.get("input_tables")
+            return {}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump_a = root / "tables" / "dump_A"
+            dump_b = root / "tables" / "dump_B"
+            latest = root / "parquet"
+            for base in (dump_a, dump_b, latest):
+                base.mkdir(parents=True)
+                for table in ("works", "authorships", "work_topics"):
+                    (base / f"{table}.parquet").write_text(f"{base.name}:{table}", encoding="utf-8")
+
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "build_author_work_metrics", side_effect=fake_author_work_metrics),
+                patch.object(pipeline, "compute_indices", return_value=[]),
+                patch.object(pipeline, "build_ratings", return_value=[]),
+                patch.object(pipeline, "analyze_stats", return_value={}),
+                patch.object(pipeline, "analyze_theory", return_value={}),
+                patch.object(pipeline, "_publish_latest_view", return_value=None),
+                patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
+                patch.object(pipeline.reports, "build_report_bundle", return_value={}),
+                patch.object(pipeline, "_archive_run_artifacts", return_value={}),
+                patch.object(pipeline, "_write_pipeline_summary", return_value=None),
+            ):
+                pipeline.recalculate(
+                    {
+                        "dump_id": "dump_A",
+                        "run_id": "run_A",
+                        "analysis_eligibility": {"status": "final", "allowed_for_final_analysis": True},
+                        "entity_level": "subfield",
+                        "entity_id_short": "1706",
+                        "entity_display_name": "Computer Science Applications",
+                    }
+                )
+
+        self.assertEqual(Path(captured["works_path"]), dump_a / "works.parquet")
+        self.assertEqual(Path(captured["authorships_path"]), dump_a / "authorships.parquet")
+        self.assertIn("works", captured["passport_input_tables"])
+        self.assertEqual(captured["passport_input_tables"]["works"]["path"], str(dump_a / "works.parquet"))
 
     def test_pipeline_summary_includes_analysis_eligibility(self) -> None:
         captured: dict[str, object] = {}

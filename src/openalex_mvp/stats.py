@@ -5,7 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .io_utils import as_float, as_int, ensure_dir, read_csv_dicts, write_json
+from .io_utils import as_float, as_int, ensure_dir, read_table_dicts, write_json
 from .ranking import METRICS
 
 
@@ -16,8 +16,8 @@ def analyze_stats(
     json_out: str | Path = "data/results/stats_summary.json",
     metrics: tuple[str, ...] = METRICS,
 ) -> dict[str, Any]:
-    indices = read_csv_dicts(indices_path)
-    ratings = read_csv_dicts(ratings_path)
+    indices = read_table_dicts(indices_path)
+    ratings = read_table_dicts(ratings_path)
     ensure_dir(fig_dir)
     available_metrics = tuple(metric for metric in metrics if any(metric in row for row in indices))
 
