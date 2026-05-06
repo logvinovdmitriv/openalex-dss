@@ -18,6 +18,7 @@ def analytics(
     run_id: str = "",
     dump_id: str = "",
     cohort_id: str = "",
+    cohort_filter_policy: str = "auto",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -74,7 +75,7 @@ def analytics(
         work_type=work_type,
     )
     try:
-        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
         filters = cohort_ctx["filters"]
@@ -127,6 +128,7 @@ def distribution(
     run_id: str = "",
     dump_id: str = "",
     cohort_id: str = "",
+    cohort_filter_policy: str = "auto",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -182,7 +184,7 @@ def distribution(
         work_type=work_type,
     )
     try:
-        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
         filters = cohort_ctx["filters"]
@@ -201,6 +203,7 @@ def ranking_json(
     run_id: str = "",
     dump_id: str = "",
     cohort_id: str = "",
+    cohort_filter_policy: str = "auto",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -257,7 +260,7 @@ def ranking_json(
         work_type=work_type,
     )
     try:
-        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
         filters = cohort_ctx["filters"]
@@ -276,6 +279,7 @@ def ranking_csv(
     run_id: str = "",
     dump_id: str = "",
     cohort_id: str = "",
+    cohort_filter_policy: str = "auto",
     fraction_mode: str = "strict_authors_count",
     metric: str = "islv",
     country_code: str = "",
@@ -311,6 +315,7 @@ def ranking_csv(
             run_id=run_id,
             dump_id=dump_id,
             cohort_id=cohort_id,
+            cohort_filter_policy=cohort_filter_policy,
             fraction_mode=fraction_mode,
             metric=metric,
             country_code=country_code,
@@ -407,10 +412,10 @@ def _slice_filters(
     )
 
 
-def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode: str, filters: dict[str, Any]) -> dict[str, Any]:
+def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode: str, filters: dict[str, Any], filter_policy: str = "auto") -> dict[str, Any]:
     if not cohort_id:
         return {"run_id": run_id, "dump_id": dump_id, "filters": filters, "author_ids": None, "cohort": None}
-    ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+    ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=filter_policy)
     cohort = ctx["cohort"]
     return {
         "run_id": ctx["run_id"],
@@ -425,6 +430,7 @@ def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode:
             "checksum": cohort.get("checksum"),
             "membership_filters": ctx.get("membership_filters") or {},
             "analysis_filters": ctx.get("analysis_filters") or ctx.get("filters") or {},
+            "filter_policy": ctx.get("filter_policy") or "auto",
             "filter_mode": ctx.get("filter_mode"),
         },
     }

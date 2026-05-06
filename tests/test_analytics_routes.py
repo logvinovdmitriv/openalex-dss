@@ -158,6 +158,7 @@ class AnalyticsRouteTests(unittest.TestCase):
                 country_code="de",
                 filter_mode="search",
                 text_search_query="ergodesign",
+                cohort_filter_policy="current",
             )
 
         self.assertEqual(payload["n_rows"], 1)
@@ -169,6 +170,7 @@ class AnalyticsRouteTests(unittest.TestCase):
                 "dump_id": "dump_a",
                 "fraction_mode": "integer",
                 "filters": {"country_code": "DE", "filter_mode": "search", "text_search_query": "ergodesign"},
+                "filter_policy": "current",
             },
         )
 
@@ -194,6 +196,7 @@ class AnalyticsRouteTests(unittest.TestCase):
                 fraction_mode="integer",
                 metric="islv",
                 country_code="ru",
+                cohort_filter_policy="none",
                 limit=50,
             )
             csv_response = cohort_routes.cohort_author_metrics_csv(
@@ -203,13 +206,16 @@ class AnalyticsRouteTests(unittest.TestCase):
                 fraction_mode="integer",
                 metric="islv",
                 country_code="ru",
+                cohort_filter_policy="none",
                 limit=50,
             )
 
         self.assertEqual(json_payload["total"], 1)
         self.assertEqual(captured["json"]["metric"], "islv")
         self.assertEqual(captured["json"]["filters"], {"country_code": "RU"})
+        self.assertEqual(captured["json"]["filter_policy"], "none")
         self.assertEqual(captured["csv"]["metric"], "islv")
+        self.assertEqual(captured["csv"]["filter_policy"], "none")
         self.assertIn("author_metrics", csv_response.headers["Content-Disposition"])
         self.assertIn("https://openalex.org/A1", csv_response.body.decode("utf-8"))
 

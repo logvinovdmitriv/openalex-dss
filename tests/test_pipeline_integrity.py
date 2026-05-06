@@ -606,6 +606,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             "filters": {"country_code": "DE"},
             "analysis_filters": {"country_code": "DE"},
             "membership_filters": {"country_code": "RU"},
+            "filter_policy": "current",
             "filter_mode": "analysis_override",
         }
         rows = [
@@ -646,6 +647,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             "filters": {"country_code": "DE"},
             "analysis_filters": {"country_code": "DE"},
             "membership_filters": {"country_code": "RU"},
+            "filter_policy": "current",
             "filter_mode": "analysis_override",
         }
         rows = [
@@ -669,6 +671,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(captured["filters"], {"country_code": "DE"})
         self.assertEqual(captured["kwargs"], {"run_id": "run_a", "dump_id": "dump_a"})
         self.assertEqual(stats["cohort_context"]["filter_mode"], "analysis_override")
+        self.assertEqual(stats["cohort_context"]["filter_policy"], "current")
         self.assertEqual(stats["n_rows"], 1)
         self.assertEqual(stats["descriptive"]["h"]["mean"], 2.0)
 
@@ -687,9 +690,23 @@ class PipelineIntegrityTests(unittest.TestCase):
             fraction_mode="integer",
             limit=50,
         )
+        fourth = reports._report_scope(
+            run_id="run_a",
+            dump_id="dump_a",
+            filters={},
+            cohort_id="cohort_a",
+            cohort_checksum="sha-a",
+            cohort_n_authors=1,
+            metric="h",
+            fraction_mode="integer",
+            limit=50,
+            cohort_filter_policy="none",
+        )
         self.assertNotEqual(first["report_scope_hash"], second["report_scope_hash"])
         self.assertNotEqual(first["report_scope_hash"], third["report_scope_hash"])
+        self.assertNotEqual(first["report_scope_hash"], fourth["report_scope_hash"])
         self.assertEqual(third["cohort_membership_filters"], {"country_code": "RU"})
+        self.assertEqual(fourth["cohort_filter_policy"], "none")
 
     def test_report_build_requires_explicit_run_or_dump_for_final_report(self) -> None:
         bundle = reports.build_report_bundle(metric="h", fraction_mode="integer", filters={"country_code": "RU"})
@@ -755,6 +772,35 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIsNone(cohort["top_n"])
         self.assertEqual(cohort["author_ids"], ["https://openalex.org/A4", "https://openalex.org/A5", "https://openalex.org/A7"])
         self.assertEqual(cohort["n_authors"], 3)
+
+    def test_resolve_cohort_context_filter_policy_is_explicit(self) -> None:
+        cohort = {
+            "cohort_id": "cohort_a",
+            "run_id": "run_a",
+            "dump_id": "dump_a",
+            "fraction_mode": "integer",
+            "filters": {"country_code": "RU"},
+            "author_ids": ["https://openalex.org/A1"],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(cohorts, "COHORTS_DIR", Path(tmp)):
+                cohorts._write(cohort)
+
+                membership = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"}, filter_policy="membership")
+                current = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"}, filter_policy="current")
+                current_empty = cohorts.resolve_cohort_context("cohort_a", filters={}, filter_policy="current")
+                none = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"}, filter_policy="none")
+                auto = cohorts.resolve_cohort_context("cohort_a", filters={}, filter_policy="auto")
+
+        self.assertEqual(membership["filters"], {"country_code": "RU"})
+        self.assertEqual(membership["filter_policy"], "membership")
+        self.assertEqual(current["filters"], {"country_code": "DE"})
+        self.assertEqual(current["filter_policy"], "current")
+        self.assertEqual(current_empty["filters"], {})
+        self.assertEqual(current_empty["filter_mode"], "no_analysis_filters")
+        self.assertEqual(none["filters"], {})
+        self.assertEqual(none["filter_policy"], "none")
+        self.assertEqual(auto["filters"], {"country_code": "RU"})
 
     def test_cohort_filters_keep_slice_analysis_contract_fields(self) -> None:
         filters = cohorts._filters(

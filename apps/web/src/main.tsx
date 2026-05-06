@@ -53,6 +53,7 @@ import {
   sliceSubjectTitle,
   viewFromHash,
   type EntitySuggestion,
+  type CohortFilterPolicy,
   type ResolverTab,
   type View,
   type WorkbenchRun,
@@ -109,6 +110,7 @@ function Workbench() {
   const [selectedCohortId, setSelectedCohortId] = useState("");
   const [cohortSource, setCohortSource] = useState<"top_n" | "metric_filter">("top_n");
   const [cohortName, setCohortName] = useState("Top авторов текущего среза");
+  const [cohortFilterPolicy, setCohortFilterPolicy] = useState<CohortFilterPolicy>("membership");
   const [minPublications, setMinPublications] = useState(0);
   const [minH, setMinH] = useState(0);
   const [minMetricValue, setMinMetricValue] = useState(0);
@@ -169,8 +171,8 @@ function Workbench() {
   const activeDumpId = extractDumpId(run.data);
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
   const cohortStats = useQuery({
-    queryKey: ["cohort-stats", selectedCohortId, fractionMode, runId, activeDumpId, filterKey],
-    queryFn: () => getJson<any>(cohortStatisticsUrl(selectedCohortId, filters, fractionMode, runId, activeDumpId)),
+    queryKey: ["cohort-stats", selectedCohortId, fractionMode, runId, activeDumpId, filterKey, cohortFilterPolicy],
+    queryFn: () => getJson<any>(cohortStatisticsUrl(selectedCohortId, filters, fractionMode, runId, activeDumpId, cohortFilterPolicy)),
     enabled: Boolean(selectedCohortId),
   });
   const hasLocalAnalyticsData = Boolean(runId || activeDumpId || state.data?.tables?.author_work?.rows || state.data?.tables?.indices?.rows);
@@ -179,13 +181,13 @@ function Workbench() {
     queryFn: () => getJson<TableResponse>(`/tables/${tableName}?q=${encodeURIComponent(tableQ)}&run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}&limit=${Math.max(1, topN || 1)}`),
   });
   const analytics = useQuery({
-    queryKey: ["analytics", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey],
-    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, runId, activeDumpId, selectedCohortId)),
+    queryKey: ["analytics", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, cohortFilterPolicy],
+    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, runId, activeDumpId, selectedCohortId, cohortFilterPolicy)),
     enabled: hasLocalAnalyticsData,
   });
   const ranking = useQuery({
-    queryKey: ["analytics-ranking", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, topN],
-    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, runId, activeDumpId, Math.max(1, topN || 100), selectedCohortId)),
+    queryKey: ["analytics-ranking", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, topN, cohortFilterPolicy],
+    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, runId, activeDumpId, Math.max(1, topN || 100), selectedCohortId, cohortFilterPolicy)),
     enabled: hasLocalAnalyticsData,
   });
   const detail = useQuery({
@@ -307,7 +309,7 @@ function Workbench() {
     },
   });
   const buildReport = useMutation({
-    mutationFn: () => postJson<any>(`/reports/build?${filterParams(filters, { metric, fraction_mode: fractionMode, run_id: runId, dump_id: activeDumpId, limit: Math.max(1, activeTopN || 1), cohort_id: selectedCohortId }).toString()}`, {}),
+    mutationFn: () => postJson<any>(`/reports/build?${filterParams(filters, { metric, fraction_mode: fractionMode, run_id: runId, dump_id: activeDumpId, limit: Math.max(1, activeTopN || 1), cohort_id: selectedCohortId, cohort_filter_policy: cohortFilterPolicy }).toString()}`, {}),
     onSuccess: () => qc.invalidateQueries(),
   });
   const createCohort = useMutation({
@@ -525,6 +527,8 @@ function Workbench() {
             setCohortSource={setCohortSource}
             cohortName={cohortName}
             setCohortName={setCohortName}
+            cohortFilterPolicy={cohortFilterPolicy}
+            setCohortFilterPolicy={setCohortFilterPolicy}
             minPublications={minPublications}
             setMinPublications={setMinPublications}
             minH={minH}
@@ -546,12 +550,14 @@ function Workbench() {
             topN={activeTopN}
             cohortStats={cohortStats.data}
             selectedCohortId={selectedCohortId}
+            cohortFilterPolicy={cohortFilterPolicy}
+            setCohortFilterPolicy={setCohortFilterPolicy}
             onOpenCohorts={() => navigate("cohorts")}
           />
         )}
 
         {view === "reports" && (
-          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={runId} dumpId={activeDumpId} cohortId={selectedCohortId} cohortContext={analytics.data?.cohort} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
+          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={runId} dumpId={activeDumpId} cohortId={selectedCohortId} cohortFilterPolicy={cohortFilterPolicy} cohortContext={cohortStats.data?.cohort_context ?? analytics.data?.cohort} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
         )}
 
         {view === "passports" && (
@@ -1084,6 +1090,8 @@ function CohortsPage({
   setCohortSource,
   cohortName,
   setCohortName,
+  cohortFilterPolicy,
+  setCohortFilterPolicy,
   minPublications,
   setMinPublications,
   minH,
@@ -1111,6 +1119,8 @@ function CohortsPage({
   setCohortSource: (value: "top_n" | "metric_filter") => void;
   cohortName: string;
   setCohortName: (value: string) => void;
+  cohortFilterPolicy: CohortFilterPolicy;
+  setCohortFilterPolicy: (value: CohortFilterPolicy) => void;
   minPublications: number;
   setMinPublications: (value: number) => void;
   minH: number;
@@ -1125,6 +1135,7 @@ function CohortsPage({
   const selected = rows.find((row: any) => row.cohort_id === selectedCohortId);
   const describe = cohortStats?.descriptive?.[metric] ?? {};
   const box = cohortStats?.boxplots?.[metric] ?? {};
+  const context = cohortStats?.cohort_context ?? (selected ? storedCohortContext(selected) : null);
   return (
     <div className="stack">
       <section className="panel">
@@ -1156,6 +1167,13 @@ function CohortsPage({
               {ensureCurrentOption(fractionModeOptions, fractionMode).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </Field>
+          <Field label="Режим анализа когорты">
+            <select value={cohortFilterPolicy} onChange={(event) => setCohortFilterPolicy(event.target.value as CohortFilterPolicy)}>
+              <option value="membership">Как при создании</option>
+              <option value="current">По текущим фильтрам</option>
+              <option value="none">Без доп. фильтров</option>
+            </select>
+          </Field>
           {cohortSource === "top_n" && (
             <Field label="Размер Top-N">
               <select value={String(topN)} onChange={(event) => setTopN(Number(event.target.value))}>
@@ -1179,7 +1197,7 @@ function CohortsPage({
           <b>{cohortSource === "top_n" ? "Top-N когорта" : "Когорта по порогам"}</b>
           <span>{cohortSource === "top_n" ? "Сначала выбираются первые N авторов по метрике, затем применяются минимальные пороги." : "Top-N не применяется: в когорту войдут все авторы текущей аналитической выборки, прошедшие пороги."}</span>
         </div>
-        {selected && <CohortContextPanel context={storedCohortContext(selected)} />}
+        {context && <CohortContextPanel context={context} />}
       </section>
 
       <section className="chart-table-grid">
@@ -1229,6 +1247,8 @@ function StatisticsPage({
   topN,
   cohortStats,
   selectedCohortId,
+  cohortFilterPolicy,
+  setCohortFilterPolicy,
   onOpenCohorts,
 }: {
   analytics: any;
@@ -1238,6 +1258,8 @@ function StatisticsPage({
   topN: number;
   cohortStats: any;
   selectedCohortId: string;
+  cohortFilterPolicy: CohortFilterPolicy;
+  setCohortFilterPolicy: (value: CohortFilterPolicy) => void;
   onOpenCohorts: () => void;
 }) {
   const scatter = (table?.rows ?? []).slice(0, 120).map((row: any) => ({
@@ -1254,6 +1276,7 @@ function StatisticsPage({
   }));
   const activeN = cohortStats?.cohort?.n_authors ?? (table?.total ? Math.min(Number(table.total), topN) : 0);
   const distributionRows = histogramRows.length ? histogramRows : chartRows;
+  const cohortContext = cohortStats?.cohort_context ?? analytics?.cohort;
   return (
     <div className="stack">
       {!selectedCohortId && (
@@ -1272,7 +1295,19 @@ function StatisticsPage({
         <MetricCard label="Tie-rate" value={fmt(describe.tie_rate ?? 0)} />
         <MetricCard label="Skewness" value={fmt(describe.skewness ?? 0)} />
       </section>
-      {analytics?.cohort && <CohortContextPanel context={analytics.cohort} />}
+      {selectedCohortId && (
+        <section className="panel">
+          <div className="toolbar">
+            <span className="step-badge">Режим анализа когорты</span>
+            <select value={cohortFilterPolicy} onChange={(event) => setCohortFilterPolicy(event.target.value as CohortFilterPolicy)}>
+              <option value="membership">Как при создании</option>
+              <option value="current">По текущим фильтрам</option>
+              <option value="none">Без доп. фильтров</option>
+            </select>
+          </div>
+        </section>
+      )}
+      {cohortContext && <CohortContextPanel context={cohortContext} />}
       <section className="chart-table-grid">
         <div className="panel">
           <h2>Распределение индекса</h2>
@@ -1326,6 +1361,7 @@ function ReportsPage({
   runId,
   dumpId,
   cohortId,
+  cohortFilterPolicy,
   cohortContext,
   topN,
   onBuild,
@@ -1337,16 +1373,18 @@ function ReportsPage({
   runId: string;
   dumpId: string;
   cohortId: string;
+  cohortFilterPolicy: CohortFilterPolicy;
   cohortContext: any;
   topN: number;
   onBuild: () => void;
   building: boolean;
 }) {
-  const reportParams = filterParams(filters, { fraction_mode: fractionMode, metric, limit: topN, run_id: runId, dump_id: dumpId, cohort_id: cohortId });
+  const reportParams = filterParams(filters, { fraction_mode: fractionMode, metric, limit: topN, run_id: runId, dump_id: dumpId, cohort_id: cohortId, cohort_filter_policy: cohortFilterPolicy });
   const rankingUrl = `${API_BASE}/analytics/ranking.csv?${reportParams.toString()}`;
   const bundleUrl = `${API_BASE}/reports/bundle.json?${reportParams.toString()}`;
-  const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "csv")}` : "";
-  const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "json")}` : "";
+  const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "csv", cohortFilterPolicy)}` : "";
+  const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, metric, runId, dumpId, "json", cohortFilterPolicy)}` : "";
+  const cohortStatsUrl = cohortId ? `${API_BASE}${cohortStatisticsUrl(cohortId, filters, fractionMode, runId, dumpId, cohortFilterPolicy)}` : "";
   return (
     <div className="stack">
       <section className="panel">
@@ -1362,6 +1400,7 @@ function ReportsPage({
           <a href={rankingUrl}>CSV рейтинга</a>
           {cohortMetricsCsvUrl && <a href={cohortMetricsCsvUrl}>CSV метрик когорты</a>}
           {cohortMetricsJsonUrl && <a href={cohortMetricsJsonUrl}>JSON метрик когорты</a>}
+          {cohortStatsUrl && <a href={cohortStatsUrl}>JSON статистики когорты</a>}
           <a href={bundleUrl}>JSON-пакет отчета</a>
           <a href={`${API_BASE}/state`}>JSON состояния</a>
           <a href={`${API_BASE}/catalog`}>Каталог конфигураций</a>
@@ -1385,12 +1424,14 @@ function PassportsPage({ state, sliceDoc, estimate, materialization }: { state: 
 
 function CohortContextPanel({ context }: { context: any }) {
   const mode = context?.filter_mode ?? "membership_filters";
+  const policy = context?.filter_policy ?? "auto";
   const membership = context?.membership_filters ?? {};
   const analysis = context?.analysis_filters ?? membership;
   return (
     <section className={mode === "analysis_override" ? "notice warn" : "notice"}>
-      <b>{mode === "analysis_override" ? "Авторское множество зафиксировано, метрики пересчитаны по текущим фильтрам" : "Анализ повторяет фильтры формирования когорты"}</b>
+      <b>{mode === "analysis_override" ? "Авторское множество зафиксировано, метрики пересчитаны по текущим фильтрам" : mode === "no_analysis_filters" ? "Авторское множество зафиксировано, дополнительные фильтры не применяются" : "Анализ повторяет фильтры формирования когорты"}</b>
       <div className="key-grid">
+        <KeyValue label="Политика фильтров" value={cohortPolicyLabel(policy)} />
         <KeyValue label="Когорта сформирована по" value={formatFilterSet(membership)} />
         <KeyValue label="Текущий анализ выполнен по" value={formatFilterSet(analysis)} />
         <KeyValue label="Checksum авторов" value={String(context?.checksum ?? "")} />
@@ -1409,8 +1450,16 @@ function storedCohortContext(cohort: any) {
     checksum: cohort?.checksum,
     membership_filters: filters,
     analysis_filters: filters,
+    filter_policy: "membership",
     filter_mode: "membership_filters",
   };
+}
+
+function cohortPolicyLabel(value: string) {
+  if (value === "membership") return "как при создании";
+  if (value === "current") return "по текущим фильтрам";
+  if (value === "none") return "без дополнительных фильтров";
+  return "авто";
 }
 
 function formatFilterSet(filters: any) {

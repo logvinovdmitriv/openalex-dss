@@ -17,6 +17,7 @@ from app.services import warehouse
 
 COHORTS_DIR = DATA / "cohorts"
 COHORT_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "islv", "iupv", "lrdi")
+COHORT_FILTER_POLICIES = {"auto", "membership", "current", "none"}
 
 
 class CohortNotFound(ValueError):
@@ -103,6 +104,13 @@ def get_cohort(cohort_id: str) -> dict[str, Any]:
     return _read(path)
 
 
+def _cohort_filter_policy(value: str) -> str:
+    policy = str(value or "auto").strip().lower()
+    if policy not in COHORT_FILTER_POLICIES:
+        raise ValueError(f"Unsupported cohort_filter_policy: {policy}")
+    return policy
+
+
 def resolve_cohort_context(
     cohort_id: str,
     *,
@@ -110,6 +118,7 @@ def resolve_cohort_context(
     dump_id: str = "",
     fraction_mode: str = "",
     filters: dict[str, Any] | None = None,
+    filter_policy: str = "auto",
 ) -> dict[str, Any]:
     try:
         cohort = get_cohort(cohort_id)
@@ -124,9 +133,23 @@ def resolve_cohort_context(
         raise ValueError(f"cohort_id={cohort_id} belongs to dump_id={cohort_dump_id}, not dump_id={dump_id}")
     if fraction_mode and cohort_fraction_mode and fraction_mode != cohort_fraction_mode:
         raise ValueError(f"cohort_id={cohort_id} uses fraction_mode={cohort_fraction_mode}, not fraction_mode={fraction_mode}")
+    policy = _cohort_filter_policy(filter_policy)
     request_filters = clean_analysis_filters(filters or {})
     cohort_filters = clean_analysis_filters(cohort.get("filters") or {})
-    analysis_filters = request_filters or cohort_filters
+    if policy == "membership":
+        analysis_filters = cohort_filters
+    elif policy == "current":
+        analysis_filters = request_filters
+    elif policy == "none":
+        analysis_filters = {}
+    else:
+        analysis_filters = request_filters or cohort_filters
+    if not analysis_filters:
+        filter_mode_label = "no_analysis_filters"
+    elif analysis_filters == cohort_filters:
+        filter_mode_label = "membership_filters"
+    else:
+        filter_mode_label = "analysis_override"
     return {
         "cohort": cohort,
         "author_ids": {str(author_id) for author_id in cohort.get("author_ids") or [] if str(author_id).strip()},
@@ -136,7 +159,9 @@ def resolve_cohort_context(
         "filters": analysis_filters,
         "analysis_filters": analysis_filters,
         "membership_filters": cohort_filters,
-        "filter_mode": "analysis_override" if request_filters and request_filters != cohort_filters else "membership_filters",
+        "request_filters": request_filters,
+        "filter_policy": policy,
+        "filter_mode": filter_mode_label,
     }
 
 
@@ -154,6 +179,7 @@ def cohort_context_summary(ctx: dict[str, Any]) -> dict[str, Any]:
         "checksum": cohort.get("checksum"),
         "membership_filters": membership_filters,
         "analysis_filters": analysis_filters,
+        "filter_policy": ctx.get("filter_policy") or "auto",
         "filter_mode": ctx.get("filter_mode") or "membership_filters",
     }
 
@@ -165,11 +191,12 @@ def cohort_author_metrics(
     dump_id: str = "",
     fraction_mode: str = "",
     filters: dict[str, Any] | None = None,
+    filter_policy: str = "auto",
     metric: str = "",
     limit: int = 100_000,
     offset: int = 0,
 ) -> dict[str, Any]:
-    ctx = resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+    ctx = resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=filter_policy)
     resolved_fraction_mode = str(ctx.get("fraction_mode") or "strict_authors_count")
     sort_metric = str(metric or (ctx.get("cohort") or {}).get("metric") or "h")
     if sort_metric not in warehouse.INDEX_NUMERIC_FIELDS:
@@ -218,8 +245,9 @@ def cohort_statistics(
     dump_id: str = "",
     fraction_mode: str = "",
     filters: dict[str, Any] | None = None,
+    filter_policy: str = "auto",
 ) -> dict[str, Any]:
-    ctx = resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+    ctx = resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=filter_policy)
     resolved_fraction_mode = str(ctx.get("fraction_mode") or "strict_authors_count")
     rows = warehouse.filtered_author_indices(
         resolved_fraction_mode,
@@ -249,7 +277,8 @@ def cohort_statistics(
         "boxplots": boxplots,
         "histograms": histograms,
         "notes": [
-            "Statistics are computed for the stored author cohort, not for every author in the slice.",
+            "Statistics are computed for the fixed author cohort after applying the resolved analysis filters.",
+            "cohort_filter_policy controls whether membership filters, current filters, or no extra filters are used.",
             "Histogram bins are pre-aggregated so the frontend does not need the full author table.",
             "Formal Q-Q plots, Shapiro/Anderson tests and bootstrap intervals are reserved for the SciPy-backed statistics iteration.",
         ],

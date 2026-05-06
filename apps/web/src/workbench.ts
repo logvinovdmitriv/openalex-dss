@@ -2,6 +2,7 @@ import { FRACTION_MODES, type ActiveFilters, countryLabel, filterParams, fmt } f
 
 export type View = "slices" | "data" | "enrichment" | "rankings" | "cohorts" | "statistics" | "reports" | "passports";
 export type ResolverTab = "subject" | "organization" | "author" | "source";
+export type CohortFilterPolicy = "membership" | "current" | "none";
 
 export type EntitySuggestion = {
   id: string;
@@ -240,20 +241,20 @@ export function progressForRun(run?: WorkbenchRun | null) {
   return { percent: 0, label: run.status || "Ожидание" };
 }
 
-export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", cohortId = "") {
-  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId, cohort_id: cohortId }).toString()}`;
+export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", cohortId = "", cohortFilterPolicy: CohortFilterPolicy = "membership") {
+  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId, cohort_id: cohortId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
 }
 
-export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, cohortId = "") {
-  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, cohort_id: cohortId }).toString()}`;
+export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, cohortId = "", cohortFilterPolicy: CohortFilterPolicy = "membership") {
+  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, cohort_id: cohortId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
 }
 
-export function cohortAuthorMetricsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", format: "csv" | "json" = "csv") {
-  return `/cohorts/${encodeURIComponent(cohortId)}/author-metrics.${format}?${filterParams(filters, { fraction_mode: fractionMode, metric, run_id: runId, dump_id: dumpId }).toString()}`;
+export function cohortAuthorMetricsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", format: "csv" | "json" = "csv", cohortFilterPolicy: CohortFilterPolicy = "membership") {
+  return `/cohorts/${encodeURIComponent(cohortId)}/author-metrics.${format}?${filterParams(filters, { fraction_mode: fractionMode, metric, run_id: runId, dump_id: dumpId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
 }
 
-export function cohortStatisticsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, runId = "", dumpId = "") {
-  return `/cohorts/${encodeURIComponent(cohortId)}/statistics?${filterParams(filters, { fraction_mode: fractionMode, run_id: runId, dump_id: dumpId }).toString()}`;
+export function cohortStatisticsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, runId = "", dumpId = "", cohortFilterPolicy: CohortFilterPolicy = "membership") {
+  return `/cohorts/${encodeURIComponent(cohortId)}/statistics?${filterParams(filters, { fraction_mode: fractionMode, run_id: runId, dump_id: dumpId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
 }
 
 function openAlexEntityUrl(level: string, id: string) {

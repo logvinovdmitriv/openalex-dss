@@ -20,18 +20,20 @@ def build_report_bundle(
     dump_id: str = "",
     filters: dict[str, Any] | None = None,
     cohort_id: str = "",
+    cohort_filter_policy: str = "auto",
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
     cohort: dict[str, Any] = {}
     cohort_ctx: dict[str, Any] = {}
     cohort_author_ids: set[str] | None = None
     if cohort_id:
-        cohort_ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        cohort_ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
         cohort = cohort_ctx["cohort"]
         cohort_author_ids = cohort_ctx["author_ids"]
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
         filters = cohort_ctx["filters"]
+        cohort_filter_policy = str(cohort_ctx.get("filter_policy") or cohort_filter_policy or "auto")
     scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
@@ -44,6 +46,7 @@ def build_report_bundle(
             cohort_checksum=str(cohort.get("checksum") or ""),
             cohort_n_authors=int(cohort.get("n_authors") or 0),
             cohort_membership_filters=cohort_ctx.get("membership_filters") or cohort.get("filters") or {},
+            cohort_filter_policy=cohort_filter_policy,
             metric=metric,
             fraction_mode=fraction_mode,
             limit=limit,
@@ -57,6 +60,7 @@ def build_report_bundle(
         cohort_checksum=str(cohort.get("checksum") or ""),
         cohort_n_authors=int(cohort.get("n_authors") or 0),
         cohort_membership_filters=cohort_ctx.get("membership_filters") or cohort.get("filters") or {},
+        cohort_filter_policy=cohort_filter_policy,
         metric=metric,
         fraction_mode=fraction_mode,
         limit=limit,
@@ -92,6 +96,7 @@ def build_report_bundle(
             "run_id": run_id,
             "dump_id": resolved_dump_id,
             "cohort_id": cohort_id,
+            "cohort_filter_policy": cohort_filter_policy,
         }
     )
     bundle_query = _query_params(
@@ -103,6 +108,7 @@ def build_report_bundle(
             "run_id": run_id,
             "dump_id": resolved_dump_id,
             "cohort_id": cohort_id,
+            "cohort_filter_policy": cohort_filter_policy,
         }
     )
     report = {
@@ -141,6 +147,7 @@ def build_report_bundle(
             "ranking_csv": f"/api/v1/analytics/ranking.csv?{export_query}",
             "cohort_author_metrics_csv": f"/api/v1/cohorts/{cohort_id}/author-metrics.csv?{export_query}" if cohort_id else None,
             "cohort_author_metrics_json": f"/api/v1/cohorts/{cohort_id}/author-metrics.json?{export_query}" if cohort_id else None,
+            "cohort_statistics_json": f"/api/v1/cohorts/{cohort_id}/statistics?{export_query}" if cohort_id else None,
             "authors_local_metrics_csv": f"/api/v1/exports/authors_local_metrics.csv?run_id={run_id}" if run_id else "/api/v1/exports/authors_local_metrics.csv",
             "works_csv": f"/api/v1/exports/works.csv?run_id={run_id}" if run_id else "/api/v1/exports/works.csv",
             "authorships_csv": f"/api/v1/exports/authorships.csv?run_id={run_id}" if run_id else "/api/v1/exports/authorships.csv",
@@ -169,16 +176,18 @@ def report_bundle_json(
     limit: int = 50,
     filters: dict[str, Any] | None = None,
     cohort_id: str = "",
+    cohort_filter_policy: str = "auto",
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
     cohort: dict[str, Any] = {}
     cohort_ctx: dict[str, Any] = {}
     if cohort_id:
-        cohort_ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+        cohort_ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
         cohort = cohort_ctx["cohort"]
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
         filters = cohort_ctx["filters"]
+        cohort_filter_policy = str(cohort_ctx.get("filter_policy") or cohort_filter_policy or "auto")
     scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
@@ -190,12 +199,13 @@ def report_bundle_json(
         cohort_checksum=str(cohort.get("checksum") or ""),
         cohort_n_authors=int(cohort.get("n_authors") or 0),
         cohort_membership_filters=cohort_ctx.get("membership_filters") or cohort.get("filters") or {},
+        cohort_filter_policy=cohort_filter_policy,
         metric=metric,
         fraction_mode=fraction_mode,
         limit=limit,
     )
     if not run_id:
-        return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id)
+        return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
     path = _report_bundle_path(run_id, report_scope["report_scope_hash"])
     if path.exists():
         cached = _read_json(path)
@@ -203,7 +213,7 @@ def report_bundle_json(
         if run_id and dump_id and cached_dump_id != dump_id:
             if cached_dump_id:
                 raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
-            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id)
+            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
         if not run_id or cached.get("status") != "incomplete_run_artifacts":
             return cached
     legacy_path = _report_bundle_path(run_id)
@@ -212,7 +222,7 @@ def report_bundle_json(
         cached_dump_id = str(legacy.get("dump_id") or "").strip()
         if run_id and dump_id and cached_dump_id and cached_dump_id != dump_id:
             raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
-    return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id)
+    return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy)
 
 
 def _quality_funnel(quality: dict[str, Any], *, run_id: str = "") -> list[dict[str, Any]]:
@@ -286,6 +296,7 @@ def _report_scope(
     fraction_mode: str,
     limit: int,
     cohort_membership_filters: dict[str, Any] | None = None,
+    cohort_filter_policy: str = "auto",
 ) -> dict[str, Any]:
     membership_filters = _clean_filters(cohort_membership_filters or {})
     canonical = {
@@ -298,6 +309,7 @@ def _report_scope(
         "cohort_n_authors": int(cohort_n_authors or 0),
         "cohort_membership_filters": membership_filters,
         "cohort_membership_filters_hash": _hash_dict(membership_filters),
+        "cohort_filter_policy": str(cohort_filter_policy or "auto").strip().lower(),
         "metric": str(metric or "").strip(),
         "fraction_mode": str(fraction_mode or "").strip(),
         "limit": int(limit or 0),
