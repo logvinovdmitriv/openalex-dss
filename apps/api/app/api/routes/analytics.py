@@ -85,6 +85,8 @@ def analytics(
         distribution = bundle["distribution"]
         top = bundle["ranking"]
         metric_lines = bundle["line_series"]
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     run_global_stats = {
@@ -188,6 +190,8 @@ def distribution(
         payload["cohort"] = cohort_ctx["cohort"]
         payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
         return payload
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -261,6 +265,8 @@ def ranking_json(
         payload["cohort"] = cohort_ctx["cohort"]
         payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
         return payload
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

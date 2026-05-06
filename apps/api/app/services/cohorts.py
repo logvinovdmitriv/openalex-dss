@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import csv
 import uuid
 from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,10 @@ from app.services import warehouse
 
 COHORTS_DIR = DATA / "cohorts"
 COHORT_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "islv", "iupv", "lrdi")
+
+
+class CohortNotFound(ValueError):
+    pass
 
 
 def create_cohort(payload: dict[str, Any]) -> dict[str, Any]:
@@ -108,7 +114,7 @@ def resolve_cohort_context(
     try:
         cohort = get_cohort(cohort_id)
     except KeyError as exc:
-        raise ValueError(f"Unknown cohort_id: {cohort_id}") from exc
+        raise CohortNotFound(f"Unknown cohort_id: {cohort_id}") from exc
     cohort_run_id = str(cohort.get("run_id") or "")
     cohort_dump_id = str(cohort.get("dump_id") or "")
     cohort_fraction_mode = str(cohort.get("fraction_mode") or "")
@@ -132,6 +138,72 @@ def resolve_cohort_context(
         "membership_filters": cohort_filters,
         "filter_mode": "analysis_override" if request_filters and request_filters != cohort_filters else "membership_filters",
     }
+
+
+def cohort_context_summary(ctx: dict[str, Any]) -> dict[str, Any]:
+    cohort = ctx.get("cohort") or {}
+    membership_filters = ctx.get("membership_filters") or clean_analysis_filters(cohort.get("filters") or {}) or ctx.get("filters") or {}
+    analysis_filters = ctx.get("analysis_filters") or ctx.get("filters") or membership_filters
+    return {
+        "cohort_id": cohort.get("cohort_id"),
+        "name": cohort.get("name"),
+        "source": cohort.get("source"),
+        "metric": cohort.get("metric"),
+        "fraction_mode": cohort.get("fraction_mode"),
+        "n_authors": cohort.get("n_authors"),
+        "checksum": cohort.get("checksum"),
+        "membership_filters": membership_filters,
+        "analysis_filters": analysis_filters,
+        "filter_mode": ctx.get("filter_mode") or "membership_filters",
+    }
+
+
+def cohort_author_metrics(
+    cohort_id: str,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    fraction_mode: str = "",
+    filters: dict[str, Any] | None = None,
+    limit: int = 100_000,
+    offset: int = 0,
+) -> dict[str, Any]:
+    ctx = resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
+    resolved_fraction_mode = str(ctx.get("fraction_mode") or "strict_authors_count")
+    rows = warehouse.filtered_author_indices(
+        resolved_fraction_mode,
+        ctx.get("filters") or {},
+        run_id=str(ctx.get("run_id") or ""),
+        dump_id=str(ctx.get("dump_id") or ""),
+    )
+    rows = warehouse.filter_rows_by_author_ids(rows, ctx.get("author_ids"))
+    rows = warehouse.sort_metric_rows(rows, str((ctx.get("cohort") or {}).get("metric") or "h"))
+    total = len(rows)
+    limit = max(1, min(int(limit), 500_000))
+    offset = max(0, int(offset))
+    page = rows[offset: offset + limit]
+    fields = _metric_fields(page or rows)
+    return {
+        "table": "cohort_author_metrics",
+        "cohort_context": cohort_context_summary(ctx),
+        "run_id": str(ctx.get("run_id") or ""),
+        "dump_id": str(ctx.get("dump_id") or ""),
+        "fraction_mode": resolved_fraction_mode,
+        "fields": fields,
+        "rows": page,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def cohort_author_metrics_csv(cohort_id: str, **kwargs: Any) -> str:
+    payload = cohort_author_metrics(cohort_id, **kwargs)
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=payload["fields"], extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(payload["rows"])
+    return output.getvalue()
 
 
 def cohort_statistics(cohort_id: str) -> dict[str, Any]:
@@ -223,6 +295,35 @@ def _metric_filter_author_ids(
         seen.add(author_id)
         out.append(author_id)
     return out
+
+
+def _metric_fields(rows: list[dict[str, Any]]) -> list[str]:
+    preferred = [
+        "author_id",
+        "author_display_name",
+        "p",
+        "c",
+        "c_frac",
+        "cpp",
+        "h",
+        "i10",
+        "g",
+        "m_local",
+        "top1_share",
+        "islv",
+        "iupv",
+        "lrdi",
+        "mean_authors_per_work",
+        "share_single_authored",
+        "n_flagged_works",
+        "n_truncated_works",
+        "country_code",
+        "subject_name",
+    ]
+    available = set().union(*(row.keys() for row in rows)) if rows else set(preferred)
+    fields = [field for field in preferred if field in available]
+    extras = sorted(str(field) for field in available if str(field) not in set(fields))
+    return [*fields, *extras]
 
 
 def _filters(payload: dict[str, Any]) -> dict[str, Any]:

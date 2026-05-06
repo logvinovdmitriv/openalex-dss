@@ -248,6 +248,10 @@ export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string
   return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, cohort_id: cohortId }).toString()}`;
 }
 
+export function cohortAuthorMetricsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, runId = "", dumpId = "", format: "csv" | "json" = "csv") {
+  return `/cohorts/${encodeURIComponent(cohortId)}/author-metrics.${format}?${filterParams(filters, { fraction_mode: fractionMode, run_id: runId, dump_id: dumpId }).toString()}`;
+}
+
 function openAlexEntityUrl(level: string, id: string) {
   if (!level || !id) return "";
   return level === "topic" ? `https://openalex.org/${id}` : `https://openalex.org/${level}s/${id}`;

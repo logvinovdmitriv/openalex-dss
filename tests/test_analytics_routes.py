@@ -134,11 +134,11 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(response.body.decode("utf-8").strip(), "author_id,score")
 
     def test_unknown_cohort_returns_controlled_error(self) -> None:
-        with patch.object(analytics_routes.cohorts, "resolve_cohort_context", side_effect=ValueError("Unknown cohort_id: nope")):
+        with patch.object(analytics_routes.cohorts, "resolve_cohort_context", side_effect=analytics_routes.cohorts.CohortNotFound("Unknown cohort_id: nope")):
             with self.assertRaises(analytics_routes.HTTPException) as raised:
                 analytics_routes.ranking_json(cohort_id="nope", fraction_mode="integer", metric="h", limit=100)
 
-        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(raised.exception.status_code, 404)
 
 
 if __name__ == "__main__":

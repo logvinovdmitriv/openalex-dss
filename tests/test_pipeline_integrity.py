@@ -555,6 +555,8 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["author_ids"], {"https://openalex.org/A2"})
         self.assertEqual(bundle["cohort"]["checksum"], "sha-a")
         self.assertEqual(bundle["report_scope"]["cohort_checksum"], "sha-a")
+        self.assertEqual(bundle["cohort_context"]["membership_filters"], {"country_code": "RU"})
+        self.assertEqual(bundle["cohort_context"]["analysis_filters"], {"country_code": "RU"})
 
     def test_empty_cohort_report_has_empty_rank_table(self) -> None:
         cohort_ctx = {
@@ -594,10 +596,63 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(bundle["rank_table"]["total"], 0)
         self.assertEqual(bundle["distribution"]["n"], 0)
 
+    def test_cohort_author_metrics_export_uses_analysis_filters_and_context(self) -> None:
+        cohort_ctx = {
+            "cohort": {"cohort_id": "cohort_a", "checksum": "sha-a", "n_authors": 1, "source": "top_n", "metric": "h", "fraction_mode": "integer", "filters": {"country_code": "RU"}},
+            "author_ids": {"https://openalex.org/A2"},
+            "run_id": "run_a",
+            "dump_id": "dump_a",
+            "fraction_mode": "integer",
+            "filters": {"country_code": "DE"},
+            "analysis_filters": {"country_code": "DE"},
+            "membership_filters": {"country_code": "RU"},
+            "filter_mode": "analysis_override",
+        }
+        rows = [
+            {"author_id": "https://openalex.org/A1", "author_display_name": "Author One", "h": 3, "p": 4, "c": 10},
+            {"author_id": "https://openalex.org/A2", "author_display_name": "Author Two", "h": 2, "p": 3, "c": 7},
+        ]
+        captured: dict[str, object] = {}
+
+        def fake_filtered(fraction_mode: str, filters: dict[str, str], **kwargs: object) -> list[dict[str, object]]:
+            captured["fraction_mode"] = fraction_mode
+            captured["filters"] = filters
+            captured["kwargs"] = kwargs
+            return rows
+
+        with (
+            patch.object(cohorts, "resolve_cohort_context", return_value=cohort_ctx),
+            patch.object(warehouse, "filtered_author_indices", side_effect=fake_filtered),
+        ):
+            payload = cohorts.cohort_author_metrics("cohort_a", run_id="run_a", dump_id="dump_a", fraction_mode="integer", filters={"country_code": "DE"})
+            csv_data = cohorts.cohort_author_metrics_csv("cohort_a", run_id="run_a", dump_id="dump_a", fraction_mode="integer", filters={"country_code": "DE"})
+
+        self.assertEqual(captured["filters"], {"country_code": "DE"})
+        self.assertEqual(captured["kwargs"], {"run_id": "run_a", "dump_id": "dump_a"})
+        self.assertEqual(payload["rows"], [rows[1]])
+        self.assertEqual(payload["cohort_context"]["filter_mode"], "analysis_override")
+        self.assertEqual(payload["cohort_context"]["membership_filters"], {"country_code": "RU"})
+        self.assertIn("Author Two", csv_data)
+        self.assertNotIn("Author One", csv_data)
+
     def test_report_scope_hash_changes_when_cohort_checksum_changes(self) -> None:
         first = reports._report_scope(run_id="run_a", dump_id="dump_a", filters={}, cohort_id="cohort_a", cohort_checksum="sha-a", cohort_n_authors=1, metric="h", fraction_mode="integer", limit=50)
         second = reports._report_scope(run_id="run_a", dump_id="dump_a", filters={}, cohort_id="cohort_a", cohort_checksum="sha-b", cohort_n_authors=1, metric="h", fraction_mode="integer", limit=50)
+        third = reports._report_scope(
+            run_id="run_a",
+            dump_id="dump_a",
+            filters={},
+            cohort_id="cohort_a",
+            cohort_checksum="sha-a",
+            cohort_n_authors=1,
+            cohort_membership_filters={"country_code": "RU"},
+            metric="h",
+            fraction_mode="integer",
+            limit=50,
+        )
         self.assertNotEqual(first["report_scope_hash"], second["report_scope_hash"])
+        self.assertNotEqual(first["report_scope_hash"], third["report_scope_hash"])
+        self.assertEqual(third["cohort_membership_filters"], {"country_code": "RU"})
 
     def test_report_build_requires_explicit_run_or_dump_for_final_report(self) -> None:
         bundle = reports.build_report_bundle(metric="h", fraction_mode="integer", filters={"country_code": "RU"})

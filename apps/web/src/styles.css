@@ -648,6 +648,17 @@ input[aria-invalid="true"] {
   overflow-wrap: anywhere;
 }
 
+.key-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+}
+
+.key-grid .key-value {
+  border-top: 0;
+  padding: 4px 0;
+}
+
 .check-pill {
   display: inline-flex;
   align-items: center;
@@ -677,6 +688,11 @@ input[aria-invalid="true"] {
 .notice.success {
   border-color: var(--border-strong);
   background: var(--accent-soft);
+}
+
+.notice.warn {
+  border-color: #f0d78a;
+  background: #fff9e8;
 }
 
 .notice.error,

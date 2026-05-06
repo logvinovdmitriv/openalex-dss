@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.services.analysis_filters import build_analysis_filters
-from app.services import reports
+from app.services import cohorts, reports
 
 
 router = APIRouter(tags=["reports"])
@@ -74,6 +74,8 @@ def build_report(
     )
     try:
         return reports.build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id)
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -140,6 +142,8 @@ def report_bundle(
     )
     try:
         payload = reports.report_bundle_json(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id)
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(

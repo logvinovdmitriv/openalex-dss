@@ -26,6 +26,7 @@ import {
   DEFAULT_FILTERS,
   countryLabel,
   filterParams,
+  filterSummary,
   fmt,
   resolveCountryInput,
   metricLabel,
@@ -41,6 +42,7 @@ import {
   buildDownloadPolicy,
   buildSlicePayload,
   bytesToMb,
+  cohortAuthorMetricsUrl,
   humanSliceTitle,
   mutationError,
   pageLead,
@@ -548,7 +550,7 @@ function Workbench() {
         )}
 
         {view === "reports" && (
-          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={runId} dumpId={activeDumpId} cohortId={selectedCohortId} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
+          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={runId} dumpId={activeDumpId} cohortId={selectedCohortId} cohortContext={analytics.data?.cohort} topN={activeTopN} onBuild={() => buildReport.mutate()} building={buildReport.isPending} />
         )}
 
         {view === "passports" && (
@@ -1176,6 +1178,7 @@ function CohortsPage({
           <b>{cohortSource === "top_n" ? "Top-N когорта" : "Когорта по порогам"}</b>
           <span>{cohortSource === "top_n" ? "Сначала выбираются первые N авторов по метрике, затем применяются минимальные пороги." : "Top-N не применяется: в когорту войдут все авторы текущей аналитической выборки, прошедшие пороги."}</span>
         </div>
+        {selected && <CohortContextPanel context={storedCohortContext(selected)} />}
       </section>
 
       <section className="chart-table-grid">
@@ -1268,6 +1271,7 @@ function StatisticsPage({
         <MetricCard label="Tie-rate" value={fmt(describe.tie_rate ?? 0)} />
         <MetricCard label="Skewness" value={fmt(describe.skewness ?? 0)} />
       </section>
+      {analytics?.cohort && <CohortContextPanel context={analytics.cohort} />}
       <section className="chart-table-grid">
         <div className="panel">
           <h2>Распределение индекса</h2>
@@ -1321,6 +1325,7 @@ function ReportsPage({
   runId,
   dumpId,
   cohortId,
+  cohortContext,
   topN,
   onBuild,
   building,
@@ -1331,6 +1336,7 @@ function ReportsPage({
   runId: string;
   dumpId: string;
   cohortId: string;
+  cohortContext: any;
   topN: number;
   onBuild: () => void;
   building: boolean;
@@ -1338,6 +1344,8 @@ function ReportsPage({
   const reportParams = filterParams(filters, { fraction_mode: fractionMode, metric, limit: topN, run_id: runId, dump_id: dumpId, cohort_id: cohortId });
   const rankingUrl = `${API_BASE}/analytics/ranking.csv?${reportParams.toString()}`;
   const bundleUrl = `${API_BASE}/reports/bundle.json?${reportParams.toString()}`;
+  const cohortMetricsCsvUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, runId, dumpId, "csv")}` : "";
+  const cohortMetricsJsonUrl = cohortId ? `${API_BASE}${cohortAuthorMetricsUrl(cohortId, filters, fractionMode, runId, dumpId, "json")}` : "";
   return (
     <div className="stack">
       <section className="panel">
@@ -1351,11 +1359,14 @@ function ReportsPage({
         </div>
         <div className="download-grid">
           <a href={rankingUrl}>CSV рейтинга</a>
+          {cohortMetricsCsvUrl && <a href={cohortMetricsCsvUrl}>CSV метрик когорты</a>}
+          {cohortMetricsJsonUrl && <a href={cohortMetricsJsonUrl}>JSON метрик когорты</a>}
           <a href={bundleUrl}>JSON-пакет отчета</a>
           <a href={`${API_BASE}/state`}>JSON состояния</a>
           <a href={`${API_BASE}/catalog`}>Каталог конфигураций</a>
         </div>
       </section>
+      {cohortContext && <CohortContextPanel context={cohortContext} />}
     </div>
   );
 }
@@ -1369,6 +1380,40 @@ function PassportsPage({ state, sliceDoc, estimate, materialization }: { state: 
       <JsonPanel title="Quality report" value={state?.quality ?? {}} />
     </div>
   );
+}
+
+function CohortContextPanel({ context }: { context: any }) {
+  const mode = context?.filter_mode ?? "membership_filters";
+  const membership = context?.membership_filters ?? {};
+  const analysis = context?.analysis_filters ?? membership;
+  return (
+    <section className={mode === "analysis_override" ? "notice warn" : "notice"}>
+      <b>{mode === "analysis_override" ? "Авторское множество зафиксировано, метрики пересчитаны по текущим фильтрам" : "Анализ повторяет фильтры формирования когорты"}</b>
+      <div className="key-grid">
+        <KeyValue label="Когорта сформирована по" value={formatFilterSet(membership)} />
+        <KeyValue label="Текущий анализ выполнен по" value={formatFilterSet(analysis)} />
+        <KeyValue label="Checksum авторов" value={String(context?.checksum ?? "")} />
+      </div>
+    </section>
+  );
+}
+
+function storedCohortContext(cohort: any) {
+  const filters = cohort?.filters ?? {};
+  return {
+    cohort_id: cohort?.cohort_id,
+    name: cohort?.name,
+    source: cohort?.source,
+    n_authors: cohort?.n_authors,
+    checksum: cohort?.checksum,
+    membership_filters: filters,
+    analysis_filters: filters,
+    filter_mode: "membership_filters",
+  };
+}
+
+function formatFilterSet(filters: any) {
+  return filterSummary({ ...DEFAULT_FILTERS, ...(filters ?? {}) });
 }
 
 function ResolverDialog({ filters, setFilters, onClose }: { filters: ActiveFilters; setFilters: (value: ActiveFilters) => void; onClose: () => void }) {

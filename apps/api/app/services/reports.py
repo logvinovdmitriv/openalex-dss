@@ -23,6 +23,7 @@ def build_report_bundle(
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
     cohort: dict[str, Any] = {}
+    cohort_ctx: dict[str, Any] = {}
     cohort_author_ids: set[str] | None = None
     if cohort_id:
         cohort_ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
@@ -42,6 +43,7 @@ def build_report_bundle(
             cohort_id=cohort_id,
             cohort_checksum=str(cohort.get("checksum") or ""),
             cohort_n_authors=int(cohort.get("n_authors") or 0),
+            cohort_membership_filters=cohort_ctx.get("membership_filters") or cohort.get("filters") or {},
             metric=metric,
             fraction_mode=fraction_mode,
             limit=limit,
@@ -54,33 +56,25 @@ def build_report_bundle(
         cohort_id=cohort_id,
         cohort_checksum=str(cohort.get("checksum") or ""),
         cohort_n_authors=int(cohort.get("n_authors") or 0),
+        cohort_membership_filters=cohort_ctx.get("membership_filters") or cohort.get("filters") or {},
         metric=metric,
         fraction_mode=fraction_mode,
         limit=limit,
     )
     scope_hash = report_scope["report_scope_hash"]
-    if run_id:
-        docs = _run_report_artifacts(run_id)
-        missing = [name for name, value in docs.items() if not value]
-        if missing:
-            report = _incomplete_run_report(run_id=run_id, dump_id=dump_id, missing=missing, report_scope=report_scope)
-            _write_json(_report_bundle_path(run_id, scope_hash), report)
-            return report
-        state = docs["pipeline"]
-        quality = docs["quality"]
-        stats = docs["stats"]
-        theory = docs["theory"]
-        checksums = docs["checksums"]
-        slice_passport = docs["slice_passport"]
-        calculation_passport = docs["calculation_passport"]
-    else:
-        state = {}
-        quality = {}
-        stats = {}
-        theory = {}
-        checksums = {}
-        slice_passport = {}
-        calculation_passport = {}
+    docs = _run_report_artifacts(run_id)
+    missing = [name for name, value in docs.items() if not value]
+    if missing:
+        report = _incomplete_run_report(run_id=run_id, dump_id=dump_id, missing=missing, report_scope=report_scope)
+        _write_json(_report_bundle_path(run_id, scope_hash), report)
+        return report
+    state = docs["pipeline"]
+    quality = docs["quality"]
+    stats = docs["stats"]
+    theory = docs["theory"]
+    checksums = docs["checksums"]
+    slice_passport = docs["slice_passport"]
+    calculation_passport = docs["calculation_passport"]
     current_slice = state.get("slice") or state.get("current_slice") or {}
     request = state.get("request") or {}
     analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
@@ -121,6 +115,7 @@ def build_report_bundle(
         "filters": filters,
         "cohort_id": cohort_id,
         "cohort": _cohort_summary(cohort),
+        "cohort_context": cohorts.cohort_context_summary(cohort_ctx) if cohort_ctx else None,
         "interpretation_policy": {
             "strict_mode": "Математические выводы строятся только по локально пересчитанным works-based индексам.",
             "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения; корпус Works скачивается через OpenAlex CLI.",
@@ -144,6 +139,8 @@ def build_report_bundle(
         "checksums": checksums,
         "exports": {
             "ranking_csv": f"/api/v1/analytics/ranking.csv?{export_query}",
+            "cohort_author_metrics_csv": f"/api/v1/cohorts/{cohort_id}/author-metrics.csv?{export_query}" if cohort_id else None,
+            "cohort_author_metrics_json": f"/api/v1/cohorts/{cohort_id}/author-metrics.json?{export_query}" if cohort_id else None,
             "authors_local_metrics_csv": f"/api/v1/exports/authors_local_metrics.csv?run_id={run_id}" if run_id else "/api/v1/exports/authors_local_metrics.csv",
             "works_csv": f"/api/v1/exports/works.csv?run_id={run_id}" if run_id else "/api/v1/exports/works.csv",
             "authorships_csv": f"/api/v1/exports/authorships.csv?run_id={run_id}" if run_id else "/api/v1/exports/authorships.csv",
@@ -175,6 +172,7 @@ def report_bundle_json(
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
     cohort: dict[str, Any] = {}
+    cohort_ctx: dict[str, Any] = {}
     if cohort_id:
         cohort_ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters)
         cohort = cohort_ctx["cohort"]
@@ -191,6 +189,7 @@ def report_bundle_json(
         cohort_id=cohort_id,
         cohort_checksum=str(cohort.get("checksum") or ""),
         cohort_n_authors=int(cohort.get("n_authors") or 0),
+        cohort_membership_filters=cohort_ctx.get("membership_filters") or cohort.get("filters") or {},
         metric=metric,
         fraction_mode=fraction_mode,
         limit=limit,
@@ -286,7 +285,9 @@ def _report_scope(
     metric: str,
     fraction_mode: str,
     limit: int,
+    cohort_membership_filters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    membership_filters = _clean_filters(cohort_membership_filters or {})
     canonical = {
         "version": "report_scope_v1",
         "run_id": run_id,
@@ -295,6 +296,8 @@ def _report_scope(
         "cohort_id": str(cohort_id or "").strip(),
         "cohort_checksum": str(cohort_checksum or "").strip(),
         "cohort_n_authors": int(cohort_n_authors or 0),
+        "cohort_membership_filters": membership_filters,
+        "cohort_membership_filters_hash": _hash_dict(membership_filters),
         "metric": str(metric or "").strip(),
         "fraction_mode": str(fraction_mode or "").strip(),
         "limit": int(limit or 0),
@@ -328,6 +331,11 @@ def _cohort_summary(cohort: dict[str, Any]) -> dict[str, Any] | None:
         "checksum": cohort.get("checksum"),
         "membership_filters": cohort.get("filters") or {},
     }
+
+
+def _hash_dict(value: dict[str, Any]) -> str:
+    blob = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
 def _query_params(params: dict[str, Any]) -> str:
