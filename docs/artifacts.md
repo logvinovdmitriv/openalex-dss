@@ -58,5 +58,6 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 It can replace large latest-view copies in a later storage cleanup. During the
 transition, latest-view files remain a compatibility layer while scoped
 artifacts remain the source of truth. `/workbench` exposes this pointer for UI
-state, but final analytics and reports should still use explicit scope
-parameters.
+state. The UI may use active context as the default preview scope for local
+data, rankings, cohorts, and scientometrics, but final reports should still use
+explicit scope parameters.

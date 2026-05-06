@@ -46,6 +46,7 @@ import {
   bytesToMb,
   cohortAuthorMetricsUrl,
   cohortStatisticsUrl,
+  effectiveUiScope,
   humanSliceTitle,
   LOCAL_DATA_KIND_OPTIONS,
   localDataPreviewCsvUrl,
@@ -67,6 +68,7 @@ import {
   type ScientometricAnalysisPayload,
   type ScientometricFinding,
   type View,
+  type WorkbenchActiveContext,
   type WorkbenchRun,
   type WorkbenchState,
 } from "./workbench";
@@ -187,55 +189,66 @@ function Workbench() {
     },
   });
   const activeDumpId = extractDumpId(run.data);
+  const uiScope = effectiveUiScope({
+    runId,
+    dumpId: activeDumpId,
+    activeContext: workbench.data?.active_context,
+  });
+  const effectiveRunId = uiScope.runId;
+  const effectiveDumpId = uiScope.dumpId;
+  const usingActiveContextScope = uiScope.source === "active_context";
+  const scopeReady = Boolean(runId || activeDumpId || workbench.isSuccess);
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
   const scientometricMetricKey = useMemo(() => scientometricMetrics.join(","), [scientometricMetrics]);
   const localDataSummary = useQuery({
-    queryKey: ["local-data-summary", runId, activeDumpId],
-    queryFn: () => getJson<LocalDataSummary>(localDataSummaryUrl(runId, activeDumpId)),
+    queryKey: ["local-data-summary", effectiveRunId, effectiveDumpId],
+    queryFn: () => getJson<LocalDataSummary>(localDataSummaryUrl(effectiveRunId, effectiveDumpId)),
+    enabled: scopeReady,
   });
   const cohortStats = useQuery({
-    queryKey: ["cohort-stats", selectedCohortId, fractionMode, runId, activeDumpId, filterKey, cohortFilterPolicy],
-    queryFn: () => getJson<any>(cohortStatisticsUrl(selectedCohortId, filters, fractionMode, runId, activeDumpId, cohortFilterPolicy)),
-    enabled: Boolean(selectedCohortId),
+    queryKey: ["cohort-stats", selectedCohortId, fractionMode, effectiveRunId, effectiveDumpId, filterKey, cohortFilterPolicy],
+    queryFn: () => getJson<any>(cohortStatisticsUrl(selectedCohortId, filters, fractionMode, effectiveRunId, effectiveDumpId, cohortFilterPolicy)),
+    enabled: Boolean(selectedCohortId) && scopeReady,
   });
-  const hasLocalAnalyticsData = Boolean(runId || activeDumpId || workbench.data?.tables?.author_work?.rows || workbench.data?.tables?.indices?.rows);
+  const hasLocalAnalyticsData = Boolean(effectiveRunId || effectiveDumpId || workbench.data?.tables?.author_work?.rows || workbench.data?.tables?.indices?.rows);
   const table = useQuery({
-    queryKey: ["local-data-preview", localDataKind, tableQ, topN, runId, activeDumpId],
-    queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: tableQ, runId, dumpId: activeDumpId, limit: Math.max(1, topN || 1) })),
+    queryKey: ["local-data-preview", localDataKind, tableQ, topN, effectiveRunId, effectiveDumpId],
+    queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: tableQ, runId: effectiveRunId, dumpId: effectiveDumpId, limit: Math.max(1, topN || 1) })),
+    enabled: scopeReady,
   });
   const analytics = useQuery({
-    queryKey: ["analytics", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, cohortFilterPolicy],
-    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, runId, activeDumpId, selectedCohortId, cohortFilterPolicy)),
+    queryKey: ["analytics", metric, fractionMode, effectiveRunId, effectiveDumpId, selectedCohortId, filterKey, cohortFilterPolicy],
+    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, effectiveRunId, effectiveDumpId, selectedCohortId, cohortFilterPolicy)),
     enabled: hasLocalAnalyticsData,
   });
   const ranking = useQuery({
-    queryKey: ["analytics-ranking", metric, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, topN, cohortFilterPolicy],
-    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, runId, activeDumpId, Math.max(1, topN || 100), selectedCohortId, cohortFilterPolicy)),
+    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, selectedCohortId, filterKey, topN, cohortFilterPolicy],
+    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, effectiveRunId, effectiveDumpId, Math.max(1, topN || 100), selectedCohortId, cohortFilterPolicy)),
     enabled: hasLocalAnalyticsData,
   });
   const scientometrics = useQuery({
-    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, rankTopN, fractionMode, runId, activeDumpId, selectedCohortId, filterKey, cohortFilterPolicy],
+    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, rankTopN, fractionMode, effectiveRunId, effectiveDumpId, selectedCohortId, filterKey, cohortFilterPolicy],
     queryFn: () => getJson<ScientometricAnalysisPayload>(scientometricsUrl({
       filters,
       fractionMode,
       metrics: scientometricMetrics,
       baselineMetric,
       rankTopN,
-      runId,
-      dumpId: activeDumpId,
+      runId: effectiveRunId,
+      dumpId: effectiveDumpId,
       cohortId: selectedCohortId,
       cohortFilterPolicy,
     })),
     enabled: hasLocalAnalyticsData && scientometricMetrics.length > 0,
   });
   const detail = useQuery({
-    queryKey: ["detail", selected, runId, activeDumpId],
+    queryKey: ["detail", selected, effectiveRunId, effectiveDumpId],
     queryFn: () => getJson<any>(
       selected?.kind === "author"
-        ? `/authors/${encodeURIComponent(selected.id)}?run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}`
-        : `/works/${encodeURIComponent(selected?.id ?? "")}?run_id=${encodeURIComponent(runId)}&dump_id=${encodeURIComponent(activeDumpId)}`,
+        ? `/authors/${encodeURIComponent(selected.id)}?run_id=${encodeURIComponent(effectiveRunId)}&dump_id=${encodeURIComponent(effectiveDumpId)}`
+        : `/works/${encodeURIComponent(selected?.id ?? "")}?run_id=${encodeURIComponent(effectiveRunId)}&dump_id=${encodeURIComponent(effectiveDumpId)}`,
     ),
-    enabled: Boolean(selected),
+    enabled: Boolean(selected) && scopeReady,
   });
 
   const domainPresets = (registry.data?.domain_presets ?? []) as ResearchAreaPreset[];
@@ -349,13 +362,13 @@ function Workbench() {
   });
   const recalculate = useMutation({
     mutationFn: () => {
-      if (!activeDumpId) {
+      if (!effectiveDumpId) {
         throw new Error("Для пересчета индексов нужен выбранный dump_id.");
       }
       return postJson<any>("/runs", {
         action: "recalculate",
         payload: {
-          dump_id: activeDumpId,
+          dump_id: effectiveDumpId,
           ...analysisRunPayload,
         },
       });
@@ -383,8 +396,8 @@ function Workbench() {
   const createCohort = useMutation({
     mutationFn: () => postJson<any>("/cohorts", {
       slice_id: sliceDoc?.slice_id ?? "current",
-      run_id: runId || undefined,
-      dump_id: activeDumpId || undefined,
+      run_id: effectiveRunId || undefined,
+      dump_id: effectiveDumpId || undefined,
       name: cohortName,
       source: cohortSource,
       metric,
@@ -541,9 +554,13 @@ function Workbench() {
             tableQ={tableQ}
             setTableQ={setTableQ}
             table={table.data}
-            csvUrl={`${API_BASE}${localDataPreviewCsvUrl(localDataKind, { q: tableQ, runId, dumpId: activeDumpId, limit: 100_000 })}`}
+            csvUrl={`${API_BASE}${localDataPreviewCsvUrl(localDataKind, { q: tableQ, runId: effectiveRunId, dumpId: effectiveDumpId, limit: 100_000 })}`}
             run={run.data}
             running={running}
+            activeContext={workbench.data?.active_context}
+            usingActiveContextScope={usingActiveContextScope}
+            effectiveRunId={effectiveRunId}
+            effectiveDumpId={effectiveDumpId}
             onRefresh={() => qc.invalidateQueries()}
             onSelect={(next) => setSelected(next)}
           />
@@ -573,7 +590,7 @@ function Workbench() {
             chartRows={chartRows}
             onSelect={(next) => setSelected(next)}
             onRecalculate={() => recalculate.mutate()}
-            canRecalculate={Boolean(activeDumpId)}
+            canRecalculate={Boolean(effectiveDumpId)}
             recalculating={recalculate.isPending || running}
           />
         )}
@@ -893,10 +910,14 @@ function LocalDataPage({
   csvUrl,
   run,
   running,
+  activeContext,
+  usingActiveContextScope,
+  effectiveRunId,
+  effectiveDumpId,
   onRefresh,
   onSelect,
 }: {
-  workbench: any;
+  workbench?: WorkbenchState;
   dumps: any;
   tables: any;
   localDataKind: LocalDataKind;
@@ -908,6 +929,10 @@ function LocalDataPage({
   csvUrl: string;
   run: any;
   running: boolean;
+  activeContext?: WorkbenchActiveContext;
+  usingActiveContextScope: boolean;
+  effectiveRunId: string;
+  effectiveDumpId: string;
   onRefresh: () => void;
   onSelect: (value: { kind: "author" | "work"; id: string }) => void;
 }) {
@@ -921,6 +946,12 @@ function LocalDataPage({
         <MetricCard label="Локальных витрин" value={fmt(["works", "authorships", "work_topics", "author_work", "indices", "ratings"].filter((name) => tables?.[name]?.exists).length)} />
         <MetricCard label="Индексов авторов" value={fmt(tables?.indices?.rows ?? 0)} />
       </section>
+      <ActiveContextPanel
+        activeContext={activeContext}
+        usingAsDefault={usingActiveContextScope}
+        effectiveRunId={effectiveRunId}
+        effectiveDumpId={effectiveDumpId}
+      />
       <section className="panel">
         <div className="panel-head split">
           <div>
@@ -974,6 +1005,40 @@ function LocalDataPage({
         <DataGrid data={table} onSelect={onSelect} hiddenFields={["slice_id"]} />
       </section>
     </div>
+  );
+}
+
+function ActiveContextPanel({
+  activeContext,
+  usingAsDefault,
+  effectiveRunId,
+  effectiveDumpId,
+}: {
+  activeContext?: WorkbenchActiveContext;
+  usingAsDefault: boolean;
+  effectiveRunId: string;
+  effectiveDumpId: string;
+}) {
+  const hasScope = Boolean(effectiveRunId || effectiveDumpId || activeContext?.active_run_id || activeContext?.active_dump_id);
+  if (!hasScope) return null;
+  const eligibility = activeContextEligibility(activeContext?.allowed_for_final_analysis);
+  return (
+    <section className="panel">
+      <div className="panel-head split">
+        <div>
+          <span className="step-badge">Active context</span>
+          <h2>Активный локальный контекст</h2>
+          <p>Просмотр данных, индексов, когорт и графиков использует этот scope, если run/dump не выбран явно.</p>
+        </div>
+        <span className={eligibility.className}>{eligibility.label}</span>
+      </div>
+      <div className="metric-grid">
+        <MetricCard label="Run" value={effectiveRunId || "не задан"} />
+        <MetricCard label="Dump" value={effectiveDumpId || "не задан"} />
+        <MetricCard label="Источник" value={activeContextSourceLabel(activeContext?.source)} />
+        <MetricCard label="Режим scope" value={usingAsDefault ? "active context" : "explicit"} />
+      </div>
+    </section>
   );
 }
 
@@ -3044,6 +3109,20 @@ function correlationColor(value: unknown) {
   if (!Number.isFinite(numeric)) return "#f3f6f9";
   const alpha = Math.min(0.42, Math.max(0.08, Math.abs(numeric) * 0.32 + 0.1));
   return numeric >= 0 ? `rgba(22, 115, 67, ${alpha})` : `rgba(21, 94, 117, ${alpha})`;
+}
+
+function activeContextEligibility(value: boolean | null | undefined) {
+  if (value === true) return { label: "Финальный анализ разрешен", className: "status-chip ok" };
+  if (value === false) return { label: "Финальный анализ запрещен", className: "status-chip warn" };
+  return { label: "Пригодность не определена", className: "status-chip" };
+}
+
+function activeContextSourceLabel(source?: string) {
+  if (source === "materialization") return "materialization";
+  if (source === "recalculate") return "recalculate";
+  if (source === "dev_import_file") return "dev import";
+  if (source === "import_local_file") return "file import";
+  return source || "не задан";
 }
 
 function MetricCard({ label, value }: { label: string; value: string | number }) {

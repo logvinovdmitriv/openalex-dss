@@ -175,10 +175,35 @@ export type WorkbenchWorkflow = {
 
 export type WorkbenchState = {
   tables?: Record<string, { rows?: number }>;
+  dumps?: Array<Record<string, unknown>>;
   workflow?: WorkbenchWorkflow;
   quality?: Record<string, unknown>;
   active_context?: WorkbenchActiveContext;
 };
+
+export type EffectiveUiScope = {
+  runId: string;
+  dumpId: string;
+  source: "explicit" | "active_context" | "none";
+};
+
+export function effectiveUiScope(params: {
+  runId?: string;
+  dumpId?: string;
+  activeContext?: WorkbenchActiveContext | null;
+}): EffectiveUiScope {
+  const explicitRunId = String(params.runId ?? "").trim();
+  const explicitDumpId = String(params.dumpId ?? "").trim();
+  const activeRunId = String(params.activeContext?.active_run_id ?? "").trim();
+  const activeDumpId = String(params.activeContext?.active_dump_id ?? "").trim();
+  const hasExplicit = Boolean(explicitRunId || explicitDumpId);
+  const hasActiveContext = Boolean(activeRunId || activeDumpId);
+  return {
+    runId: explicitRunId || activeRunId,
+    dumpId: explicitDumpId || activeDumpId,
+    source: hasExplicit ? "explicit" : hasActiveContext ? "active_context" : "none",
+  };
+}
 
 export type LocalDataSummary = {
   kinds?: Array<{ kind: LocalDataKind; label: string }>;
