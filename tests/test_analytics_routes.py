@@ -141,6 +141,40 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 404)
 
+    def test_scientometric_analysis_route_forwards_scope_filters_and_metrics(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_analysis(**kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {"analysis_version": "scientometrics_v1", "n_authors": 2}
+
+        with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", side_effect=fake_analysis):
+            payload = analytics_routes.scientometric_analysis(
+                run_id="run_a",
+                dump_id="dump_a",
+                cohort_id="cohort_a",
+                cohort_filter_policy="none",
+                fraction_mode="integer",
+                metrics="h,g,islv",
+                baseline_metric="h",
+                top_n=50,
+                country_code="ru",
+                filter_mode="search",
+                text_search_query="ergodesign",
+                work_type="article",
+            )
+
+        self.assertEqual(payload["analysis_version"], "scientometrics_v1")
+        self.assertEqual(captured["run_id"], "run_a")
+        self.assertEqual(captured["dump_id"], "dump_a")
+        self.assertEqual(captured["cohort_id"], "cohort_a")
+        self.assertEqual(captured["cohort_filter_policy"], "none")
+        self.assertEqual(captured["fraction_mode"], "integer")
+        self.assertEqual(captured["metrics"], ["h", "g", "islv"])
+        self.assertEqual(captured["baseline_metric"], "h")
+        self.assertEqual(captured["top_n"], 50)
+        self.assertEqual(captured["filters"], {"country_code": "RU", "filter_mode": "search", "text_search_query": "ergodesign", "work_type": "article"})
+
     def test_cohort_statistics_route_forwards_analysis_scope(self) -> None:
         captured: dict[str, object] = {}
 
