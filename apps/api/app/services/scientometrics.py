@@ -23,6 +23,7 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
 )
 SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v1"
 DEFAULT_OVERLAP_CUTS = (10, 20, 50)
+KENDALL_MAX_EXACT_N = 1000
 _NORMAL = NormalDist()
 
 
@@ -71,7 +72,7 @@ def build_scientometric_analysis(
         fraction_mode = str(fraction_mode or "strict_authors_count")
         resolved_filters = request_filters
 
-    top_n = max(1, min(int(top_n or 100), 1000))
+    rank_top_n = max(1, min(int(top_n or 100), 1000))
     rows = warehouse.filtered_author_indices(fraction_mode, resolved_filters, run_id=run_id, dump_id=dump_id)
     rows = warehouse.filter_rows_by_author_ids(rows, author_ids)
     selected_metrics = [metric for metric in selected_metrics if _has_metric_data(rows, metric) or metric in warehouse.INDEX_NUMERIC_FIELDS]
@@ -81,9 +82,16 @@ def build_scientometric_analysis(
     histograms = histogram_metrics(rows, selected_metrics)
     normality = normality_metrics(rows, selected_metrics)
     correlations = correlation_matrices(rows, selected_metrics)
-    rank_comparison_payload = rank_comparisons(rows, selected_metrics, baseline_metric=baseline_metric, top_n=top_n)
+    rank_comparison_payload = rank_comparisons(rows, selected_metrics, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
     scorecard = metric_scorecard(rows, selected_metrics, descriptive=descriptive)
-    warnings = _analysis_warnings(rows, selected_metrics, cohort_filter_policy=cohort_filter_policy)
+    warnings = _analysis_warnings(
+        rows,
+        selected_metrics,
+        cohort_filter_policy=cohort_filter_policy,
+        rank_top_n=rank_top_n,
+        boxplots=boxplots,
+        correlations=correlations,
+    )
 
     return {
         "analysis_version": SCIENTOMETRIC_ANALYSIS_VERSION,
@@ -95,7 +103,8 @@ def build_scientometric_analysis(
             "cohort_id": cohort_id,
             "cohort_filter_policy": cohort_filter_policy,
             "baseline_metric": baseline_metric,
-            "top_n": top_n,
+            "analysis_author_scope": "all_resolved_authors",
+            "rank_top_n": rank_top_n,
             "n_authors": len(rows),
             "metric_scope": "filtered_recomputed",
             "percentile_scope": "current filtered author set",
@@ -108,6 +117,7 @@ def build_scientometric_analysis(
         "histograms": histograms,
         "normality": normality,
         "correlations": correlations,
+        "rank_top_n": rank_top_n,
         "rank_comparisons": rank_comparison_payload["comparisons"],
         "top_overlap": rank_comparison_payload["top_overlap"],
         "outliers": _outlier_table(boxplots),
@@ -153,7 +163,7 @@ def correlation_matrices(rows: list[dict[str, Any]], metrics: list[str] | tuple[
     return {
         "pearson_log1p": _correlation_matrix(rows, selected, method="pearson_log1p"),
         "spearman": _correlation_matrix(rows, selected, method="spearman"),
-        "kendall_tau_b": _correlation_matrix(rows, selected, method="kendall_tau_b"),
+        "kendall_tau_b": _kendall_tau_b_matrix(rows, selected),
     }
 
 
@@ -162,11 +172,14 @@ def rank_comparisons(
     metrics: list[str] | tuple[str, ...],
     *,
     baseline_metric: str = "h",
-    top_n: int = 100,
+    rank_top_n: int = 100,
+    top_n: int | None = None,
 ) -> dict[str, Any]:
+    if top_n is not None:
+        rank_top_n = top_n
     selected = list(metrics)
     ranks = {metric: _competition_ranks(rows, metric) for metric in selected}
-    overlap_cuts = _overlap_cuts(top_n)
+    overlap_cuts = _overlap_cuts(rank_top_n)
     top_overlap = _top_overlap_matrix(ranks, overlap_cuts)
     baseline_ranks = ranks.get(baseline_metric, {})
     comparisons: dict[str, Any] = {}
@@ -187,8 +200,10 @@ def rank_comparisons(
             for author_id in common
         ]
         abs_values = [float(item["abs_rank_delta"]) for item in deltas]
-        top_base = _top_set(baseline_ranks, top_n)
-        top_metric = _top_set(metric_ranks, top_n)
+        top_base = _top_exact_set(baseline_ranks, rank_top_n)
+        top_metric = _top_exact_set(metric_ranks, rank_top_n)
+        top_overlap_exact = len(top_base & top_metric)
+        jaccard_exact = _jaccard(top_base, top_metric)
         comparisons[metric] = {
             "baseline_metric": baseline_metric,
             "metric": metric,
@@ -197,8 +212,10 @@ def rank_comparisons(
             "p90_abs_delta": _quantile(abs_values, 0.9) if abs_values else None,
             "max_abs_delta": max(abs_values) if abs_values else None,
             "share_abs_delta_le_5": _share(abs_values, lambda value: value <= 5.0),
-            "top_overlap": len(top_base & top_metric),
-            "jaccard_top_n": _jaccard(top_base, top_metric),
+            "top_overlap_exact": top_overlap_exact,
+            "top_overlap": top_overlap_exact,
+            "jaccard_top_n_exact": jaccard_exact,
+            "jaccard_top_n": jaccard_exact,
             "largest_shifts": sorted(deltas, key=lambda item: (-item["abs_rank_delta"], item["author_id"]))[:20],
         }
     return {"comparisons": comparisons, "top_overlap": top_overlap}
@@ -221,7 +238,7 @@ def metric_scorecard(
     payload: dict[str, Any] = {}
     for metric in metrics:
         metric_payload = {
-            label: _spearman_for_metrics(rows, metric, factor)
+            label: _dependence_payload(_spearman_for_metrics(rows, metric, factor))
             for label, factor in factors.items()
             if metric != factor
         }
@@ -252,17 +269,39 @@ def _select_metrics(metrics: list[str] | tuple[str, ...] | None) -> list[str]:
     return out
 
 
-def _analysis_warnings(rows: list[dict[str, Any]], metrics: list[str], *, cohort_filter_policy: str) -> list[str]:
+def _analysis_warnings(
+    rows: list[dict[str, Any]],
+    metrics: list[str],
+    *,
+    cohort_filter_policy: str,
+    rank_top_n: int,
+    boxplots: dict[str, Any],
+    correlations: dict[str, Any],
+) -> list[str]:
     warnings: list[str] = []
     if not rows:
         warnings.append("No authors matched the resolved scientometric analysis scope.")
     elif len(rows) < 5:
         warnings.append("The author set is very small; correlation and normality diagnostics are unstable.")
+    elif len(rows) < 20:
+        warnings.append("The author set has fewer than 20 authors; normality diagnostics should be interpreted cautiously.")
+    if rows and len(rows) > rank_top_n:
+        warnings.append("rank_top_n limits only rank comparisons and overlap; descriptive statistics use all resolved authors.")
     if cohort_filter_policy == "auto":
         warnings.append("cohort_filter_policy=auto is a legacy compatibility mode and should not be used for final analysis.")
     missing_metrics = [metric for metric in metrics if not _metric_values(rows, metric)]
     if missing_metrics and rows:
         warnings.append(f"No numeric values were available for metrics: {', '.join(missing_metrics)}.")
+    iqr_zero_metrics = [
+        metric
+        for metric, payload in boxplots.items()
+        if (payload or {}).get("outlier_rule") == "iqr_zero_no_outlier_fence"
+    ]
+    if iqr_zero_metrics:
+        warnings.append(f"IQR is zero for metrics {', '.join(iqr_zero_metrics)}; IQR outlier fences are not informative.")
+    skipped_kendall = ((correlations.get("kendall_tau_b") or {}).get("skipped") or [])
+    if skipped_kendall:
+        warnings.append(f"Kendall tau-b was skipped for {len(skipped_kendall)} metric pairs with more than {KENDALL_MAX_EXACT_N} paired observations.")
     return warnings
 
 
@@ -277,15 +316,22 @@ def _interpretation(
         "All diagnostics are computed inside the resolved local run/dump/cohort scope.",
         "Rank and correlation diagnostics are descriptive; they do not replace expert assessment.",
     ]
+    candidate_basis: list[str] = []
     if "islv" in metrics:
         notes.append("ISLV is interpreted as a local balanced visibility indicator based on percentile components and a top1 concentration penalty.")
+        candidate_basis = [
+            "uses percentile-normalized components inside the local slice",
+            "includes fractional citation contribution through c_frac",
+            "uses a top1_share concentration penalty",
+            "is a candidate indicator, not an automatically proven best metric",
+        ]
     if "c" in metrics:
-        top1_dependence = (scorecard.get("c") or {}).get("top1_dominance_dependence")
+        top1_dependence = ((scorecard.get("c") or {}).get("top1_dominance_dependence") or {}).get("abs_spearman_rho")
         if top1_dependence is not None and top1_dependence > 0.5:
             notes.append("Total citations show elevated association with top1_share, so one highly cited work may strongly affect rank positions.")
-    best_balanced = "islv" if "islv" in metrics else baseline_metric
     return {
-        "best_balanced_metric": best_balanced if rows else None,
+        "candidate_balanced_metric": "islv" if rows and "islv" in metrics else None,
+        "candidate_balanced_metric_basis": candidate_basis if rows and "islv" in metrics else [],
         "baseline_metric": baseline_metric,
         "warnings": warnings,
         "notes": notes,
@@ -375,6 +421,22 @@ def _boxplot_metric(rows: list[dict[str, Any]], metric: str) -> dict[str, Any]:
     median = _quantile(values, 0.5)
     q3 = _quantile(values, 0.75)
     iqr = q3 - q1
+    if iqr == 0.0:
+        return {
+            "min_whisker": values[0],
+            "q1": q1,
+            "median": median,
+            "q3": q3,
+            "max_whisker": values[-1],
+            "iqr": iqr,
+            "lower_fence": None,
+            "upper_fence": None,
+            "outliers": [],
+            "outlier_count": 0,
+            "outlier_rule": "iqr_zero_no_outlier_fence",
+            "outlier_rule_unstable": True,
+            "warning": "IQR is zero; IQR outlier rule is not informative for this metric.",
+        }
     low = q1 - 1.5 * iqr
     high = q3 + 1.5 * iqr
     inner = [value for value in values if low <= value <= high]
@@ -483,12 +545,39 @@ def _correlation_matrix(rows: list[dict[str, Any]], metrics: list[str], *, metho
                 x_values = [math.log1p(max(0.0, pair[0])) for pair in pairs]
                 y_values = [math.log1p(max(0.0, pair[1])) for pair in pairs]
                 value = _pearson(x_values, y_values)
-            elif method == "spearman":
-                value = _spearman_pairs(pairs)
             else:
-                value = _kendall_tau_b(pairs)
+                value = _spearman_pairs(pairs)
             matrix[left][right] = value
     return matrix
+
+
+def _kendall_tau_b_matrix(rows: list[dict[str, Any]], metrics: list[str]) -> dict[str, Any]:
+    matrix: dict[str, dict[str, float | None]] = {metric: {} for metric in metrics}
+    skipped: list[dict[str, Any]] = []
+    for left in metrics:
+        for right in metrics:
+            pairs = _paired_values(rows, left, right)
+            if left == right:
+                matrix[left][right] = 1.0 if len(pairs) >= 2 else None
+                continue
+            if len(pairs) > KENDALL_MAX_EXACT_N:
+                matrix[left][right] = None
+                skipped.append(
+                    {
+                        "left": left,
+                        "right": right,
+                        "n": len(pairs),
+                        "reason": f"exact Kendall tau-b skipped above {KENDALL_MAX_EXACT_N} paired observations",
+                    }
+                )
+            else:
+                matrix[left][right] = _kendall_tau_b(pairs)
+    return {
+        "matrix": matrix,
+        "method": "exact_tau_b_skipped_above_limit",
+        "max_exact_n": KENDALL_MAX_EXACT_N,
+        "skipped": skipped,
+    }
 
 
 def _spearman_for_metrics(rows: list[dict[str, Any]], left: str, right: str) -> float | None:
@@ -529,7 +618,6 @@ def _pearson(x_values: list[float], y_values: list[float]) -> float | None:
 def _kendall_tau_b(pairs: list[tuple[float, float]]) -> float | None:
     if len(pairs) < 2:
         return None
-    pairs = pairs[:1000]
     concordant = 0
     discordant = 0
     ties_x = 0
@@ -583,8 +671,8 @@ def _top_overlap_matrix(ranks: dict[str, dict[str, int]], cuts: list[int]) -> di
         for right in metrics:
             by_cut = {}
             for cut in cuts:
-                left_top = _top_set(ranks[left], cut)
-                right_top = _top_set(ranks[right], cut)
+                left_top = _top_exact_set(ranks[left], cut)
+                right_top = _top_exact_set(ranks[right], cut)
                 by_cut[str(cut)] = {
                     "overlap": len(left_top & right_top),
                     "jaccard": _jaccard(left_top, right_top),
@@ -592,11 +680,15 @@ def _top_overlap_matrix(ranks: dict[str, dict[str, int]], cuts: list[int]) -> di
                     "right_n": len(right_top),
                 }
             payload[left][right] = by_cut
-    return payload
+    return {
+        "mode": "exact_n_by_competition_rank_then_author_id",
+        "cuts": cuts,
+        "matrix": payload,
+    }
 
 
-def _top_set(ranks: dict[str, int], n: int) -> set[str]:
-    return {author_id for author_id, rank in ranks.items() if rank <= n}
+def _top_exact_set(ranks: dict[str, int], n: int) -> set[str]:
+    return {author_id for author_id, _ in sorted(ranks.items(), key=lambda item: (item[1], item[0]))[:n]}
 
 
 def _overlap_cuts(top_n: int) -> list[int]:
@@ -669,9 +761,27 @@ def _iqr_outlier_values(values: list[float]) -> list[float]:
     q1 = _quantile(values, 0.25)
     q3 = _quantile(values, 0.75)
     iqr = q3 - q1
+    if iqr == 0.0:
+        return []
     low = q1 - 1.5 * iqr
     high = q3 + 1.5 * iqr
     return [value for value in values if value < low or value > high]
+
+
+def _dependence_payload(value: float | None) -> dict[str, Any]:
+    if value is None:
+        return {"spearman_rho": None, "abs_spearman_rho": None, "direction": "undefined"}
+    if value > 0:
+        direction = "positive"
+    elif value < 0:
+        direction = "negative"
+    else:
+        direction = "zero"
+    return {
+        "spearman_rho": value,
+        "abs_spearman_rho": abs(value),
+        "direction": direction,
+    }
 
 
 def _average_ranks(values: list[float]) -> list[float]:

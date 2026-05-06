@@ -72,7 +72,64 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertAlmostEqual(correlations["spearman"]["h"]["g"], 1.0)
         self.assertIn("c_frac", rank_payload["comparisons"])
         self.assertGreater(rank_payload["comparisons"]["c_frac"]["max_abs_delta"], 0)
-        self.assertEqual(rank_payload["top_overlap"]["h"]["g"]["2"]["overlap"], 2)
+        self.assertEqual(rank_payload["top_overlap"]["matrix"]["h"]["g"]["2"]["overlap"], 2)
+
+    def test_iqr_zero_boxplot_does_not_create_false_outliers(self) -> None:
+        rows = [
+            {"author_id": "A1", "h": 1},
+            {"author_id": "A2", "h": 1},
+            {"author_id": "A3", "h": 1},
+            {"author_id": "A4", "h": 1},
+            {"author_id": "A5", "h": 2},
+        ]
+
+        summary = scientometrics.describe_metrics(rows, ["h"])["h"]
+        boxplot = scientometrics.boxplot_metrics(rows, ["h"])["h"]
+
+        self.assertEqual(summary["iqr"], 0.0)
+        self.assertEqual(summary["outlier_count_iqr"], 0)
+        self.assertEqual(boxplot["outliers"], [])
+        self.assertEqual(boxplot["outlier_rule"], "iqr_zero_no_outlier_fence")
+
+    def test_top_overlap_exact_n_does_not_expand_tied_rank_cut(self) -> None:
+        rows = [
+            {"author_id": "A1", "h": 10, "c": 10},
+            {"author_id": "A2", "h": 1, "c": 9},
+            {"author_id": "A3", "h": 1, "c": 8},
+            {"author_id": "A4", "h": 1, "c": 7},
+        ]
+
+        payload = scientometrics.rank_comparisons(rows, ["h", "c"], baseline_metric="h", rank_top_n=2)
+        overlap = payload["top_overlap"]["matrix"]["h"]["c"]["2"]
+
+        self.assertEqual(payload["top_overlap"]["mode"], "exact_n_by_competition_rank_then_author_id")
+        self.assertEqual(overlap["left_n"], 2)
+        self.assertEqual(overlap["right_n"], 2)
+        self.assertLessEqual(overlap["overlap"], 2)
+
+    def test_kendall_tau_b_skips_large_inputs_instead_of_truncating_silently(self) -> None:
+        rows = [{"author_id": f"A{index}", "h": index, "g": index} for index in range(1001)]
+
+        correlations = scientometrics.correlation_matrices(rows, ["h", "g"])
+        kendall = correlations["kendall_tau_b"]
+
+        self.assertIsNone(kendall["matrix"]["h"]["g"])
+        self.assertTrue(kendall["skipped"])
+        self.assertEqual(kendall["max_exact_n"], 1000)
+
+    def test_scorecard_dependence_keeps_signed_and_absolute_correlation(self) -> None:
+        rows = [
+            {"author_id": "A1", "islv": 3, "top1_share": 0.0},
+            {"author_id": "A2", "islv": 2, "top1_share": 0.5},
+            {"author_id": "A3", "islv": 1, "top1_share": 1.0},
+        ]
+
+        scorecard = scientometrics.metric_scorecard(rows, ["islv"])
+        dependence = scorecard["islv"]["top1_dominance_dependence"]
+
+        self.assertEqual(dependence["direction"], "negative")
+        self.assertLess(dependence["spearman_rho"], 0)
+        self.assertEqual(dependence["abs_spearman_rho"], abs(dependence["spearman_rho"]))
 
     def test_build_analysis_applies_cohort_scope_and_policy(self) -> None:
         captured: dict[str, object] = {}
@@ -127,6 +184,8 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"], {"run_id": "run_a", "dump_id": "dump_a"})
         self.assertEqual(payload["n_authors"], 1)
         self.assertEqual(payload["scope"]["cohort_filter_policy"], "current")
+        self.assertEqual(payload["scope"]["analysis_author_scope"], "all_resolved_authors")
+        self.assertEqual(payload["scope"]["rank_top_n"], 10)
         self.assertEqual(payload["cohort_context"]["analysis_filters"], {"country_code": "DE"})
 
     def test_empty_analysis_returns_warning_without_crashing(self) -> None:
@@ -141,7 +200,8 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(payload["n_authors"], 0)
         self.assertEqual(payload["descriptive"]["h"]["n"], 0)
         self.assertTrue(payload["warnings"])
-        self.assertIsNone(payload["interpretation"]["best_balanced_metric"])
+        self.assertIsNone(payload["interpretation"]["candidate_balanced_metric"])
+        self.assertNotIn("best_balanced_metric", payload["interpretation"])
 
 
 if __name__ == "__main__":
