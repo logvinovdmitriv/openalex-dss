@@ -326,6 +326,7 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(distribution["evidence_metrics"], ["c"])
         self.assertEqual(candidate["evidence_finding_ids"], ["balanced_candidate:islv"])
         self.assertIn("C", distribution["text"])
+        self.assertIn("baseline h-index", text)
         self.assertNotIn("лучший индекс", text.lower())
         self.assertIn("не заменяют экспертную оценку", " ".join(draft["limitations"]).lower())
 

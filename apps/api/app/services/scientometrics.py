@@ -431,12 +431,13 @@ def conclusion_draft(
     n_authors: int,
     scope: dict[str, Any],
 ) -> dict[str, Any]:
-    paragraphs: list[dict[str, str]] = [
+    baseline_label = _metric_label(baseline_metric)
+    paragraphs: list[dict[str, Any]] = [
         {
             "role": "scope",
             "text": (
                 f"Анализ выполнен для локально зафиксированного аналитического scope: {n_authors} авторов, "
-                f"режим дробления {scope.get('fraction_mode') or 'не указан'}, baseline {baseline_metric}. "
+                f"режим дробления {scope.get('fraction_mode') or 'не указан'}, baseline {baseline_label}. "
                 "Все показатели являются локальными и рассчитаны по выбранному срезу, а не по глобальному профилю автора."
             ),
             "evidence_finding_ids": [],
@@ -541,9 +542,9 @@ def conclusion_draft(
     if unstable or agreement:
         details: list[str] = []
         if unstable:
-            details.append(f"изменяют позиции относительно {baseline_metric}: {_metric_list_text(unstable)}")
+            details.append(f"изменяют позиции относительно {baseline_label}: {_metric_list_text(unstable)}")
         if agreement:
-            details.append(f"близки к {baseline_metric}: {_metric_list_text(agreement)}")
+            details.append(f"близки к {baseline_label}: {_metric_list_text(agreement)}")
         paragraphs.append(
             {
                 "role": "rank_comparison",

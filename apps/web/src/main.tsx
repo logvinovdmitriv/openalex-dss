@@ -1869,6 +1869,9 @@ function ConclusionDraftPanel({ payload }: { payload: ScientometricAnalysisPaylo
             {(paragraph.evidence_finding_ids ?? []).length > 0 && (
               <small>Основания: {(paragraph.evidence_finding_ids ?? []).join(", ")}</small>
             )}
+            {(paragraph.evidence_metrics ?? []).length > 0 && (
+              <small>Метрики: {(paragraph.evidence_metrics ?? []).map(metricLabel).join(", ")}</small>
+            )}
           </div>
         ))}
       </div>
