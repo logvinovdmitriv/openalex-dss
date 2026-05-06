@@ -273,6 +273,69 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertIsNone(summary["candidate_metric"])
         self.assertIsNone(summary["candidate_metric_claim"])
 
+    def test_conclusion_draft_uses_findings_without_claiming_best_metric(self) -> None:
+        findings = [
+            {
+                "id": "heavy_tail:c",
+                "type": "heavy_tail_distribution",
+                "metric": "c",
+                "severity": "high",
+                "evidence": {},
+                "text": "",
+                "recommendation": "",
+            },
+            {
+                "id": "tie_rate:h",
+                "type": "high_tie_rate",
+                "metric": "h",
+                "severity": "medium",
+                "evidence": {},
+                "text": "",
+                "recommendation": "",
+            },
+            {
+                "id": "balanced_candidate:islv",
+                "type": "balanced_candidate_metric",
+                "metric": "islv",
+                "severity": "informational",
+                "evidence": {},
+                "text": "",
+                "recommendation": "",
+            },
+        ]
+        summary = scientometrics.finding_summary(findings, metrics=["c", "h", "islv"], baseline_metric="h")
+
+        draft = scientometrics.conclusion_draft(
+            findings=findings,
+            finding_summary=summary,
+            metrics=["c", "h", "islv"],
+            baseline_metric="h",
+            n_authors=42,
+            scope={"fraction_mode": "integer"},
+        )
+        roles = [paragraph["role"] for paragraph in draft["paragraphs"]]
+        text = " ".join(paragraph["text"] for paragraph in draft["paragraphs"])
+
+        self.assertEqual(draft["version"], "scientometric_conclusion_v1")
+        self.assertIn("distribution_limits", roles)
+        self.assertIn("index_limitations", roles)
+        self.assertIn("candidate_metric", roles)
+        self.assertNotIn("лучший индекс", text.lower())
+        self.assertIn("не заменяют экспертную оценку", " ".join(draft["limitations"]).lower())
+
+    def test_conclusion_draft_for_empty_findings_keeps_scope_and_limitations(self) -> None:
+        draft = scientometrics.conclusion_draft(
+            findings=[],
+            finding_summary=scientometrics.finding_summary([], metrics=["h"], baseline_metric="h"),
+            metrics=["h"],
+            baseline_metric="h",
+            n_authors=0,
+            scope={"fraction_mode": "integer"},
+        )
+
+        self.assertEqual([paragraph["role"] for paragraph in draft["paragraphs"]], ["scope", "final_caution"])
+        self.assertTrue(draft["limitations"])
+
     def test_build_analysis_applies_cohort_scope_and_policy(self) -> None:
         captured: dict[str, object] = {}
         cohort_ctx = {
@@ -340,9 +403,10 @@ class ScientometricServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["n_authors"], 0)
-        self.assertEqual(payload["analysis_version"], "scientometrics_v2")
+        self.assertEqual(payload["analysis_version"], "scientometrics_v3")
         self.assertEqual(payload["descriptive"]["h"]["n"], 0)
         self.assertEqual(payload["finding_summary"]["findings_version"], "scientometric_findings_v2")
+        self.assertEqual(payload["conclusion_draft"]["version"], "scientometric_conclusion_v1")
         self.assertEqual(payload["finding_thresholds"]["tie_rate"], 0.30)
         self.assertTrue(payload["warnings"])
         self.assertIsNone(payload["interpretation"]["candidate_balanced_metric"])

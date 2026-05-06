@@ -1490,6 +1490,7 @@ function StatisticsPage({
             <ScorecardTable payload={scientometrics} metrics={metrics} />
           </section>
           <FindingsPanel payload={scientometrics} />
+          <ConclusionDraftPanel payload={scientometrics} />
           <InterpretationPanel payload={scientometrics} />
         </>
       )}
@@ -1845,6 +1846,37 @@ function FindingsPanel({ payload }: { payload: ScientometricAnalysisPayload }) {
           </div>
         );
       })}
+    </section>
+  );
+}
+
+function ConclusionDraftPanel({ payload }: { payload: ScientometricAnalysisPayload }) {
+  const draft = payload?.conclusion_draft;
+  const paragraphs = draft?.paragraphs ?? [];
+  if (!draft || !paragraphs.length) return null;
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <span className="step-badge">Conclusion</span>
+        <h2>{draft.title ?? "Черновик вывода"}</h2>
+        <p>Текст собран детерминированно из findings текущего scope. Его можно использовать как основу раздела отчета после проверки таблиц и графиков.</p>
+      </div>
+      <div className="stack compact-stack">
+        {paragraphs.map((paragraph, index) => (
+          <div key={`${paragraph.role ?? "paragraph"}:${index}`} className="notice">
+            <b>{conclusionRoleLabel(String(paragraph.role ?? ""))}</b>
+            <span>{paragraph.text ?? ""}</span>
+          </div>
+        ))}
+      </div>
+      {(draft.limitations ?? []).length > 0 && (
+        <div className="notice warn">
+          <b>Ограничения вывода</b>
+          <ul className="plain-list">
+            {(draft.limitations ?? []).map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
@@ -2870,6 +2902,19 @@ function findingTypeLabel(value: string) {
     balanced_candidate_metric: "кандидатный индекс",
     productivity_metric: "продуктивность",
     citation_volume_metric: "объем цитирования",
+  };
+  return labels[value] ?? value;
+}
+
+function conclusionRoleLabel(value: string) {
+  const labels: Record<string, string> = {
+    scope: "Область анализа",
+    distribution_limits: "Распределения",
+    index_limitations: "Различающая способность",
+    dependence_limits: "Зависимости индексов",
+    rank_comparison: "Сравнение рангов",
+    candidate_metric: "Кандидатная формула",
+    final_caution: "Ограничение интерпретации",
   };
   return labels[value] ?? value;
 }

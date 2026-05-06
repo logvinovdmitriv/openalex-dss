@@ -28,6 +28,14 @@ export type ScientometricFindingSummary = {
   notes?: string[];
 };
 
+export type ScientometricConclusionDraft = {
+  version?: string;
+  title?: string;
+  paragraphs?: Array<{ role?: string; text?: string }>;
+  limitations?: string[];
+  source?: Record<string, unknown>;
+};
+
 export type ScientometricAnalysisPayload = {
   analysis_version: string;
   scope: Record<string, unknown>;
@@ -62,6 +70,7 @@ export type ScientometricAnalysisPayload = {
   findings?: ScientometricFinding[];
   finding_summary?: ScientometricFindingSummary;
   finding_thresholds?: Record<string, number>;
+  conclusion_draft?: ScientometricConclusionDraft;
 };
 
 export type EntitySuggestion = {

@@ -161,7 +161,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         def fake_analysis(**kwargs: object) -> dict[str, object]:
             captured.update(kwargs)
-            return {"analysis_version": "scientometrics_v2", "n_authors": 2}
+            return {"analysis_version": "scientometrics_v3", "n_authors": 2}
 
         with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", side_effect=fake_analysis):
             payload = analytics_routes.scientometric_analysis(
@@ -179,7 +179,7 @@ class AnalyticsRouteTests(unittest.TestCase):
                 work_type="article",
             )
 
-        self.assertEqual(payload["analysis_version"], "scientometrics_v2")
+        self.assertEqual(payload["analysis_version"], "scientometrics_v3")
         self.assertEqual(captured["run_id"], "run_a")
         self.assertEqual(captured["dump_id"], "dump_a")
         self.assertEqual(captured["cohort_id"], "cohort_a")
@@ -192,7 +192,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
     def test_scientometric_export_routes_return_csv_artifacts(self) -> None:
         payload = {
-            "analysis_version": "scientometrics_v2",
+            "analysis_version": "scientometrics_v3",
             "descriptive": {
                 "h": {
                     "n": 2,

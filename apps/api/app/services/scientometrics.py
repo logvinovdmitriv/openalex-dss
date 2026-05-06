@@ -21,8 +21,9 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
     "islv",
     "lrdi",
 )
-SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v2"
+SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v3"
 SCIENTOMETRIC_FINDINGS_VERSION = "scientometric_findings_v2"
+SCIENTOMETRIC_CONCLUSION_VERSION = "scientometric_conclusion_v1"
 FINDING_THRESHOLDS = {
     "heavy_tail_skewness_medium": 1.0,
     "heavy_tail_skewness_high": 2.0,
@@ -105,23 +106,33 @@ def build_scientometric_analysis(
         rank_comparisons=rank_comparison_payload["comparisons"],
         metric_scorecard=scorecard,
     )
+    summary = finding_summary(findings, metrics=selected_metrics, baseline_metric=baseline_metric)
+    analysis_scope = {
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "fraction_mode": fraction_mode,
+        "filters": resolved_filters,
+        "cohort_id": cohort_id,
+        "cohort_filter_policy": cohort_filter_policy,
+        "baseline_metric": baseline_metric,
+        "analysis_author_scope": "all_resolved_authors",
+        "rank_top_n": rank_top_n,
+        "n_authors": len(rows),
+        "metric_scope": "filtered_recomputed",
+        "percentile_scope": "current filtered author set",
+    }
+    conclusion = conclusion_draft(
+        findings=findings,
+        finding_summary=summary,
+        metrics=selected_metrics,
+        baseline_metric=baseline_metric,
+        n_authors=len(rows),
+        scope=analysis_scope,
+    )
 
     return {
         "analysis_version": SCIENTOMETRIC_ANALYSIS_VERSION,
-        "scope": {
-            "run_id": run_id,
-            "dump_id": dump_id,
-            "fraction_mode": fraction_mode,
-            "filters": resolved_filters,
-            "cohort_id": cohort_id,
-            "cohort_filter_policy": cohort_filter_policy,
-            "baseline_metric": baseline_metric,
-            "analysis_author_scope": "all_resolved_authors",
-            "rank_top_n": rank_top_n,
-            "n_authors": len(rows),
-            "metric_scope": "filtered_recomputed",
-            "percentile_scope": "current filtered author set",
-        },
+        "scope": analysis_scope,
         "cohort_context": cohort_context,
         "metrics": selected_metrics,
         "n_authors": len(rows),
@@ -137,8 +148,9 @@ def build_scientometric_analysis(
         "metric_scorecard": scorecard,
         "interpretation": _interpretation(rows, selected_metrics, baseline_metric, scorecard, warnings),
         "findings": findings,
-        "finding_summary": finding_summary(findings, metrics=selected_metrics, baseline_metric=baseline_metric),
+        "finding_summary": summary,
         "finding_thresholds": FINDING_THRESHOLDS,
+        "conclusion_draft": conclusion,
         "warnings": warnings,
     }
 
@@ -410,6 +422,125 @@ def finding_summary(findings: list[dict[str, Any]], *, metrics: list[str], basel
     }
 
 
+def conclusion_draft(
+    *,
+    findings: list[dict[str, Any]],
+    finding_summary: dict[str, Any],
+    metrics: list[str],
+    baseline_metric: str,
+    n_authors: int,
+    scope: dict[str, Any],
+) -> dict[str, Any]:
+    paragraphs: list[dict[str, str]] = [
+        {
+            "role": "scope",
+            "text": (
+                f"Анализ выполнен для локально зафиксированного аналитического scope: {n_authors} авторов, "
+                f"режим дробления {scope.get('fraction_mode') or 'не указан'}, baseline {baseline_metric}. "
+                "Все показатели являются локальными и рассчитаны по выбранному срезу, а не по глобальному профилю автора."
+            ),
+        }
+    ]
+
+    heavy_tail_metrics = _finding_metrics(findings, "heavy_tail_distribution")
+    if heavy_tail_metrics:
+        paragraphs.append(
+            {
+                "role": "distribution_limits",
+                "text": (
+                    f"В выборке выявлены тяжелохвостые или асимметричные распределения по метрикам {_metric_list_text(heavy_tail_metrics)}. "
+                    "Это ограничивает интерпретацию средних значений и прямого raw-ранжирования; для сравнения предпочтительны ранговые показатели и log1p-визуализация."
+                ),
+            }
+        )
+
+    weak_differentiation = _unique_preserve_order(
+        [*_finding_metrics(findings, "high_tie_rate"), *_finding_metrics(findings, "zero_inflation")]
+    )
+    if weak_differentiation:
+        paragraphs.append(
+            {
+                "role": "index_limitations",
+                "text": (
+                    f"Для метрик {_metric_list_text(weak_differentiation)} обнаружена высокая доля одинаковых или нулевых значений. "
+                    "Такие показатели полезны как простые и устойчивые индикаторы, но хуже различают авторов внутри близких групп."
+                ),
+            }
+        )
+
+    dependence_metrics = _unique_preserve_order(
+        [
+            *_finding_metrics(findings, "publication_volume_dependence"),
+            *_finding_metrics(findings, "citation_volume_dependence"),
+            *_finding_metrics(findings, "top1_dominance_dependence"),
+        ]
+    )
+    if dependence_metrics:
+        paragraphs.append(
+            {
+                "role": "dependence_limits",
+                "text": (
+                    f"Для метрик {_metric_list_text(dependence_metrics)} выявлена существенная связь с числом публикаций, общим цитированием или концентрацией цитирований в одной работе. "
+                    "Это показывает, что отдельный индекс не должен использоваться как единственный критерий сравнения."
+                ),
+            }
+        )
+
+    unstable = _finding_metrics(findings, "rank_instability")
+    agreement = _finding_metrics(findings, "rank_agreement")
+    if unstable or agreement:
+        details: list[str] = []
+        if unstable:
+            details.append(f"изменяют позиции относительно {baseline_metric}: {_metric_list_text(unstable)}")
+        if agreement:
+            details.append(f"близки к {baseline_metric}: {_metric_list_text(agreement)}")
+        paragraphs.append(
+            {
+                "role": "rank_comparison",
+                "text": (
+                    "Ранговые сравнения показывают, какие индексы фактически дублируют baseline, а какие меняют состав Top-N: "
+                    + "; ".join(details)
+                    + ". Для метрик с крупными сдвигами требуется анализ rank-shifts.csv и largest-rank-shifts.csv."
+                ),
+            }
+        )
+
+    if any(finding.get("type") == "balanced_candidate_metric" for finding in findings):
+        paragraphs.append(
+            {
+                "role": "candidate_metric",
+                "text": (
+                    "ISLV может рассматриваться как кандидатная сбалансированная модификация, поскольку объединяет процентильные компоненты, дробное цитирование и штраф концентрации top1_share. "
+                    "Его преимущество следует формулировать только в пределах текущего среза и по указанным критериям, а не как универсальное превосходство."
+                ),
+            }
+        )
+
+    paragraphs.append(
+        {
+            "role": "final_caution",
+            "text": "Полученные выводы являются описательными и не заменяют экспертную оценку исследователей.",
+        }
+    )
+
+    return {
+        "version": SCIENTOMETRIC_CONCLUSION_VERSION,
+        "title": "Вывод по сравнению наукометрических индексов",
+        "paragraphs": paragraphs,
+        "limitations": [
+            "Вывод действителен только в пределах текущего локального среза и выбранной авторской когорты.",
+            "Метрики не заменяют экспертную оценку.",
+            "OpenAlex-метаданные могут содержать ошибки авторской дизамбигуации и неполноту.",
+        ],
+        "source": {
+            "findings_version": finding_summary.get("findings_version"),
+            "n_findings": finding_summary.get("n_findings", len(findings)),
+            "baseline_metric": baseline_metric,
+            "metrics": metrics,
+        },
+    }
+
+
 def _distribution_findings(metrics: list[str], descriptive: dict[str, Any], normality: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for metric in metrics:
@@ -566,6 +697,30 @@ def _metric_identity_findings(metrics: list[str]) -> list[dict[str, Any]]:
             )
         )
     return findings
+
+
+def _finding_metrics(findings: list[dict[str, Any]], finding_type: str) -> list[str]:
+    return _unique_preserve_order(
+        [str(finding.get("metric") or "").strip() for finding in findings if finding.get("type") == finding_type and finding.get("metric")]
+    )
+
+
+def _unique_preserve_order(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def _metric_list_text(metrics: list[str]) -> str:
+    if not metrics:
+        return "нет"
+    if len(metrics) == 1:
+        return metrics[0]
+    if len(metrics) == 2:
+        return f"{metrics[0]} и {metrics[1]}"
+    return ", ".join(metrics[:-1]) + f" и {metrics[-1]}"
 
 
 def _rank_findings(
