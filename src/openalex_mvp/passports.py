@@ -9,38 +9,22 @@ from .config import SliceConfig, config_to_dict
 from .io_utils import sha256_file, write_json
 
 
-PRIMARY_ARTIFACTS = [
-    "config/slice.yaml",
-    "requirements.lock",
-    "docs/methodology.md",
-    "data/tables/local/works.parquet",
-    "data/tables/local/authorships.parquet",
-    "data/tables/local/work_topics.parquet",
-    "data/runs/local/tables/author_work.csv",
-    "data/runs/local/tables/indices.csv",
-    "data/runs/local/tables/ratings.csv",
-    "data/passports/resolved_entity.json",
-    "data/passports/fetch_meta.json",
-    "data/passports/quality_report.json",
-    "data/passports/slice_passport.json",
-    "data/passports/calculation_passport.json",
-]
-
-
 def build_passports(
     cfg: SliceConfig,
     root: str | Path = ".",
-    out_dir: str | Path = "data/passports",
+    out_dir: str | Path | None = None,
     *,
-    run_id: str = "base",
+    run_id: str = "",
     dump_id: str = "",
     analysis_eligibility: dict[str, Any] | None = None,
     input_tables: dict[str, Any] | None = None,
     primary_artifacts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if not primary_artifacts:
+        raise ValueError("primary_artifacts is required")
     root_path = Path(root)
     data_root = _data_root(root_path)
-    out = root_path / out_dir
+    out = _passport_out_dir(root_path, data_root, out_dir, run_id)
     out.mkdir(parents=True, exist_ok=True)
 
     slice_passport = {
@@ -50,7 +34,6 @@ def build_passports(
         "source_mode": "openalex_cli_filtered_metadata",
         "api_base": "https://api.openalex.org",
         "vak_mapping_status": "не указано",
-        "resolved_entities_file": "data/passports/resolved_entity.json",
         "resolved_entity": {
             "entity_level": cfg.entity_level,
             "entity_id_short": cfg.entity_id_short,
@@ -133,7 +116,6 @@ def build_passports(
         },
         "iupv": {
             "formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
-            "formula_version": "v2_percentile_geometric_mean",
             "percentile_scope": "current slice within each fraction_mode",
             "status": "experimental",
             "unused_previous_parameters": {"n0": cfg.iupv_n0, "lambda": cfg.iupv_lambda},
@@ -145,14 +127,12 @@ def build_passports(
             "epsilon": 0.01,
             "tau": 0.50,
             "lambda": 0.30,
-            "formula_version": "mvp_v1",
             "status": "own_formula",
         },
         "lrdi": {
             "p0": cfg.lrdi_p0,
             "lambda": cfg.lrdi_lambda,
             "analysis_year": cfg.analysis_year,
-            "formula_version": "v1",
             "status": "experimental",
         },
     }
@@ -183,26 +163,12 @@ def build_passports(
     write_json(out / "slice_passport.json", slice_passport)
     write_json(out / "calculation_passport.json", calculation_passport)
 
-    if primary_artifacts is None:
-        checksums = {
-            rel: sha256_file(_artifact_path(root_path, data_root, rel))
-            for rel in PRIMARY_ARTIFACTS
-            if _artifact_path(root_path, data_root, rel).is_file()
-        }
-        checksums.update(_dynamic_primary_artifacts(root_path, data_root, cfg))
-        checksum_notes = [
-            "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
-            "CLI raw dumps live under data/raw/openalex_cli/{slice_id}/ outside the repository.",
-            "Primary checksums were built from the provided artifact list.",
-        ]
-        manifest_path = _write_sha256_manifest(root_path, data_root, cfg.slice_name, checksums)
-    else:
-        checksums = _primary_artifact_checksums(primary_artifacts)
-        checksum_notes = [
-            "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
-            "Primary checksums were built from scoped dump/run artifacts.",
-        ]
-        manifest_path = _write_sha256_manifest_for_out_dir(out, checksums)
+    checksums = _primary_artifact_checksums(primary_artifacts)
+    checksum_notes = [
+        "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
+        "Primary checksums were built from scoped dump/run artifacts.",
+    ]
+    manifest_path = _write_sha256_manifest_for_out_dir(out, checksums)
     checksums_doc = {
         "algorithm": "SHA-256",
         "slice_id": cfg.slice_name,
@@ -214,36 +180,12 @@ def build_passports(
     return checksums_doc
 
 
-def _write_sha256_manifest(root_path: Path, data_root: Path, slice_id: str, checksums: dict[str, str]) -> Path:
-    del root_path
-    out = data_root / "checksums" / slice_id
-    out.mkdir(parents=True, exist_ok=True)
-    manifest = out / "sha256_manifest.txt"
-    lines = [f"{digest}  {rel}" for rel, digest in sorted(checksums.items())]
-    manifest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8", newline="\n")
-    return manifest
-
-
 def _write_sha256_manifest_for_out_dir(out: Path, checksums: dict[str, str]) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     manifest = out / "sha256_manifest.txt"
     lines = [f"{digest}  {rel}" for rel, digest in sorted(checksums.items())]
     manifest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8", newline="\n")
     return manifest
-
-
-def _dynamic_primary_artifacts(root_path: Path, data_root: Path, cfg: SliceConfig) -> dict[str, str]:
-    del root_path
-    artifacts: dict[str, str] = {}
-    raw_path = data_root / "raw" / "openalex_cli" / cfg.slice_name / "works.jsonl.gz"
-    if raw_path.is_file():
-        rel = str(Path("data") / raw_path.relative_to(data_root))
-        artifacts[rel] = sha256_file(raw_path)
-    dump_manifest = data_root / "raw" / "openalex_cli" / cfg.slice_name / "dump_manifest.json"
-    if dump_manifest.is_file():
-        rel = str(Path("data") / dump_manifest.relative_to(data_root))
-        artifacts[rel] = sha256_file(dump_manifest)
-    return artifacts
 
 
 def _primary_artifact_checksums(primary_artifacts: dict[str, Any]) -> dict[str, str]:
@@ -269,10 +211,18 @@ def _data_root(root_path: Path) -> Path:
     return (root_path.parent / "openalex-dss-data").resolve()
 
 
-def _artifact_path(root_path: Path, data_root: Path, rel: str) -> Path:
-    if rel == "data" or rel.startswith("data/"):
-        return data_root / rel.removeprefix("data/").lstrip("/")
-    return root_path / rel
+def _passport_out_dir(root_path: Path, data_root: Path, out_dir: str | Path | None, run_id: str) -> Path:
+    if out_dir is not None:
+        return root_path / Path(out_dir)
+    safe_run_id = _safe_path_component(run_id)
+    if not safe_run_id:
+        raise ValueError("run_id is required when out_dir is not provided")
+    return data_root / "runs" / safe_run_id / "passports"
+
+
+def _safe_path_component(value: str) -> str:
+    text = str(value or "").strip()
+    return "".join(ch if ch.isalnum() or ch in {"-", "_", "=", "."} else "_" for ch in text)
 
 
 def _display_path(root_path: Path, data_root: Path, path: Path) -> str:

@@ -24,6 +24,7 @@ global fallback files.
 | `runs/{run_id}/passports/slice_passport.json` | canonical | run | slice passport for report bundles |
 | `runs/{run_id}/passports/calculation_passport.json` | canonical | run | analysis/run passport and final-analysis eligibility |
 | `runs/{run_id}/passports/checksums.json` | canonical | run | scoped checksum manifest for report bundles |
+| `runs/{run_id}/passports/sha256_manifest.txt` | canonical | run | plain-text SHA-256 manifest beside `checksums.json` |
 | `runs/{run_id}/passports/pipeline_summary.json` | canonical | run | pipeline summary for report bundles |
 | `runs/{run_id}/reports/report_{report_scope_hash}.json` | canonical | report | reproducible report bundle for an analysis scope |
 | `workbench/active_context.json` | pointer | active context | small pointer to the current active `run_id` and `dump_id` |
@@ -55,6 +56,9 @@ global fallback files.
   checksum manifests are written beside
   `runs/{run_id}/passports/checksums.json` as
   `runs/{run_id}/passports/sha256_manifest.txt`.
+- Passport generation requires the pipeline to provide an explicit scoped
+  primary artifact map. It does not scan global normalized/results/passport
+  paths and does not write shared checksum manifests outside the run scope.
 - Run archiving records/copies `run_id` artifacts from scoped compute outputs
   and dump tables from the scoped input table manifest. It does not use
   global fallback table paths as the archive source.

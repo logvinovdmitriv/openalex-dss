@@ -244,53 +244,19 @@ def report_bundle_json(
     baseline_metric: str = "h",
     rank_top_n: int = 100,
 ) -> dict[str, Any]:
-    filters = _clean_filters(filters or {})
-    scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
-    baseline_metric = str(baseline_metric or "h").strip() or "h"
-    rank_top_n = max(1, min(int(rank_top_n or 100), 1000))
-    cohort: dict[str, Any] = {}
-    cohort_ctx: dict[str, Any] = {}
-    if cohort_id:
-        cohort_ctx = cohorts.resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
-        cohort = cohort_ctx["cohort"]
-        run_id = cohort_ctx["run_id"]
-        dump_id = cohort_ctx["dump_id"]
-        filters = cohort_ctx["filters"]
-        cohort_filter_policy = str(cohort_ctx.get("filter_policy") or cohort_filter_policy or "membership")
-    scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
-    run_id = scope["run_id"]
-    dump_id = scope["dump_id"]
-    report_scope = _report_scope(
+    return build_report_bundle(
+        metric=metric,
+        fraction_mode=fraction_mode,
+        limit=limit,
         run_id=run_id,
         dump_id=dump_id,
         filters=filters,
         cohort_id=cohort_id,
-        cohort_checksum=str(cohort.get("checksum") or ""),
-        cohort_n_authors=int(cohort.get("n_authors") or 0),
-        cohort_membership_filters=cohort_ctx.get("membership_filters") or cohort.get("filters") or {},
         cohort_filter_policy=cohort_filter_policy,
-        metric=metric,
-        fraction_mode=fraction_mode,
-        limit=limit,
-        scientometric_metrics=scientometric_metric_list,
+        scientometric_metrics=scientometric_metrics,
         baseline_metric=baseline_metric,
         rank_top_n=rank_top_n,
     )
-    if not run_id:
-        return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
-    path = _report_bundle_path(run_id, report_scope["report_scope_hash"])
-    if path.exists():
-        cached = _read_json(path)
-        cached_dump_id = str(cached.get("dump_id") or "").strip()
-        if run_id and dump_id and cached_dump_id != dump_id:
-            if cached_dump_id:
-                raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
-            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
-        if not _cached_report_bundle_current(cached, cohort_id=cohort_id):
-            return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
-        if not run_id or cached.get("status") != "incomplete_run_artifacts":
-            return cached
-    return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
 
 
 def _quality_funnel(quality: dict[str, Any], *, run_id: str = "") -> list[dict[str, Any]]:
@@ -398,39 +364,6 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
         "report_scope": report_scope,
         "message": "Final report build requires explicit run_id with run-scoped passports, checksums and local metric tables.",
     }
-
-
-def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = "") -> bool:
-    if cached.get("schema") != REPORT_BUNDLE_SCHEMA:
-        return False
-    for key in ("report_scope", "cohort_context", "warnings", "exports", "export_notes", "scientometric_analysis"):
-        if key not in cached:
-            return False
-    if cohort_id and not ((cached.get("exports") or {}).get("cohort_statistics_json")):
-        return False
-    required_export_keys = (
-        "scientometrics_json",
-        "scientometrics_descriptive_csv",
-        "scientometrics_correlations_csv",
-        "scientometrics_rank_shifts_csv",
-        "scientometrics_largest_rank_shifts_csv",
-        "scientometrics_outliers_csv",
-        "scientometrics_top_outliers_csv",
-        "scientometrics_findings_csv",
-        "scientometrics_conclusion_md",
-    )
-    if cached.get("run_id") or cached.get("dump_id"):
-        required_export_keys = (
-            *required_export_keys,
-            "local_indices_csv",
-            "local_works_csv",
-            "local_authorships_csv",
-            "local_work_topics_csv",
-        )
-    for key in required_export_keys:
-        if not ((cached.get("exports") or {}).get(key)):
-            return False
-    return True
 
 
 def _report_warnings(cohort_filter_policy: str) -> list[str]:

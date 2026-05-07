@@ -902,7 +902,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIn("quality", bundle["missing_artifacts"])
         self.assertNotIn("quality_report", bundle)
 
-    def test_cached_report_bundle_rejects_foreign_dump_scope(self) -> None:
+    def test_report_bundle_json_rebuilds_instead_of_reading_cached_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = root / "runs" / "run_a"
@@ -922,17 +922,18 @@ class PipelineIntegrityTests(unittest.TestCase):
             report_path = run_dir / "reports" / f"report_{scope['report_scope_hash']}.json"
             report_path.parent.mkdir(parents=True)
             report_path.write_text(json.dumps({"status": "ok", "run_id": "run_a", "dump_id": "dump_b"}), encoding="utf-8")
+            rebuilt = {"schema": "report_bundle", "status": "ok", "run_id": "run_a", "dump_id": "dump_a", "rebuilt": True}
 
             with (
                 patch.object(reports, "DATA", root),
-                patch.object(warehouse, "DATA", root),
+                patch.object(reports, "build_report_bundle", return_value=rebuilt) as build,
             ):
-                with self.assertRaises(ValueError) as raised:
-                    reports.report_bundle_json(run_id="run_a")
+                payload = reports.report_bundle_json(run_id="run_a")
 
-        self.assertIn("incompatible", str(raised.exception))
+        self.assertTrue(payload["rebuilt"])
+        build.assert_called_once()
 
-    def test_report_bundle_json_rebuilds_stale_schema_cache(self) -> None:
+    def test_report_bundle_json_ignores_existing_report_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             scope = reports._report_scope(
@@ -950,7 +951,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             cached_path.parent.mkdir(parents=True)
             cached_path.write_text(
                 json.dumps({
-                    "schema": "report_bundle_old",
+                    "schema": "report_bundle",
                     "status": "ok",
                     "run_id": "run_a",
                     "dump_id": "dump_a",

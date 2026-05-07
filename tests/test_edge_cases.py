@@ -127,7 +127,7 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertFalse(result["compatible"])
         self.assertIn("search", result["reasons"][0])
 
-    def test_raw_cli_dump_hash_is_primary_checksum_artifact(self) -> None:
+    def test_build_passports_requires_scoped_primary_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data = root / "data"
@@ -142,9 +142,10 @@ class EdgeCaseTests(unittest.TestCase):
             (raw_dir / "dump_manifest.json").write_text("{}", encoding="utf-8")
 
             with patch.dict(os.environ, {"OPENALEX_DSS_DATA_DIR": str(data)}):
-                checksums = build_passports(cfg, Path(__file__).resolve().parents[1], data / "passports")
+                with self.assertRaises(ValueError) as raised:
+                    build_passports(cfg, Path(__file__).resolve().parents[1])
 
-            self.assertIn("data/raw/openalex_cli/slice_checksum/works.jsonl.gz", checksums["primary_artifacts"])
+            self.assertIn("primary_artifacts is required", str(raised.exception))
 
     def test_build_passports_can_checksum_scoped_primary_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -168,7 +169,7 @@ class EdgeCaseTests(unittest.TestCase):
                 checksums = build_passports(
                     cfg,
                     Path(__file__).resolve().parents[1],
-                    data / "runs/run_a/passports",
+                    run_id="run_a",
                     primary_artifacts={
                         "dump/tables/works.parquet": {"path": str(works)},
                         "run/tables/indices.csv": str(indices),
