@@ -176,17 +176,19 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     }
     fetch_meta_path = _write_dump_fetch_meta(dump_id, fetch_meta)
     run_id = str(payload.get("run_id") or "local_file")
+    extra_primary_artifacts = {
+        "dump/fetch_meta.json": fetch_meta_path,
+        "dump/quality_report.json": quality_report,
+    }
+    if dump_manifest_path:
+        extra_primary_artifacts["dump/dump_manifest.json"] = dump_manifest_path
     compute = _run_compute(
         cfg,
         run_id=run_id,
         dump_id=dump_id,
         analysis_eligibility=analysis_eligibility,
         input_tables=input_tables,
-        extra_primary_artifacts={
-            **_dump_provenance_primary_artifacts(dump_id),
-            "dump/fetch_meta.json": fetch_meta_path,
-            "dump/quality_report.json": quality_report,
-        },
+        extra_primary_artifacts=extra_primary_artifacts,
     )
     _write_pipeline_summary("import_local_file", cfg, {**payload, "run_id": run_id, "source_file": profile, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(

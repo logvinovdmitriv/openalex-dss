@@ -212,6 +212,9 @@ class PipelineIntegrityTests(unittest.TestCase):
             raw = root / "works.jsonl"
             raw.write_text(json.dumps(_work("W1")) + "\n", encoding="utf-8")
             profile = {"path": str(raw), "bytes": raw.stat().st_size, "sha256": "raw-sha"}
+            stale_manifest = root / "data" / "dumps" / "dump_scope" / "dump_manifest.json"
+            stale_manifest.parent.mkdir(parents=True)
+            stale_manifest.write_text(json.dumps({"dump_id": "stale_dump"}), encoding="utf-8")
 
             with (
                 patch.object(pipeline, "DATA", root / "data"),
