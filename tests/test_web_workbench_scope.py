@@ -99,6 +99,168 @@ class WebWorkbenchScopeTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_slice_payload_normalizes_full_openalex_subject_url(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is not available")
+        esbuild_check = subprocess.run(
+            ["node", "-e", "import('esbuild').catch(() => process.exit(1))"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if esbuild_check.returncode != 0:
+            self.skipTest("esbuild is not available")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            entry = tmp_path / "slice_payload_entry.ts"
+            out = tmp_path / "slice_payload_entry.mjs"
+            entry.write_text(
+                textwrap.dedent(
+                    f"""
+                    import {{ buildSliceDefinitionPayload }} from {json.dumps(str(ROOT / "apps/web/src/workbench.ts"))};
+
+                    const payload = buildSliceDefinitionPayload({{
+                      subject_level: "topic",
+                      subject_id: "https://openalex.org/T10260",
+                      subject_name: "Software Engineering Research",
+                      filter_mode: "primary_topic",
+                      keyword_id: "",
+                      keyword_name: "",
+                      text_search_query: "",
+                      author_id: "",
+                      author_name: "",
+                      author_orcid: "",
+                      institution_id: "",
+                      institution_name: "",
+                      institution_ror: "",
+                      source_id: "",
+                      source_name: "",
+                      source_type: "",
+                      language: "",
+                      open_access_is_oa: "",
+                      has_abstract: "",
+                      min_cited_by_count: "",
+                      doi: "",
+                      affiliation_mode: "historical",
+                      country_code: "",
+                      from_publication_date: "2021-01-01",
+                      to_publication_date: "2026-12-31",
+                      work_type: "",
+                    }});
+
+                    if (payload.entity_id_short !== "T10260") {{
+                      throw new Error(`expected short topic id, got ${{payload.entity_id_short}}`);
+                    }}
+                    if (payload.entity_id_full !== "https://openalex.org/T10260") {{
+                      throw new Error(`expected canonical topic URL, got ${{payload.entity_id_full}}`);
+                    }}
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            build = subprocess.run(
+                [
+                    "node",
+                    "-e",
+                    (
+                        "import('esbuild').then(({build}) => "
+                        f"build({{entryPoints:[{json.dumps(str(entry))}], bundle:true, platform:'node', "
+                        f"format:'esm', outfile:{json.dumps(str(out))}}}))"
+                    ),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+
+            result = subprocess.run(
+                ["node", str(out)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_filters_from_slice_payload_restores_saved_slice_fields(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is not available")
+        esbuild_check = subprocess.run(
+            ["node", "-e", "import('esbuild').catch(() => process.exit(1))"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if esbuild_check.returncode != 0:
+            self.skipTest("esbuild is not available")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            entry = tmp_path / "filters_from_slice_entry.ts"
+            out = tmp_path / "filters_from_slice_entry.mjs"
+            entry.write_text(
+                textwrap.dedent(
+                    f"""
+                    import {{ filtersFromSlicePayload }} from {json.dumps(str(ROOT / "apps/web/src/workbench.ts"))};
+                    import {{ DEFAULT_FILTERS }} from {json.dumps(str(ROOT / "apps/web/src/domain.ts"))};
+
+                    const filters = filtersFromSlicePayload({{
+                      entity_level: "topic",
+                      entity_id_short: "T10260",
+                      entity_display_name: "Software Engineering Research",
+                      filter_mode: "primary_topic",
+                      institution_id: "I1",
+                      institution_display_name: "Test University",
+                      country_code: "ru",
+                      from_publication_date: "2021-01-01",
+                      to_publication_date: "2026-12-31",
+                      work_type: "article",
+                      min_cited_by_count: 3,
+                    }}, DEFAULT_FILTERS);
+
+                    if (filters.subject_id !== "T10260" || filters.subject_name !== "Software Engineering Research") {{
+                      throw new Error(`subject was not restored: ${{JSON.stringify(filters)}}`);
+                    }}
+                    if (filters.country_code !== "RU" || filters.institution_name !== "Test University" || filters.min_cited_by_count !== "3") {{
+                      throw new Error(`scoped fields were not restored: ${{JSON.stringify(filters)}}`);
+                    }}
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            build = subprocess.run(
+                [
+                    "node",
+                    "-e",
+                    (
+                        "import('esbuild').then(({build}) => "
+                        f"build({{entryPoints:[{json.dumps(str(entry))}], bundle:true, platform:'node', "
+                        f"format:'esm', outfile:{json.dumps(str(out))}}}))"
+                    ),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+
+            result = subprocess.run(
+                ["node", str(out)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_local_data_missing_scope_state_distinguishes_empty_active_context(self) -> None:
         if not shutil.which("node"):
             self.skipTest("node is not available")
@@ -127,12 +289,12 @@ class WebWorkbenchScopeTests(unittest.TestCase):
                     }}
 
                     const noContext = localDataMissingScopeState({{}});
-                    if (noContext.missing !== true || !noContext.detail.includes("нужен активный run_id")) {{
+                    if (noContext.missing !== true || !noContext.detail.includes("нужен активный расчет")) {{
                       throw new Error(`expected missing active context detail, got ${{JSON.stringify(noContext)}}`);
                     }}
 
                     const emptyActive = localDataMissingScopeState({{ activeContext: {{ source: "stale" }} }});
-                    if (emptyActive.missing !== true || !emptyActive.detail.includes("не содержит run_id")) {{
+                if (emptyActive.missing !== true || !emptyActive.detail.includes("не содержит расчета или локального среза")) {{
                       throw new Error(`expected empty active context detail, got ${{JSON.stringify(emptyActive)}}`);
                     }}
                     """

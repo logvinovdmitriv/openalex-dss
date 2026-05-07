@@ -5,7 +5,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 
 def ensure_parent(path: str | Path) -> Path:
@@ -79,9 +79,34 @@ def write_parquet_dicts(path: str | Path, rows: Iterable[dict], fieldnames: list
         return 0
     data = [{key: row.get(key) for key in fieldnames} for row in rows]
     p = ensure_parent(path)
-    frame = pl.DataFrame(data) if data else pl.DataFrame({key: [] for key in fieldnames})
+    frame = pl.DataFrame(_parquet_columns(data, fieldnames)) if data else pl.DataFrame({key: [] for key in fieldnames})
     frame.write_parquet(p)
     return len(data)
+
+
+def _parquet_columns(rows: list[dict], fieldnames: list[str]) -> dict[str, list[Any]]:
+    return {field: _coerce_parquet_column([row.get(field) for row in rows]) for field in fieldnames}
+
+
+def _coerce_parquet_column(values: list[Any]) -> list[Any]:
+    observed = [value for value in values if value is not None]
+    if not observed:
+        return values
+    if all(isinstance(value, bool) for value in observed):
+        return values
+    if all(isinstance(value, int) and not isinstance(value, bool) for value in observed):
+        return values
+    if all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in observed):
+        return [float(value) if value is not None else None for value in values]
+    return [_parquet_string_value(value) for value in values]
+
+
+def _parquet_string_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple, dict)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
 
 
 def _csv_value(value: object) -> object:

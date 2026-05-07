@@ -41,4 +41,4 @@ def get_run(run_id: str) -> dict[str, Any]:
     try:
         return jobs.get_run(run_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Run not found") from exc
+        raise HTTPException(status_code=404, detail="Задача не найдена") from exc

@@ -13,11 +13,11 @@ from app.services.analysis_filters import clean_analysis_filters
 
 REPORT_BUNDLE_SCHEMA = "report_bundle"
 REPORT_SCOPE_SCHEMA = "report_scope"
-DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "islv")
+DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "cpp", "h", "i10", "g")
 
 
 def build_report_bundle(
-    metric: str = "islv",
+    metric: str = "h",
     fraction_mode: str = "strict_authors_count",
     limit: int = 50,
     *,
@@ -29,8 +29,16 @@ def build_report_bundle(
     scientometric_metrics: list[str] | tuple[str, ...] | str | None = None,
     baseline_metric: str = "h",
     rank_top_n: int = 100,
+    data_filters: dict[str, Any] | None = None,
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
+    data_filters = warehouse.parse_column_filters(data_filters)
+    data_sort = str(data_sort or "").strip()
+    data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
+    data_limit = max(0, min(_int_value(data_limit, 0), 500_000))
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     baseline_metric = str(baseline_metric or "h").strip() or "h"
     rank_top_n = max(1, min(int(rank_top_n or 100), 1000))
@@ -64,6 +72,10 @@ def build_report_bundle(
             scientometric_metrics=scientometric_metric_list,
             baseline_metric=baseline_metric,
             rank_top_n=rank_top_n,
+            data_filters=data_filters,
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=data_limit,
         )
         return _preview_report(report_scope)
     report_scope = _report_scope(
@@ -81,6 +93,10 @@ def build_report_bundle(
         scientometric_metrics=scientometric_metric_list,
         baseline_metric=baseline_metric,
         rank_top_n=rank_top_n,
+        data_filters=data_filters,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
     )
     scope_hash = report_scope["report_scope_hash"]
     docs = _run_report_artifacts(run_id)
@@ -98,8 +114,9 @@ def build_report_bundle(
     request = state.get("request") or {}
     analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
 
-    top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500, run_id=run_id, dump_id=dump_id, author_ids=cohort_author_ids)
-    distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id, author_ids=cohort_author_ids)
+    data_selection_kwargs = _data_selection_kwargs(data_filters=data_filters, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit)
+    top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500, run_id=run_id, dump_id=dump_id, author_ids=cohort_author_ids, **data_selection_kwargs)
+    distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id, author_ids=cohort_author_ids, **data_selection_kwargs)
     resolved_dump_id = dump_id or str(top.get("dump_id") or calculation_passport.get("dump_id") or "")
     report_scope["dump_id"] = resolved_dump_id
     scientometric_analysis = scientometrics.build_scientometric_analysis(
@@ -112,6 +129,10 @@ def build_report_bundle(
         cohort_id=cohort_id,
         cohort_filter_policy=cohort_filter_policy,
         top_n=rank_top_n,
+        data_filters=data_filters,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
     )
     export_query = _query_params(
         {
@@ -123,6 +144,10 @@ def build_report_bundle(
             "dump_id": resolved_dump_id,
             "cohort_id": cohort_id,
             "cohort_filter_policy": cohort_filter_policy,
+            "data_filters": json.dumps(data_filters, ensure_ascii=False) if data_filters else "",
+            "data_sort": data_sort,
+            "data_direction": data_direction if data_sort else "",
+            "data_limit": data_limit if data_limit else "",
         }
     )
     statistics_query = _query_params(
@@ -132,6 +157,10 @@ def build_report_bundle(
             "run_id": run_id,
             "dump_id": resolved_dump_id,
             "cohort_filter_policy": cohort_filter_policy,
+            "data_filters": json.dumps(data_filters, ensure_ascii=False) if data_filters else "",
+            "data_sort": data_sort,
+            "data_direction": data_direction if data_sort else "",
+            "data_limit": data_limit if data_limit else "",
         }
     )
     bundle_query = _query_params(
@@ -147,6 +176,10 @@ def build_report_bundle(
             "scientometric_metrics": ",".join(scientometric_metric_list),
             "baseline_metric": baseline_metric,
             "rank_top_n": rank_top_n,
+            "data_filters": json.dumps(data_filters, ensure_ascii=False) if data_filters else "",
+            "data_sort": data_sort,
+            "data_direction": data_direction if data_sort else "",
+            "data_limit": data_limit if data_limit else "",
         }
     )
     scientometric_query = _query_params(
@@ -160,6 +193,10 @@ def build_report_bundle(
             "dump_id": resolved_dump_id,
             "cohort_id": cohort_id,
             "cohort_filter_policy": cohort_filter_policy,
+            "data_filters": json.dumps(data_filters, ensure_ascii=False) if data_filters else "",
+            "data_sort": data_sort,
+            "data_direction": data_direction if data_sort else "",
+            "data_limit": data_limit if data_limit else "",
         }
     )
     exports = {
@@ -179,7 +216,15 @@ def build_report_bundle(
         "report_bundle_json": f"/api/v1/reports/bundle.json?{bundle_query}" if bundle_query else "/api/v1/reports/bundle.json",
         "sha256_manifest": checksums.get("sha256_manifest"),
     }
-    exports.update(_local_data_csv_exports(run_id=run_id, dump_id=resolved_dump_id))
+    exports.update(
+        _local_data_csv_exports(
+            run_id=run_id,
+            dump_id=resolved_dump_id,
+            data_filters=data_filters,
+            data_sort=data_sort,
+            data_direction=data_direction,
+        )
+    )
 
     report = {
         "schema": REPORT_BUNDLE_SCHEMA,
@@ -188,13 +233,17 @@ def build_report_bundle(
         "dump_id": resolved_dump_id,
         "report_scope": report_scope,
         "filters": filters,
+        "data_filters": data_filters,
+        "data_sort": data_sort,
+        "data_direction": data_direction,
+        "data_limit": data_limit,
         "cohort_id": cohort_id,
         "cohort": _cohort_summary(cohort),
         "cohort_context": cohorts.cohort_context_summary(cohort_ctx) if cohort_ctx else None,
         "warnings": _report_warnings(cohort_filter_policy),
         "interpretation_policy": {
             "strict_mode": "Математические выводы строятся только по локально пересчитанным works-based индексам.",
-            "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения; корпус Works скачивается через OpenAlex CLI.",
+            "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения. Уже скачанные локальные срезы анализируются без API; новая загрузка через установленный загрузчик OpenAlex может требовать ключ OpenAlex.",
             "decision_boundary": "Метрики формируют пул кандидатов и объяснение, но не заменяют экспертное решение.",
         },
         "slice_passport": slice_passport,
@@ -234,7 +283,7 @@ def report_bundle_json(
     *,
     run_id: str = "",
     dump_id: str = "",
-    metric: str = "islv",
+    metric: str = "h",
     fraction_mode: str = "strict_authors_count",
     limit: int = 50,
     filters: dict[str, Any] | None = None,
@@ -243,6 +292,10 @@ def report_bundle_json(
     scientometric_metrics: list[str] | tuple[str, ...] | str | None = None,
     baseline_metric: str = "h",
     rank_top_n: int = 100,
+    data_filters: dict[str, Any] | None = None,
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> dict[str, Any]:
     return build_report_bundle(
         metric=metric,
@@ -256,6 +309,10 @@ def report_bundle_json(
         scientometric_metrics=scientometric_metrics,
         baseline_metric=baseline_metric,
         rank_top_n=rank_top_n,
+        data_filters=data_filters,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
     )
 
 
@@ -327,14 +384,27 @@ def _report_scope(
     scientometric_metrics: list[str] | tuple[str, ...] | None = None,
     baseline_metric: str = "h",
     rank_top_n: int = 100,
+    data_filters: dict[str, Any] | None = None,
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> dict[str, Any]:
     membership_filters = _clean_filters(cohort_membership_filters or {})
+    data_filters = warehouse.parse_column_filters(data_filters)
+    data_sort = str(data_sort or "").strip()
+    data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
+    data_limit = max(0, min(_int_value(data_limit, 0), 500_000))
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     canonical = {
         "schema": REPORT_SCOPE_SCHEMA,
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),
+        "data_filters": data_filters,
+        "data_filters_hash": _hash_dict(data_filters),
+        "data_sort": data_sort,
+        "data_direction": data_direction,
+        "data_limit": data_limit,
         "cohort_id": str(cohort_id or "").strip(),
         "cohort_checksum": str(cohort_checksum or "").strip(),
         "cohort_n_authors": int(cohort_n_authors or 0),
@@ -391,6 +461,13 @@ def _hash_dict(value: dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def _int_value(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _scientometric_metrics(metrics: list[str] | tuple[str, ...] | str | None) -> list[str]:
     if isinstance(metrics, str):
         raw = metrics.replace("|", ",").split(",")
@@ -411,19 +488,63 @@ def _query_params(params: dict[str, Any]) -> str:
     return urlencode(clean)
 
 
-def _local_data_csv_export(kind: str, *, run_id: str = "", dump_id: str = "") -> str:
-    query = _query_params({"kind": kind, "run_id": run_id, "dump_id": dump_id})
+def _data_selection_kwargs(*, data_filters: dict[str, Any], data_sort: str, data_direction: str, data_limit: int) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if data_filters:
+        out["data_filters"] = data_filters
+    if data_sort:
+        out["data_sort"] = data_sort
+        out["data_direction"] = data_direction
+    if data_limit > 0:
+        out["data_limit"] = data_limit
+    return out
+
+
+def _local_data_csv_export(
+    kind: str,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    data_filters: dict[str, Any] | None = None,
+    data_sort: str = "",
+    data_direction: str = "desc",
+) -> str:
+    query = _query_params(
+        {
+            "kind": kind,
+            "run_id": run_id,
+            "dump_id": dump_id,
+            "data_filters": json.dumps(data_filters, ensure_ascii=False) if data_filters else "",
+            "sort": data_sort,
+            "direction": data_direction if data_sort else "",
+        }
+    )
     return f"/api/v1/local-data/preview.csv?{query}"
 
 
-def _local_data_csv_exports(*, run_id: str = "", dump_id: str = "") -> dict[str, str]:
+def _local_data_csv_exports(
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    data_filters: dict[str, Any] | None = None,
+    data_sort: str = "",
+    data_direction: str = "desc",
+) -> dict[str, str]:
     if not (str(run_id or "").strip() or str(dump_id or "").strip()):
         return {}
     return {
-        "local_indices_csv": _local_data_csv_export("indices", run_id=run_id, dump_id=dump_id),
-        "local_works_csv": _local_data_csv_export("works", run_id=run_id, dump_id=dump_id),
-        "local_authorships_csv": _local_data_csv_export("authorships", run_id=run_id, dump_id=dump_id),
-        "local_work_topics_csv": _local_data_csv_export("work_topics", run_id=run_id, dump_id=dump_id),
+        "local_indices_csv": _local_data_csv_export(
+            "indices", run_id=run_id, dump_id=dump_id, data_filters=data_filters, data_sort=data_sort, data_direction=data_direction
+        ),
+        "local_works_csv": _local_data_csv_export(
+            "works", run_id=run_id, dump_id=dump_id, data_filters=data_filters, data_sort=data_sort, data_direction=data_direction
+        ),
+        "local_authorships_csv": _local_data_csv_export(
+            "authorships", run_id=run_id, dump_id=dump_id, data_filters=data_filters, data_sort=data_sort, data_direction=data_direction
+        ),
+        "local_work_topics_csv": _local_data_csv_export(
+            "work_topics", run_id=run_id, dump_id=dump_id, data_filters=data_filters, data_sort=data_sort, data_direction=data_direction
+        ),
     }
 
 

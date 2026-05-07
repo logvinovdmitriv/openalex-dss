@@ -1,10 +1,18 @@
-import { FRACTION_MODES, type ActiveFilters, countryLabel, filterParams, fmt } from "./domain";
+import { DEFAULT_FILTERS, FRACTION_MODES, type ActiveFilters, countryLabel, filterParams, fmt } from "./domain";
+import type { TableColumnFilters } from "./api";
 
-export type View = "slices" | "data" | "enrichment" | "rankings" | "cohorts" | "statistics" | "reports" | "passports";
+export type View = "slices" | "data" | "rankings" | "statistics" | "reports";
 export type ResolverTab = "subject" | "organization" | "author" | "source";
-export type CohortFilterPolicy = "membership" | "current" | "none";
 export type LocalDataKind = "works" | "authorships" | "work_topics" | "author_work" | "indices" | "ratings";
 export type ScientometricFindingSeverity = "high" | "medium" | "low" | "informational";
+export type DataSelectionParams = {
+  sort?: string;
+  direction?: "asc" | "desc";
+  limit?: number;
+  filters?: TableColumnFilters;
+  search?: string;
+  authorIds?: string[];
+};
 
 export type ScientometricFinding = {
   id: string;
@@ -173,6 +181,8 @@ export type WorkbenchWorkflow = {
 
 export type WorkbenchState = {
   tables?: Record<string, { rows?: number }>;
+  slices?: Array<Record<string, unknown>>;
+  materializations?: Array<Record<string, unknown>>;
   dumps?: Array<Record<string, unknown>>;
   workflow?: WorkbenchWorkflow;
   quality?: Record<string, unknown>;
@@ -226,12 +236,12 @@ export function localDataMissingScopeState(params: {
   if (hasActiveContext && !activeHasScope) {
     return {
       missing: true,
-      detail: "Active context существует, но не содержит run_id или dump_id. Материализуйте срез заново либо выберите существующий dump/run.",
+      detail: "Выбранный контекст существует, но не содержит расчета или локального среза. Скачайте срез заново либо выберите уже скачанный срез.",
     };
   }
   return {
     missing: true,
-    detail: "Для просмотра локальных данных нужен активный run_id или dump_id. Материализуйте срез либо выберите существующий dump/run.",
+    detail: "Для просмотра локальных данных нужен активный расчет или уже скачанный локальный срез. Материализуйте срез либо выберите существующий локальный срез.",
   };
 }
 
@@ -246,54 +256,43 @@ export type LocalDataSummary = {
 };
 
 export const LOCAL_DATA_KIND_OPTIONS: Array<{ value: LocalDataKind; label: string }> = [
+  { value: "indices", label: "Авторы и индексы" },
+  { value: "ratings", label: "Рейтинговые позиции" },
   { value: "works", label: "Работы" },
   { value: "authorships", label: "Авторства" },
   { value: "work_topics", label: "Темы работ" },
   { value: "author_work", label: "Автор-работа" },
-  { value: "indices", label: "Индексы авторов" },
-  { value: "ratings", label: "Позиции рейтингов" },
 ];
 
 export const VIEW_DEFINITIONS: Record<View, { label: string; lead: string }> = {
   slices: {
-    label: "Срез и загрузка",
-    lead: "В одном месте задается срез, выполняется оценка объема и настраивается скачивание локального пакета.",
+    label: "Срез",
+    lead: "В одном месте задается срез, выбирается уже скачанная версия, выполняется оценка объема и запускается скачивание.",
   },
   data: {
-    label: "Локальные данные",
-    lead: "Контроль сохраненных JSONL/Parquet/витрин без смешения с логикой отбора.",
-  },
-  enrichment: {
-    label: "Точечное обогащение",
-    lead: "Дозагрузка отдельных авторов, организаций, ORCID/ROR и работ без смешения с локальными индексами среза.",
+    label: "Данные",
+    lead: "Единая таблица выбранного среза: выбор таблицы, фильтр, min/max, сортировка по столбцам и TOP-N.",
   },
   rankings: {
     label: "Индексы и рейтинги",
-    lead: "Локальные индексы считаются только по работам выбранного среза.",
-  },
-  cohorts: {
-    label: "Когорты авторов",
-    lead: "Фиксируйте Top-N или ручную выборку авторов перед статистикой и отчетом.",
+    lead: "Индексы показываются по выборке, настроенной во вкладке “Данные”.",
   },
   statistics: {
-    label: "Сравнение и статистика",
-    lead: "Корреляции, распределения и устойчивость рейтингов считаются для выбранной авторской когорты.",
+    label: "Аналитика",
+    lead: "Распределения, корреляции и выводы считаются по выборке, настроенной во вкладке “Данные”.",
   },
   reports: {
     label: "Отчеты",
-    lead: "Экспорт таблиц, графиков и воспроизводимого пакета.",
-  },
-  passports: {
-    label: "Паспорта",
-    lead: "Паспорта среза, дампа, расчета и качества данных.",
+    lead: "Пакет отчета, локальные выгрузки и паспорта воспроизводимости.",
   },
 };
 
 export function buildSliceDefinitionPayload(filters: ActiveFilters): SliceDefinitionPayload {
+  const subjectId = shortOpenAlexId(filters.subject_id);
   return {
     entity_level: filters.subject_level,
-    entity_id_short: filters.subject_id,
-    entity_id_full: openAlexEntityUrl(filters.subject_level, filters.subject_id),
+    entity_id_short: subjectId,
+    entity_id_full: openAlexEntityUrl(filters.subject_level, subjectId || filters.subject_id),
     entity_display_name: filters.subject_name,
     filter_mode: filters.filter_mode,
     keyword_id: filters.keyword_id,
@@ -321,6 +320,41 @@ export function buildSliceDefinitionPayload(filters: ActiveFilters): SliceDefini
     include_xpac: false,
     exclude_retracted: true,
     exclude_paratext: true,
+  };
+}
+
+export function filtersFromSlicePayload(payload: Record<string, unknown> | null | undefined, fallback: ActiveFilters = DEFAULT_FILTERS): ActiveFilters {
+  const raw = payload && typeof payload === "object" && "technical_payload" in payload && typeof payload.technical_payload === "object"
+    ? payload.technical_payload as Record<string, unknown>
+    : payload ?? {};
+  return {
+    ...fallback,
+    subject_level: stringField(raw.entity_level, fallback.subject_level),
+    subject_id: stringField(raw.entity_id_short, stringField(raw.entity_id_full, fallback.subject_id)),
+    subject_name: stringField(raw.entity_display_name, fallback.subject_name),
+    filter_mode: stringField(raw.filter_mode, fallback.filter_mode || "all"),
+    keyword_id: stringField(raw.keyword_id, fallback.keyword_id),
+    keyword_name: stringField(raw.keyword_display_name, fallback.keyword_name),
+    text_search_query: stringField(raw.text_search_query, fallback.text_search_query),
+    author_id: stringField(raw.author_id, fallback.author_id),
+    author_name: stringField(raw.author_display_name, fallback.author_name),
+    author_orcid: stringField(raw.author_orcid, fallback.author_orcid),
+    institution_id: stringField(raw.institution_id, fallback.institution_id),
+    institution_name: stringField(raw.institution_display_name, fallback.institution_name),
+    institution_ror: stringField(raw.institution_ror, fallback.institution_ror),
+    source_id: stringField(raw.source_id, fallback.source_id),
+    source_name: stringField(raw.source_display_name, fallback.source_name),
+    source_type: stringField(raw.source_type, fallback.source_type),
+    language: stringField(raw.language, fallback.language),
+    open_access_is_oa: stringField(raw.open_access_is_oa, fallback.open_access_is_oa),
+    has_abstract: stringField(raw.has_abstract, fallback.has_abstract),
+    min_cited_by_count: numericStringField(raw.min_cited_by_count, fallback.min_cited_by_count),
+    doi: stringField(raw.doi, fallback.doi),
+    affiliation_mode: stringField(raw.affiliation_mode, fallback.affiliation_mode),
+    country_code: stringField(raw.country_code, fallback.country_code).toUpperCase(),
+    from_publication_date: stringField(raw.from_publication_date, fallback.from_publication_date),
+    to_publication_date: stringField(raw.to_publication_date, fallback.to_publication_date),
+    work_type: stringField(raw.work_type, fallback.work_type),
   };
 }
 
@@ -364,7 +398,9 @@ export function bytesToMb(value: number) {
 }
 
 export function mutationError(error: unknown) {
-  return error instanceof Error ? error.message : "";
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string") return error;
+  return "Действие не выполнено. Проверьте параметры и повторите попытку.";
 }
 
 export function viewFromHash(hash: string): View {
@@ -384,7 +420,7 @@ export function pageLead(view: View) {
 export function progressForRun(run?: WorkbenchRun | null) {
   if (!run) return { percent: 0, label: "Ожидание запуска" };
   if (typeof run.progress_percent === "number") {
-    return { percent: clampProgress(run.progress_percent), label: run.progress_stage || run.status || "Выполнение" };
+    return { percent: clampProgress(run.progress_percent), label: humanRunStage(run.progress_stage, run.status, run.action) };
   }
   if (run.status === "queued") return { percent: 8, label: "В очереди" };
   if (run.status === "running") return { percent: 55, label: "Выполнение" };
@@ -393,12 +429,33 @@ export function progressForRun(run?: WorkbenchRun | null) {
   return { percent: 0, label: run.status || "Ожидание" };
 }
 
-export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", cohortId = "", cohortFilterPolicy: CohortFilterPolicy = "membership") {
-  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId, cohort_id: cohortId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
+function humanRunStage(stage: unknown, status?: string, action?: string) {
+  const raw = String(stage || "").trim();
+  if (status === "completed") return "Готово";
+  if (status === "failed") return "Ошибка";
+  if (raw.includes("OpenAlex") || raw.includes("Упаковано") || raw.includes("Нормализация")) return raw.replaceAll("OpenAlex CLI", "загрузчик OpenAlex").replaceAll("CLI", "OpenAlex");
+  const known: Record<string, string> = {
+    queued: "В очереди",
+    starting: "Запуск",
+    preparing: "Подготовка",
+    running: "Выполнение",
+    "fetching mini-dump": "Загрузка локального среза",
+    "fetching and building local mart": "Загрузка и построение локального среза",
+    "computing indices": "Расчет индексов",
+    "normalizing local file": "Нормализация локального среза",
+    "packing CLI JSON files": "Упаковка файлов OpenAlex",
+  };
+  if (known[raw]) return known[raw];
+  if (status === "running" && (action === "build_from_openalex" || action === "fetch_slice_dump")) return "Загрузка среза";
+  return raw || status || "Выполнение";
 }
 
-export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, cohortId = "", cohortFilterPolicy: CohortFilterPolicy = "membership") {
-  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, cohort_id: cohortId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
+export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", dataQuery = "", dataSelection?: DataSelectionParams) {
+  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection) }).toString()}`;
+}
+
+export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, dataQuery = "", dataSelection?: DataSelectionParams) {
+  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection) }).toString()}`;
 }
 
 export function localDataSummaryUrl(runId = "", dumpId = "") {
@@ -409,21 +466,31 @@ export function localDataSummaryUrl(runId = "", dumpId = "") {
   return `/local-data/summary${query ? `?${query}` : ""}`;
 }
 
-export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number } = {}) {
+export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number; sort?: string; direction?: string; fractionMode?: string; dataFilters?: TableColumnFilters } = {}) {
   const query = new URLSearchParams({ kind });
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.runId) query.set("run_id", params.runId);
   if (params.dumpId) query.set("dump_id", params.dumpId);
-  if (params.limit) query.set("limit", String(params.limit));
+  if (params.limit !== undefined) query.set("limit", String(Math.max(0, Number(params.limit) || 0)));
+  if (params.sort) query.set("sort", params.sort);
+  if (params.direction) query.set("direction", params.direction);
+  if (params.fractionMode) query.set("fraction_mode", params.fractionMode);
+  const encodedFilters = encodeColumnFilters(params.dataFilters);
+  if (encodedFilters) query.set("data_filters", encodedFilters);
   return `/local-data/preview?${query.toString()}`;
 }
 
-export function localDataPreviewCsvUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number } = {}) {
+export function localDataPreviewCsvUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number; sort?: string; direction?: string; fractionMode?: string; dataFilters?: TableColumnFilters } = {}) {
   const query = new URLSearchParams({ kind });
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.runId) query.set("run_id", params.runId);
   if (params.dumpId) query.set("dump_id", params.dumpId);
-  if (params.limit) query.set("limit", String(params.limit));
+  if (params.limit !== undefined) query.set("limit", String(Math.max(0, Number(params.limit) || 0)));
+  if (params.sort) query.set("sort", params.sort);
+  if (params.direction) query.set("direction", params.direction);
+  if (params.fractionMode) query.set("fraction_mode", params.fractionMode);
+  const encodedFilters = encodeColumnFilters(params.dataFilters);
+  if (encodedFilters) query.set("data_filters", encodedFilters);
   return `/local-data/preview.csv?${query.toString()}`;
 }
 
@@ -435,8 +502,8 @@ export function scientometricsUrl(params: {
   rankTopN: number;
   runId?: string;
   dumpId?: string;
-  cohortId?: string;
-  cohortFilterPolicy?: CohortFilterPolicy;
+  dataQuery?: string;
+  dataSelection?: DataSelectionParams;
 }) {
   const query = filterParams(params.filters, {
     fraction_mode: params.fractionMode,
@@ -445,23 +512,62 @@ export function scientometricsUrl(params: {
     top_n: params.rankTopN,
     run_id: params.runId ?? "",
     dump_id: params.dumpId ?? "",
-    cohort_id: params.cohortId ?? "",
-    cohort_filter_policy: params.cohortFilterPolicy ?? "membership",
+    q: params.dataQuery ?? "",
+    ...dataSelectionQuery(params.dataSelection),
   });
   return `/analytics/scientometrics?${query.toString()}`;
 }
 
-export function cohortAuthorMetricsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", format: "csv" | "json" = "csv", cohortFilterPolicy: CohortFilterPolicy = "membership") {
-  return `/cohorts/${encodeURIComponent(cohortId)}/author-metrics.${format}?${filterParams(filters, { fraction_mode: fractionMode, metric, run_id: runId, dump_id: dumpId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
+export function dataSelectionQuery(selection?: DataSelectionParams) {
+  const encodedFilters = encodeColumnFilters(selection?.filters);
+  const sort = String(selection?.sort ?? "").trim();
+  const limit = Number(selection?.limit ?? 0);
+  const search = String(selection?.search ?? "").trim();
+  const authorIds = (selection?.authorIds ?? []).map((item) => String(item).trim()).filter(Boolean);
+  return {
+    data_filters: encodedFilters,
+    data_search: search,
+    data_sort: sort,
+    data_direction: sort ? selection?.direction ?? "desc" : "",
+    data_limit: Number.isFinite(limit) && limit > 0 ? String(limit) : "",
+    author_ids: authorIds.join(","),
+  };
 }
 
-export function cohortStatisticsUrl(cohortId: string, filters: ActiveFilters, fractionMode: string, runId = "", dumpId = "", cohortFilterPolicy: CohortFilterPolicy = "membership") {
-  return `/cohorts/${encodeURIComponent(cohortId)}/statistics?${filterParams(filters, { fraction_mode: fractionMode, run_id: runId, dump_id: dumpId, cohort_filter_policy: cohortFilterPolicy }).toString()}`;
+export function encodeColumnFilters(filters?: TableColumnFilters) {
+  const clean: TableColumnFilters = {};
+  for (const [field, filter] of Object.entries(filters ?? {})) {
+    const contains = String(filter.contains ?? "").trim();
+    const min = String(filter.min ?? "").trim();
+    const max = String(filter.max ?? "").trim();
+    if (!contains && !min && !max) continue;
+    clean[field] = {};
+    if (contains) clean[field].contains = contains;
+    if (min) clean[field].min = min;
+    if (max) clean[field].max = max;
+  }
+  return Object.keys(clean).length ? JSON.stringify(clean) : "";
 }
 
 function openAlexEntityUrl(level: string, id: string) {
   if (!level || !id) return "";
+  if (/^https?:\/\//i.test(id)) return id;
   return level === "topic" ? `https://openalex.org/${id}` : `https://openalex.org/${level}s/${id}`;
+}
+
+function stringField(value: unknown, fallback = "") {
+  const clean = String(value ?? "").trim();
+  return clean || fallback;
+}
+
+function numericStringField(value: unknown, fallback = "") {
+  if (value === null || value === undefined || value === "") return fallback;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric !== 0 ? String(numeric) : fallback;
+}
+
+function shortOpenAlexId(value: string) {
+  return value.trim().replace(/\/+$/, "").split("/").pop() ?? "";
 }
 
 function clampProgress(value: number) {

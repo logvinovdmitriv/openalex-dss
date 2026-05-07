@@ -57,6 +57,12 @@ def build_scientometric_analysis(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     top_n: int = 100,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    author_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> dict[str, Any]:
     context = _analysis_context(
         fraction_mode=fraction_mode,
@@ -68,6 +74,12 @@ def build_scientometric_analysis(
         cohort_id=cohort_id,
         cohort_filter_policy=cohort_filter_policy,
         top_n=top_n,
+        data_filters=data_filters,
+        data_search=data_search,
+        author_ids=author_ids,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
     )
     selected_metrics = context["metrics"]
     baseline_metric = context["baseline_metric"]
@@ -112,10 +124,16 @@ def build_scientometric_analysis(
         "dump_id": dump_id,
         "fraction_mode": fraction_mode,
         "filters": resolved_filters,
+        "data_filters": context["data_filters"],
+        "data_search": context["data_search"],
+        "selected_author_ids": sorted(context["explicit_author_ids"]) if context.get("explicit_author_ids") else [],
+        "data_sort": context["data_sort"],
+        "data_direction": context["data_direction"],
+        "data_limit": context["data_limit"],
         "cohort_id": cohort_id,
         "cohort_filter_policy": cohort_filter_policy,
         "baseline_metric": baseline_metric,
-        "analysis_author_scope": "all_resolved_authors",
+        "analysis_author_scope": "data_page_selection",
         "rank_top_n": rank_top_n,
         "n_authors": len(rows),
         "metric_scope": "filtered_recomputed",
@@ -251,6 +269,12 @@ def build_rank_shift_export_rows(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     top_n: int = 100,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    author_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> list[dict[str, Any]]:
     context = _analysis_context(
         fraction_mode=fraction_mode,
@@ -262,6 +286,10 @@ def build_rank_shift_export_rows(
         cohort_id=cohort_id,
         cohort_filter_policy=cohort_filter_policy,
         top_n=top_n,
+        data_filters=data_filters,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
     )
     return rank_shift_rows(context["rows"], context["metrics"], baseline_metric=context["baseline_metric"])
 
@@ -277,6 +305,12 @@ def build_outlier_export_rows(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     top_n: int = 100,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    author_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> list[dict[str, Any]]:
     context = _analysis_context(
         fraction_mode=fraction_mode,
@@ -288,6 +322,10 @@ def build_outlier_export_rows(
         cohort_id=cohort_id,
         cohort_filter_policy=cohort_filter_policy,
         top_n=top_n,
+        data_filters=data_filters,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
     )
     return outlier_rows(context["rows"], context["metrics"])
 
@@ -401,11 +439,11 @@ def finding_summary(findings: list[dict[str, Any]], *, metrics: list[str], basel
     if any(finding.get("type") == "high_tie_rate" for finding in findings):
         discussion_points.append("Отдельно указать индексы с высокой долей совпадающих значений.")
     if any(finding.get("type") == "top1_dominance_dependence" for finding in findings):
-        discussion_points.append("Проверить влияние одной сверхцитируемой работы через top1_share.")
+        discussion_points.append("Проверить влияние одной сверхцитируемой работы через долю цитирований самой цитируемой работы.")
     if any(finding.get("type") == "rank_instability" for finding in findings):
-        discussion_points.append(f"Разобрать крупнейшие сдвиги рангов относительно {baseline_metric}.")
+        discussion_points.append(f"Разобрать крупнейшие сдвиги рангов относительно {_metric_label(baseline_metric)}.")
     if has_candidate:
-        discussion_points.append("Описывать ISLV как кандидатную сбалансированную модификацию, а не как автоматически лучший индекс.")
+        discussion_points.append("Описывать сбалансированный индекс локального вклада как дополнительный исследовательский показатель, а не как автоматически лучший индекс.")
     return {
         "schema": SCIENTOMETRIC_FINDINGS_SCHEMA,
         "n_findings": len(findings),
@@ -436,8 +474,8 @@ def conclusion_draft(
         {
             "role": "scope",
             "text": (
-                f"Анализ выполнен для локально зафиксированного аналитического scope: {n_authors} авторов, "
-                f"режим дробления {scope.get('fraction_mode') or 'не указан'}, baseline {baseline_label}. "
+                f"Анализ выполнен для локально зафиксированной области анализа: {n_authors} авторов, "
+                f"режим дробления {scope.get('fraction_mode') or 'не указан'}, базовый индекс {baseline_label}. "
                 "Все показатели являются локальными и рассчитаны по выбранному срезу, а не по глобальному профилю автора."
             ),
             "evidence_finding_ids": [],
@@ -448,7 +486,7 @@ def conclusion_draft(
         paragraphs.append(
             {
                 "role": "no_data",
-                "text": "В текущем аналитическом scope нет авторов; содержательные статистические выводы не формируются.",
+                "text": "В текущей области анализа нет авторов; содержательные статистические выводы не формируются.",
                 "evidence_finding_ids": [],
                 "evidence_metrics": [],
             }
@@ -461,7 +499,7 @@ def conclusion_draft(
                 "role": "distribution_limits",
                 "text": (
                     f"В выборке выявлены тяжелохвостые или асимметричные распределения по метрикам {_metric_list_text(heavy_tail_metrics)}. "
-                    "Это ограничивает интерпретацию средних значений и прямого raw-ранжирования; для сравнения предпочтительны ранговые показатели и log1p-визуализация."
+                    "Это ограничивает интерпретацию средних значений и прямого ранжирования; для сравнения предпочтительны ранговые показатели и графики распределения."
                 ),
                 "evidence_finding_ids": _finding_ids(findings, "heavy_tail_distribution"),
                 "evidence_metrics": heavy_tail_metrics,
@@ -529,8 +567,8 @@ def conclusion_draft(
             {
                 "role": "correction_effects",
                 "text": (
-                    f"Для метрик {_metric_list_text(correction_metrics)} выявлена обратная связь с top1_share. "
-                    "Для индексов со встроенным штрафом концентрации это может указывать на корректирующий эффект; результат следует проверять через rank-shifts относительно C и h."
+                    f"Для метрик {_metric_list_text(correction_metrics)} выявлена обратная связь с долей цитирований самой цитируемой работы. "
+                    "Для индексов со встроенным штрафом концентрации это может указывать на корректирующий эффект; результат следует проверять через изменения мест относительно цитирований и индекса Хирша."
                 ),
                 "evidence_finding_ids": [str(finding.get("id") or "") for finding in negative_top1 if finding.get("id")],
                 "evidence_metrics": correction_metrics,
@@ -549,9 +587,9 @@ def conclusion_draft(
             {
                 "role": "rank_comparison",
                 "text": (
-                    "Ранговые сравнения показывают, какие индексы фактически дублируют baseline, а какие меняют состав Top-N: "
+                    "Ранговые сравнения показывают, какие индексы фактически дублируют базовый индекс, а какие меняют состав первых N авторов: "
                     + "; ".join(details)
-                    + ". Для метрик с крупными сдвигами требуется анализ rank-shifts.csv и largest-rank-shifts.csv."
+                    + ". Для метрик с крупными сдвигами требуется отдельно проверить таблицы изменений мест."
                 ),
                 "evidence_finding_ids": [
                     *_finding_ids(findings, "rank_instability"),
@@ -566,7 +604,7 @@ def conclusion_draft(
             {
                 "role": "candidate_metric",
                 "text": (
-                    "ISLV может рассматриваться как кандидатная сбалансированная модификация, поскольку объединяет процентильные компоненты, дробное цитирование и штраф концентрации top1_share. "
+                    "Сбалансированный индекс локального вклада может рассматриваться как дополнительная исследовательская модификация, поскольку объединяет процентильные компоненты, дробное цитирование и штраф концентрации в одной сверхцитируемой работе. "
                     "Его преимущество следует формулировать только в пределах текущего среза и по указанным критериям, а не как универсальное превосходство."
                 ),
                 "evidence_finding_ids": _finding_ids(findings, "balanced_candidate_metric"),
@@ -588,7 +626,7 @@ def conclusion_draft(
         "title": "Вывод по сравнению наукометрических индексов",
         "paragraphs": paragraphs,
         "limitations": [
-            "Вывод действителен только в пределах текущего локального среза и выбранной авторской когорты.",
+            "Вывод действителен только в пределах текущего локального среза и выбранной группы авторов.",
             "Метрики не заменяют экспертную оценку.",
             "OpenAlex-метаданные могут содержать ошибки авторской дизамбигуации и неполноту.",
         ],
@@ -677,7 +715,7 @@ def _distribution_findings(metrics: list[str], descriptive: dict[str, Any], norm
                         },
                     },
                     text=f"Метрика {metric} имеет выраженное асимметричное или тяжелохвостое распределение; raw-сравнение и средние значения чувствительны к выбросам.",
-                    recommendation="Использовать ранговые сравнения, log1p-визуализацию и проверять таблицу выбросов.",
+                    recommendation="Использовать ранговые сравнения, графики распределения и проверять таблицу выделяющихся значений.",
                 )
             )
 
@@ -833,17 +871,20 @@ def _metric_list_text(metrics: list[str]) -> str:
 
 def _metric_label(metric: str) -> str:
     labels = {
-        "p": "P",
-        "c": "C",
-        "c_frac": "C_frac",
-        "h": "h-index",
-        "i10": "i10",
-        "g": "g-index",
-        "m_local": "m_local",
-        "top1_share": "top1_share",
-        "iupv": "IUPV",
-        "islv": "ISLV",
-        "lrdi": "LRDI",
+        "p": "Публикации",
+        "c": "Цитирования",
+        "c_frac": "Цитирования с долевым учетом",
+        "cpp": "Средняя цитируемость",
+        "h": "Индекс Хирша",
+        "i10": "Работы с 10+ цитированиями",
+        "g": "Индекс g",
+        "m_local": "Индекс m внутри среза",
+        "top1_share": "Доля цитирований самой цитируемой работы",
+        "f5": "Индекс Полянина f5",
+        "fm5": "Долевой индекс Полянина fm5",
+        "iupv": "Собственный интегральный индекс",
+        "islv": "Собственный сбалансированный индекс",
+        "lrdi": "Индекс устойчивости результата",
     }
     return labels.get(metric, metric)
 
@@ -945,8 +986,8 @@ def _candidate_metric_findings(metrics: list[str], metric_scorecard: dict[str, A
                 "citation_dependence_abs": ((scorecard.get("citation_volume_dependence") or {}).get("abs_spearman_rho")),
                 "top1_dependence_abs": ((scorecard.get("top1_dominance_dependence") or {}).get("abs_spearman_rho")),
             },
-            text="ISLV рассматривается как кандидатная сбалансированная модификация рейтинга внутри текущего среза, а не как автоматически доказанный лучший индекс.",
-            recommendation="Обосновывать ISLV через scorecard, rank shifts и сравнение с h, C, C_frac и g.",
+            text="Сбалансированный индекс локального вклада рассматривается как дополнительная исследовательская модификация рейтинга внутри текущего среза, а не как автоматически доказанный лучший индекс.",
+            recommendation="Обосновывать его через сводную оценку, изменения мест и сравнение с индексом Хирша, цитированиями, долевыми цитированиями и индексом g.",
         )
     ]
 
@@ -1003,6 +1044,12 @@ def _analysis_context(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     top_n: int = 100,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    author_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> dict[str, Any]:
     selected_metrics = _select_metrics(metrics)
     baseline_metric = str(baseline_metric or "h").strip() or "h"
@@ -1012,7 +1059,7 @@ def _analysis_context(
         selected_metrics = [baseline_metric, *selected_metrics]
 
     request_filters = clean_analysis_filters(filters or {})
-    author_ids = None
+    scoped_author_ids = None
     cohort_context = None
     if cohort_id:
         ctx = cohorts.resolve_cohort_context(
@@ -1027,7 +1074,7 @@ def _analysis_context(
         dump_id = str(ctx.get("dump_id") or "")
         fraction_mode = str(ctx.get("fraction_mode") or fraction_mode or "strict_authors_count")
         resolved_filters = clean_analysis_filters(ctx.get("filters") or {})
-        author_ids = ctx.get("author_ids")
+        scoped_author_ids = ctx.get("author_ids")
         cohort_context = cohorts.cohort_context_summary(ctx)
         cohort_filter_policy = str(ctx.get("filter_policy") or cohort_filter_policy or "membership")
     else:
@@ -1040,9 +1087,27 @@ def _analysis_context(
     if not (str(run_id or "").strip() or str(dump_id or "").strip()):
         raise ValueError("run_id or dump_id is required for scientometric analysis.")
 
-    rank_top_n = max(1, min(int(top_n or 100), 1000))
+    requested_rank_top_n = max(0, min(int(top_n or 0), 500_000))
+    explicit_author_ids = _clean_author_ids(author_ids)
+    if explicit_author_ids is not None:
+        scoped_author_ids = explicit_author_ids if scoped_author_ids is None else set(scoped_author_ids).intersection(explicit_author_ids)
+
     rows = warehouse.filtered_indices(fraction_mode, resolved_filters, run_id=run_id, dump_id=dump_id)
-    rows = warehouse.filter_rows_by_author_ids(rows, author_ids)
+    rows = warehouse.filter_rows_by_author_ids(rows, scoped_author_ids)
+    parsed_data_filters = warehouse.parse_column_filters(data_filters)
+    data_search = str(data_search or "").strip()
+    data_sort = str(data_sort or "").strip()
+    data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
+    data_limit = max(0, min(_int_value(data_limit, 0), 500_000))
+    rows = warehouse.apply_data_selection(
+        rows,
+        data_filters=parsed_data_filters,
+        data_search=data_search,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
+    )
+    rank_top_n = requested_rank_top_n if requested_rank_top_n > 0 else max(1, len(rows))
     selected_metrics = [metric for metric in selected_metrics if _has_metric_data(rows, metric) or metric in warehouse.INDEX_NUMERIC_FIELDS]
     return {
         "metrics": selected_metrics,
@@ -1051,6 +1116,12 @@ def _analysis_context(
         "dump_id": dump_id,
         "fraction_mode": fraction_mode,
         "filters": resolved_filters,
+        "data_filters": parsed_data_filters,
+        "data_search": data_search,
+        "explicit_author_ids": explicit_author_ids or set(),
+        "data_sort": data_sort,
+        "data_direction": data_direction,
+        "data_limit": data_limit,
         "cohort_context": cohort_context,
         "cohort_filter_policy": cohort_filter_policy,
         "rank_top_n": rank_top_n,
@@ -1072,6 +1143,13 @@ def _select_metrics(metrics: list[str] | tuple[str, ...] | None) -> list[str]:
     return out
 
 
+def _clean_author_ids(author_ids: list[str] | set[str] | tuple[str, ...] | None) -> set[str] | None:
+    if author_ids is None:
+        return None
+    clean = {str(author_id).strip() for author_id in author_ids if str(author_id).strip()}
+    return clean or None
+
+
 def _analysis_warnings(
     rows: list[dict[str, Any]],
     metrics: list[str],
@@ -1089,7 +1167,7 @@ def _analysis_warnings(
     elif len(rows) < 20:
         warnings.append("The author set has fewer than 20 authors; normality diagnostics should be interpreted cautiously.")
     if rows and len(rows) > rank_top_n:
-        warnings.append("rank_top_n limits only rank comparisons and overlap; descriptive statistics use all resolved authors.")
+        warnings.append("rank_top_n limits rank comparisons and overlap; descriptive statistics use the current Data-page selection.")
     missing_metrics = [metric for metric in metrics if not _metric_values(rows, metric)]
     if missing_metrics and rows:
         warnings.append(f"No numeric values were available for metrics: {', '.join(missing_metrics)}.")
@@ -1114,16 +1192,16 @@ def _interpretation(
     warnings: list[str],
 ) -> dict[str, Any]:
     notes = [
-        "All diagnostics are computed inside the resolved local run/dump/cohort scope.",
+        "Все диагностики считаются внутри выбранного локального среза и группы авторов.",
         "Rank and correlation diagnostics are descriptive; they do not replace expert assessment.",
     ]
     candidate_basis: list[str] = []
     if "islv" in metrics:
-        notes.append("ISLV is interpreted as a local balanced visibility indicator based on percentile components and a top1 concentration penalty.")
+        notes.append("Сбалансированный индекс локального вклада интерпретируется как локальный показатель на основе процентильных компонентов и штрафа за концентрацию цитирований в одной работе.")
         candidate_basis = [
-            "uses percentile-normalized components inside the local slice",
-            "includes fractional citation contribution through c_frac",
-            "uses a top1_share concentration penalty",
+            "использует процентильные компоненты внутри локального среза",
+            "учитывает долевой вклад цитирований",
+            "использует штраф за концентрацию цитирований в одной работе",
             "is a candidate indicator, not an automatically proven best metric",
         ]
     if "c" in metrics:
@@ -1554,6 +1632,13 @@ def _number(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _int_value(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _quantile(values: list[float], q: float) -> float:

@@ -21,8 +21,8 @@ class LocalDataRouteTests(unittest.TestCase):
             local_data.warehouse,
             "list_tables",
             return_value={
-                "works": {"rows": 2, "run_id": "run_a", "dump_id": "dump_a"},
-                "indices": {"rows": 3, "run_id": "run_a", "dump_id": "dump_a"},
+                "works": {"rows": 2, "run_id": "run_a", "dump_id": "dump_a", "exists": True},
+                "indices": {"rows": 3, "run_id": "run_a", "dump_id": "dump_a", "exists": True},
                 "unknown_table": {"rows": 99, "run_id": "run_a", "dump_id": "dump_a"},
             },
         ):
@@ -33,6 +33,7 @@ class LocalDataRouteTests(unittest.TestCase):
         self.assertEqual(payload["tables"]["works"]["label"], "Работы")
         self.assertEqual(payload["tables"]["authorships"]["rows"], 0)
         self.assertEqual(payload["tables"]["authorships"]["exists"], False)
+        self.assertEqual([item["kind"] for item in payload["kinds"]], ["indices", "works"])
         self.assertEqual(payload["run_id"], "run_a")
         self.assertEqual(payload["dump_id"], "dump_a")
         self.assertEqual(payload["scope_status"], "explicit_scope")
@@ -49,15 +50,18 @@ class LocalDataRouteTests(unittest.TestCase):
         list_tables.assert_not_called()
 
     def test_local_data_preview_queries_whitelisted_kind(self) -> None:
-        with patch.object(
-            local_data.warehouse,
-            "query_table",
-            return_value={"table": "indices", "fields": ["author_id", "h"], "rows": [{"author_id": "A1", "h": 3}], "total": 1, "limit": 25, "offset": 0},
-        ) as query_table:
+        with (
+            patch.object(local_data.warehouse, "table_exists", return_value=True),
+            patch.object(
+                local_data.warehouse,
+                "query_table",
+                return_value={"table": "indices", "fields": ["author_id", "h"], "rows": [{"author_id": "A1", "h": 3}], "total": 1, "limit": 25, "offset": 0},
+            ) as query_table,
+        ):
             payload = local_data.local_data_preview(kind="indices", run_id="run_a", dump_id="dump_a", q="Author", limit=25, offset=0)
 
         self.assertEqual(payload["kind"], "indices")
-        self.assertEqual(payload["label"], "Индексы авторов")
+        self.assertEqual(payload["label"], "Авторы и индексы")
         self.assertEqual(payload["scope_status"], "explicit_scope")
         self.assertEqual(payload["reproducible"], True)
         self.assertEqual(payload["warnings"], [])
@@ -89,6 +93,18 @@ class LocalDataRouteTests(unittest.TestCase):
         self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
         query_table.assert_not_called()
 
+    def test_local_data_preview_rejects_missing_table_in_selected_scope(self) -> None:
+        with (
+            patch.object(local_data.warehouse, "table_exists", return_value=False),
+            patch.object(local_data.warehouse, "query_table") as query_table,
+        ):
+            with self.assertRaises(local_data.HTTPException) as raised:
+                local_data.local_data_preview(kind="indices", run_id="run_a", dump_id="dump_a", limit=25, offset=0)
+
+        self.assertEqual(raised.exception.status_code, 404)
+        self.assertIn("отсутствует", str(raised.exception.detail))
+        query_table.assert_not_called()
+
     def test_local_data_preview_rejects_unknown_kind(self) -> None:
         with self.assertRaises(local_data.HTTPException) as raised:
             local_data.local_data_preview(kind="unknown_table")
@@ -97,7 +113,10 @@ class LocalDataRouteTests(unittest.TestCase):
         self.assertIn("Unsupported local data kind", str(raised.exception.detail))
 
     def test_local_data_preview_csv_uses_whitelisted_kind(self) -> None:
-        with patch.object(local_data.warehouse, "export_table_csv", return_value="author_id,h\nA1,3\n") as export_table_csv:
+        with (
+            patch.object(local_data.warehouse, "table_exists", return_value=True),
+            patch.object(local_data.warehouse, "export_table_csv", return_value="author_id,h\nA1,3\n") as export_table_csv,
+        ):
             response = local_data.local_data_preview_csv(kind="indices", run_id="run_a", limit=1000, offset=0)
 
         self.assertIn("openalex_dss_local_data_indices.csv", response.headers["Content-Disposition"])

@@ -10,6 +10,7 @@ import yaml
 
 from app.core.paths import ROOT, SRC
 from app.services import author_slice
+from app.services.work_type_labels import format_work_types
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -65,7 +66,7 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
             "country_code": cfg.country_code,
             "institution": cfg.institution_display_name,
             "period": f"{cfg.from_publication_date} - {cfg.to_publication_date}",
-            "work_type": cfg.work_type,
+            "work_type": format_work_types(cfg.work_type),
         },
         "openalex_filter": build_filter(cfg),
         "estimate": estimate,
@@ -97,7 +98,7 @@ def choose_strategy(
         return {
             "status": "no_data",
             "strategy": "do_not_fetch",
-            "reasons": ["OpenAlex returned zero works for this filter."],
+            "reasons": ["OpenAlex вернул 0 работ для выбранных фильтров."],
             "warnings": [],
             "records_to_fetch": 0,
             "api_requests_planned": planned_api_requests,
@@ -110,14 +111,14 @@ def choose_strategy(
     if estimate_count > hard_stop:
         status = "very_large_slice"
         strategy = "openalex_cli_large_slice"
-        warnings.append("Estimated corpus is very large. The user should decide whether to download it or narrow the filters.")
+        warnings.append("Срез очень большой. Перед скачиванием стоит сузить фильтры или отдельно подтвердить место на диске и время выполнения.")
     elif estimate_count > medium:
         status = "large_slice"
         strategy = "openalex_cli_large_slice"
-        warnings.append("Estimated corpus is large. Review disk space, API budget and expected runtime before downloading.")
+        warnings.append("Срез большой. Перед скачиванием проверьте место на диске и ожидаемое время выполнения.")
     elif estimate_count > small:
         status = "medium_slice"
-        warnings.append("Estimated corpus is medium-sized. Download is allowed; review the forecast before proceeding.")
+        warnings.append("Срез среднего размера. Скачивание разрешено, но перед запуском проверьте прогноз объема.")
 
     return {
         "status": status,
@@ -131,7 +132,7 @@ def choose_strategy(
         "user_decides_after_estimate": status != "no_data",
         "reasons": reasons,
         "warnings": warnings,
-        "notebook_policy": "No local hard cap is applied by the planner. The user decides after seeing the forecast. Download uses OpenAlex CLI by default.",
+        "notebook_policy": "Планировщик не ставит скрытый локальный лимит. Пользователь принимает решение после прогноза. Уже скачанные локальные срезы используются без API; новая загрузка среза OpenAlex может требовать ключ OpenAlex.",
     }
 
 

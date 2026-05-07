@@ -19,6 +19,20 @@ from app.services import artifact_context, cohorts, jobs, materialization_jobs, 
 
 
 class PipelineIntegrityTests(unittest.TestCase):
+    def test_download_output_dir_stays_inside_data_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "data"
+            cfg = SimpleNamespace(slice_name="slice_a")
+            with patch.object(pipeline, "DATA", data):
+                self.assertEqual(pipeline._download_output_dir({}, cfg).resolve(), (data / "raw/openalex_cli/slice_a").resolve())
+                self.assertEqual(pipeline._download_output_dir({"download_dir": "custom"}, cfg).resolve(), (data / "custom/slice_a").resolve())
+                self.assertEqual(pipeline._download_output_dir({"download_dir": "data/custom"}, cfg).resolve(), (data / "custom/slice_a").resolve())
+                self.assertEqual(pipeline._download_output_dir({"download_dir": str(data / "chosen" / "slice_a")}, cfg).resolve(), (data / "chosen" / "slice_a").resolve())
+
+                with self.assertRaises(ValueError) as raised:
+                    pipeline._download_output_dir({"download_dir": str(Path(tmp) / "outside")}, cfg)
+        self.assertIn("Папка загрузки", str(raised.exception))
+
     def test_accepted_download_signature_mismatch_blocks_download(self) -> None:
         fake_plan = {
             "decision": {"status": "can_fetch", "can_execute": True, "reasons": []},
@@ -96,6 +110,56 @@ class PipelineIntegrityTests(unittest.TestCase):
                 with self.assertRaises(ValueError) as raised:
                     pipeline.fetch_slice_dump(payload)
         self.assertIn("подпись оценки", str(raised.exception))
+
+    def test_fetch_slice_dump_uses_saved_query_plan_without_replanning(self) -> None:
+        query_plan = {
+            "decision": {"status": "can_fetch", "can_execute": True, "reasons": []},
+            "estimate": {
+                "estimate_signature": "estimate-ok",
+                "download_signature": "download-ok",
+                "estimate_count": 1,
+            },
+            "openalex_filter": "primary_topic.subfield.id:1706",
+            "filter_classes": {},
+            "download_policy": {"complete_slice_required": True, "allow_incomplete_preview": False},
+            "execution_limits": {},
+        }
+        payload = {
+            "entity_level": "subfield",
+            "entity_id_short": "1706",
+            "entity_display_name": "Computer Science Applications",
+            "filter_mode": "primary_topic",
+            "from_publication_date": "2020-01-01",
+            "to_publication_date": "2025-12-31",
+            "accepted_estimate_signature": "estimate-ok",
+            "accepted_download_signature": "download-ok",
+            "query_plan": query_plan,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "data"
+            raw = data / "raw" / "works.jsonl.gz"
+            raw.parent.mkdir(parents=True, exist_ok=True)
+            raw.write_text("data", encoding="utf-8")
+            dump = {
+                "dump_id": "dump_saved_plan",
+                "raw_jsonl": str(raw),
+                "raw_jsonl_sha256": "sha",
+                "records_downloaded": 1,
+                "allowed_for_final_analysis": True,
+                "signatures": {},
+            }
+            with (
+                patch.object(pipeline, "DATA", data),
+                patch.object(pipeline.query_planner, "plan_slice", side_effect=AssertionError("estimate API should not run during materialization")),
+                patch.object(pipeline.openalex_cli_provider, "download_works_metadata", return_value=dump),
+                patch.object(pipeline, "file_profile", return_value={"path": str(raw), "bytes": raw.stat().st_size, "sha256": "sha"}),
+                patch.object(pipeline.metadata_store, "record_slice_dump") as record_dump,
+            ):
+                result = pipeline.fetch_slice_dump(payload, require_accepted_signatures=True)
+
+        self.assertEqual(result["dump"]["dump_id"], "dump_saved_plan")
+        record_dump.assert_called_once()
 
     def test_direct_build_run_rejects_missing_accepted_signatures(self) -> None:
         with patch.dict("os.environ", {}, clear=True):

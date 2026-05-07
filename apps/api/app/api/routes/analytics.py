@@ -21,7 +21,7 @@ def analytics(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     fraction_mode: str = "strict_authors_count",
-    metric: str = "islv",
+    metric: str = "h",
     country_code: str = "",
     filter_mode: str = "",
     subject_level: str = "",
@@ -48,6 +48,13 @@ def analytics(
     from_publication_date: str = "",
     to_publication_date: str = "",
     work_type: str = "",
+    q: str = "",
+    author_ids: str = "",
+    data_filters: str = "",
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = Query(0, ge=0, le=500_000),
     limit: int = Query(20, ge=1, le=200),
 ) -> dict[str, Any]:
     requested_run_id = run_id
@@ -76,6 +83,7 @@ def analytics(
         from_publication_date=from_publication_date,
         to_publication_date=to_publication_date,
         work_type=work_type,
+        q=q,
     )
     try:
         cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
@@ -84,12 +92,22 @@ def analytics(
         _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
         filter_warnings = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
-        bundle = warehouse.metric_bundle(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
+        parsed_data_filters = warehouse.parse_column_filters(data_filters)
+        bundle = warehouse.metric_bundle(
+            fraction_mode,
+            metric,
+            filters,
+            limit=limit,
+            run_id=run_id,
+            dump_id=dump_id,
+            author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
+            **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
+        )
         distribution = bundle["distribution"]
         top = bundle["ranking"]
         metric_lines = bundle["line_series"]
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     payload = {
@@ -101,6 +119,9 @@ def analytics(
         "percentile_scope": "current filtered author set",
         "metric_params": distribution.get("metric_params") or top.get("metric_params"),
         "filters": filters,
+        "data_filters": parsed_data_filters,
+        "data_search": data_search,
+        "selected_author_ids": _author_ids_query(author_ids),
         "cohort": cohort_ctx["cohort"],
         "filter_warnings": filter_warnings,
         "filtered_distribution": distribution,
@@ -129,7 +150,7 @@ def distribution(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     fraction_mode: str = "strict_authors_count",
-    metric: str = "islv",
+    metric: str = "h",
     country_code: str = "",
     filter_mode: str = "",
     subject_level: str = "",
@@ -156,6 +177,13 @@ def distribution(
     from_publication_date: str = "",
     to_publication_date: str = "",
     work_type: str = "",
+    q: str = "",
+    author_ids: str = "",
+    data_filters: str = "",
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = Query(0, ge=0, le=500_000),
 ) -> dict[str, Any]:
     requested_run_id = run_id
     requested_dump_id = dump_id
@@ -183,6 +211,7 @@ def distribution(
         from_publication_date=from_publication_date,
         to_publication_date=to_publication_date,
         work_type=work_type,
+        q=q,
     )
     try:
         cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
@@ -190,8 +219,20 @@ def distribution(
         dump_id = cohort_ctx["dump_id"]
         _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
-        payload = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
+        parsed_data_filters = warehouse.parse_column_filters(data_filters)
+        payload = warehouse.metric_distribution(
+            fraction_mode,
+            metric,
+            filters,
+            run_id=run_id,
+            dump_id=dump_id,
+            author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
+            **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
+        )
         payload["cohort"] = cohort_ctx["cohort"]
+        payload["data_filters"] = parsed_data_filters
+        payload["data_search"] = data_search
+        payload["selected_author_ids"] = _author_ids_query(author_ids)
         payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
         _annotate_scope_payload(
             payload,
@@ -203,7 +244,7 @@ def distribution(
         )
         return payload
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -215,7 +256,7 @@ def ranking_json(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     fraction_mode: str = "strict_authors_count",
-    metric: str = "islv",
+    metric: str = "h",
     country_code: str = "",
     filter_mode: str = "",
     subject_level: str = "",
@@ -242,7 +283,14 @@ def ranking_json(
     from_publication_date: str = "",
     to_publication_date: str = "",
     work_type: str = "",
-    limit: int = Query(100, ge=1, le=500_000),
+    q: str = "",
+    author_ids: str = "",
+    data_filters: str = "",
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = Query(0, ge=0, le=500_000),
+    limit: int = Query(100, ge=0, le=500_000),
 ) -> dict[str, Any]:
     requested_run_id = run_id
     requested_dump_id = dump_id
@@ -270,6 +318,7 @@ def ranking_json(
         from_publication_date=from_publication_date,
         to_publication_date=to_publication_date,
         work_type=work_type,
+        q=q,
     )
     try:
         cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
@@ -277,8 +326,22 @@ def ranking_json(
         dump_id = cohort_ctx["dump_id"]
         _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
-        payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
+        parsed_data_filters = warehouse.parse_column_filters(data_filters)
+        payload = warehouse.metric_ranking(
+            fraction_mode,
+            metric,
+            filters,
+            limit=limit,
+            max_limit=500_000,
+            run_id=run_id,
+            dump_id=dump_id,
+            author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
+            **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
+        )
         payload["cohort"] = cohort_ctx["cohort"]
+        payload["data_filters"] = parsed_data_filters
+        payload["data_search"] = data_search
+        payload["selected_author_ids"] = _author_ids_query(author_ids)
         payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
         _annotate_scope_payload(
             payload,
@@ -290,7 +353,7 @@ def ranking_json(
         )
         return payload
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -302,7 +365,7 @@ def ranking_csv(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     fraction_mode: str = "strict_authors_count",
-    metric: str = "islv",
+    metric: str = "h",
     country_code: str = "",
     filter_mode: str = "",
     subject_level: str = "",
@@ -329,7 +392,12 @@ def ranking_csv(
     from_publication_date: str = "",
     to_publication_date: str = "",
     work_type: str = "",
-    limit: int = Query(100_000, ge=1, le=500_000),
+    q: str = "",
+    data_filters: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = Query(0, ge=0, le=500_000),
+    limit: int = Query(100_000, ge=0, le=500_000),
 ) -> Response:
     try:
         payload = ranking_json(
@@ -365,6 +433,11 @@ def ranking_csv(
             from_publication_date=from_publication_date,
             to_publication_date=to_publication_date,
             work_type=work_type,
+            q=q,
+            data_filters=data_filters,
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=data_limit,
             limit=limit,
         )
     except HTTPException:
@@ -392,7 +465,7 @@ def scientometric_analysis(
     fraction_mode: str = "strict_authors_count",
     metrics: str = "",
     baseline_metric: str = "h",
-    top_n: int = Query(100, ge=1, le=1000),
+    top_n: int = Query(100, ge=0, le=1000),
     country_code: str = "",
     filter_mode: str = "",
     subject_level: str = "",
@@ -419,6 +492,13 @@ def scientometric_analysis(
     from_publication_date: str = "",
     to_publication_date: str = "",
     work_type: str = "",
+    q: str = "",
+    author_ids: str = "",
+    data_filters: str = "",
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = Query(0, ge=0, le=500_000),
 ) -> dict[str, Any]:
     filters = _slice_filters(
         country_code=country_code,
@@ -444,6 +524,7 @@ def scientometric_analysis(
         from_publication_date=from_publication_date,
         to_publication_date=to_publication_date,
         work_type=work_type,
+        q=q,
     )
     try:
         payload = scientometrics.build_scientometric_analysis(
@@ -456,6 +537,12 @@ def scientometric_analysis(
             cohort_id=cohort_id,
             cohort_filter_policy=cohort_filter_policy,
             top_n=top_n,
+            data_filters=warehouse.parse_column_filters(data_filters),
+            data_search=data_search,
+            author_ids=_author_ids_query(author_ids),
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=data_limit,
         )
         _annotate_scope_payload(
             payload,
@@ -467,7 +554,7 @@ def scientometric_analysis(
         )
         return payload
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -477,7 +564,7 @@ def scientometric_analysis_json(request: Request) -> Response:
     try:
         payload = _scientometric_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(
@@ -492,7 +579,7 @@ def scientometric_descriptive_csv(request: Request) -> Response:
     try:
         payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = [
@@ -528,7 +615,7 @@ def scientometric_correlations_csv(request: Request) -> Response:
     try:
         payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["method", "left_metric", "right_metric", "value"]
@@ -541,7 +628,7 @@ def scientometric_rank_shifts_csv(request: Request) -> Response:
         payload = _scientometric_export_payload_from_request(request)
         rows = scientometrics.build_rank_shift_export_rows(**_scientometric_kwargs_from_request(request))
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"]
@@ -553,7 +640,7 @@ def scientometric_largest_rank_shifts_csv(request: Request) -> Response:
     try:
         payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"]
@@ -566,7 +653,7 @@ def scientometric_outliers_csv(request: Request) -> Response:
         payload = _scientometric_export_payload_from_request(request)
         rows = scientometrics.build_outlier_export_rows(**_scientometric_kwargs_from_request(request))
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["metric", "author_id", "author_display_name", "value", "rule", "lower_fence", "upper_fence"]
@@ -578,7 +665,7 @@ def scientometric_top_outliers_csv(request: Request) -> Response:
     try:
         payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["metric", "author_id", "author_display_name", "value", "rule", "lower_fence", "upper_fence"]
@@ -590,7 +677,7 @@ def scientometric_findings_csv(request: Request) -> Response:
     try:
         payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["id", "type", "metric", "baseline_metric", "severity", "text", "recommendation", "evidence_json"]
@@ -602,7 +689,7 @@ def scientometric_conclusion_markdown(request: Request) -> Response:
     try:
         payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     markdown = scientometrics.scientometric_conclusion_markdown(payload)
@@ -641,6 +728,7 @@ def _slice_filters(
     from_publication_date: str = "",
     to_publication_date: str = "",
     work_type: str = "",
+    q: str = "",
 ) -> dict[str, str]:
     return build_analysis_filters(
         country_code=country_code,
@@ -666,6 +754,7 @@ def _slice_filters(
         from_publication_date=from_publication_date,
         to_publication_date=to_publication_date,
         work_type=work_type,
+        q=q,
     )
 
 
@@ -674,6 +763,25 @@ def _metric_list(metrics: str) -> list[str] | None:
         return None
     normalized = metrics.replace("|", ",")
     return [item.strip() for item in normalized.split(",") if item.strip()]
+
+
+def _author_ids_query(author_ids: str | list[str] | tuple[str, ...] | None) -> list[str]:
+    if author_ids is None:
+        return []
+    if isinstance(author_ids, str):
+        raw_values = author_ids.replace("\n", ",").split(",")
+    else:
+        raw_values = list(author_ids)
+    return [str(item).strip() for item in raw_values if str(item).strip()]
+
+
+def _combined_author_ids(scope_author_ids: Any, requested_author_ids: str | list[str] | tuple[str, ...] | None) -> set[str] | list[str] | None:
+    requested = set(_author_ids_query(requested_author_ids))
+    if not requested:
+        return scope_author_ids
+    if scope_author_ids is None:
+        return requested
+    return {str(author_id).strip() for author_id in scope_author_ids if str(author_id).strip()}.intersection(requested)
 
 
 def _scientometric_payload_from_request(request: Request) -> dict[str, Any]:
@@ -720,6 +828,7 @@ def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
         from_publication_date=query.get("from_publication_date", ""),
         to_publication_date=query.get("to_publication_date", ""),
         work_type=query.get("work_type", ""),
+        q=query.get("q", ""),
     )
     return {
         "fraction_mode": query.get("fraction_mode", "strict_authors_count"),
@@ -731,7 +840,35 @@ def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
         "cohort_id": query.get("cohort_id", ""),
         "cohort_filter_policy": query.get("cohort_filter_policy", "membership"),
         "top_n": max(1, min(_int_query(query.get("top_n"), 100), 1000)),
+        "data_filters": warehouse.parse_column_filters(query.get("data_filters", "")),
+        "data_search": query.get("data_search", ""),
+        "author_ids": _author_ids_query(query.get("author_ids", "")),
+        "data_sort": query.get("data_sort", ""),
+        "data_direction": query.get("data_direction", "desc"),
+        "data_limit": max(0, min(_int_query(query.get("data_limit"), 0), 500_000)),
     }
+
+
+def _data_selection_kwargs(
+    data_filters: dict[str, Any],
+    *,
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if data_filters:
+        out["data_filters"] = data_filters
+    if str(data_search or "").strip():
+        out["data_search"] = str(data_search or "").strip()
+    if str(data_sort or "").strip():
+        out["data_sort"] = str(data_sort or "").strip()
+        out["data_direction"] = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
+    limit = _int_query(data_limit, 0)
+    if limit > 0:
+        out["data_limit"] = max(1, min(limit, 500_000))
+    return out
 
 
 def _csv_response(fields: list[str], rows: list[dict[str, Any]], *, filename: str, headers: dict[str, str] | None = None) -> Response:

@@ -40,7 +40,7 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     )
     _write_pipeline_summary("recalculate", cfg, {**payload, "run_id": run_id, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, "active_context_source": "recalculate", **compute})
-    report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
+    report = reports.build_report_bundle(metric="h", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
     return {"status": "ok", "mode": "recalculate", "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
 
 
@@ -54,8 +54,8 @@ def fetch_slice_dump(
         require_accepted_signatures = True
     cfg = _cfg({**payload, "workflow_mode": "strict_works"})
     _write_runtime_config(cfg)
-    api_key = str(payload.get("api_key") or "").strip()
-    plan = query_planner.plan_slice({**payload, "workflow_mode": "strict_works"})
+    api_key = _openalex_cli_api_key(payload, cfg)
+    plan = _query_plan_from_payload(payload) or query_planner.plan_slice({**payload, "workflow_mode": "strict_works"})
     decision = plan.get("decision") or {}
     estimate = plan.get("estimate") or {}
     accepted_signature = str(payload.get("accepted_estimate_signature") or "").strip()
@@ -74,17 +74,17 @@ def fetch_slice_dump(
         _write_pipeline_summary("fetch_slice_dump", cfg, {**payload, "query_plan": plan, "dump": {"no_data": True}})
         return {"status": "ok", "mode": "fetch_slice_dump", "query_plan": plan, "dump": {"no_data": True, "records_downloaded": 0}}
     if decision.get("can_execute") is False:
-        raise ValueError("; ".join(decision.get("reasons") or []) or "Срез нельзя скачать через текущий OpenAlex CLI plan.")
+        raise ValueError("; ".join(decision.get("reasons") or []) or "Срез нельзя скачать через текущий план загрузки OpenAlex.")
     old = os.environ.get(cfg.api_key_env)
     try:
         if api_key:
             os.environ[cfg.api_key_env] = api_key
         if str(payload.get("source_strategy") or "openalex_cli") != "openalex_cli":
-            raise ValueError("Скачивание среза выполняется через установленный OpenAlex CLI. API используется только для оценки и справочников.")
+            raise ValueError("Новая загрузка среза выполняется через установленный загрузчик OpenAlex. Чтобы не использовать API-лимиты, выберите уже скачанный локальный срез.")
         passport = openalex_cli_provider.download_works_metadata(
             cfg,
             api_key=api_key,
-            out_dir=DATA / "raw/openalex_cli" / cfg.slice_name,
+            out_dir=_download_output_dir(payload, cfg),
             estimate={
                 **estimate,
                 "accepted_estimate_signature": accepted_signature or None,
@@ -159,7 +159,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         "import_mode": import_mode,
         "fetched_works": quality.get("raw_works"),
         "total_available": quality.get("raw_works"),
-        "filter": "импорт OpenAlex CLI mini-dump" if dump_manifest else "локальный импорт дампа OpenAlex Works",
+        "filter": "импорт локального среза OpenAlex" if dump_manifest else "локальный импорт дампа OpenAlex Works",
         "used_api_key": bool(dump_manifest.get("used_api_key")) if dump_manifest else False,
     }
     fetch_meta_path = _write_dump_fetch_meta(dump_id, fetch_meta)
@@ -194,7 +194,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             **compute,
         },
     )
-    report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
+    report = reports.build_report_bundle(metric="h", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
     return {
         "status": "ok",
         "mode": "import_local_file",
@@ -393,6 +393,49 @@ def _table_manifest(paths: dict[str, Path], checksums: dict[str, str]) -> dict[s
 
 def _cfg(payload: dict[str, Any]) -> Any:
     return author_slice.config_from_payload(payload)
+
+
+def _openalex_cli_api_key(payload: dict[str, Any], cfg: Any) -> str:
+    return str(payload.get("api_key") or os.environ.get(cfg.api_key_env) or "").strip()
+
+
+def _query_plan_from_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    plan = payload.get("query_plan") if isinstance(payload.get("query_plan"), dict) else {}
+    if not plan:
+        return None
+    estimate = plan.get("estimate") if isinstance(plan.get("estimate"), dict) else {}
+    decision = plan.get("decision") if isinstance(plan.get("decision"), dict) else {}
+    if not estimate or not decision:
+        return None
+    corpus = estimate.get("corpus_request") if isinstance(estimate.get("corpus_request"), dict) else {}
+    return {
+        "decision": decision,
+        "estimate": estimate,
+        "openalex_filter": plan.get("openalex_filter") or corpus.get("filter") or "",
+        "filter_classes": plan.get("filter_classes") or {},
+        "download_policy": plan.get("download_policy") or payload.get("download_policy") or {},
+        "limits": plan.get("execution_limits") or plan.get("limits") or {},
+    }
+
+
+def _download_output_dir(payload: dict[str, Any], cfg: Any) -> Path:
+    raw = str(payload.get("download_dir") or "").strip()
+    if not raw:
+        return DATA / "raw" / "openalex_cli" / _safe_id(str(cfg.slice_name or "slice"))
+    base = Path(raw).expanduser()
+    if not base.is_absolute():
+        if base.parts and base.parts[0] == "data":
+            base = DATA.joinpath(*base.parts[1:])
+        else:
+            base = DATA / base
+    resolved = base.resolve()
+    data_root = DATA.resolve()
+    try:
+        resolved.relative_to(data_root)
+    except ValueError as exc:
+        raise ValueError(f"Папка загрузки должна находиться внутри хранилища данных DSS: {DATA}") from exc
+    safe_slice = _safe_id(str(cfg.slice_name or "slice"))
+    return resolved if resolved.name == safe_slice else resolved / safe_slice
 
 
 def _write_pipeline_summary(mode: str, cfg: Any, payload: dict[str, Any]) -> None:

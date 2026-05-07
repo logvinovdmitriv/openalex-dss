@@ -29,7 +29,7 @@ def build_passports(
     slice_passport = {
         "slice_id": cfg.slice_name,
         "slice_name": cfg.slice_name,
-        "data_source": "OpenAlex CLI works metadata; OpenAlex API only for resolving, estimates and enrichment",
+        "data_source": "Метаданные Works OpenAlex; API используется только для справочников, оценки объема и точечного обогащения",
         "source_mode": "openalex_cli_filtered_metadata",
         "api_base": "https://api.openalex.org",
         "vak_mapping_status": "не указано",
@@ -100,8 +100,8 @@ def build_passports(
             "api_cache": "data/cache/openalex_api",
             "limits_config": "configs/execution_limits.yaml",
             "filter_registry": "configs/openalex_filter_registry.yaml",
-            "api_usage": "ID resolution, dropdown suggestions, field/filter catalogs, estimate/group_by/sample, rate-limit visibility and point enrichment only",
-            "download_usage": "Works corpus is downloaded through the installed OpenAlex CLI, not through the application API client.",
+            "api_usage": "поиск ID, подсказки, справочники, оценка объема, лимиты и точечное обогащение",
+            "download_usage": "корпус Works скачивается установленным загрузчиком OpenAlex, а не рабочими API-запросами приложения",
         },
     }
     indices = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"]

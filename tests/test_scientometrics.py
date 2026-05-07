@@ -325,8 +325,8 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(distribution["evidence_finding_ids"], ["heavy_tail:c"])
         self.assertEqual(distribution["evidence_metrics"], ["c"])
         self.assertEqual(candidate["evidence_finding_ids"], ["balanced_candidate:islv"])
-        self.assertIn("C", distribution["text"])
-        self.assertIn("baseline h-index", text)
+        self.assertIn("Цитирования", distribution["text"])
+        self.assertIn("базовый индекс Индекс Хирша", text)
         self.assertNotIn("лучший индекс", text.lower())
         self.assertIn("не заменяют экспертную оценку", " ".join(draft["limitations"]).lower())
 
@@ -358,8 +358,8 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertIn("## Распределения", markdown)
         self.assertIn("## Кандидатная формула", markdown)
         self.assertIn("Основания: heavy_tail:c", markdown)
-        self.assertIn("Метрики: C", markdown)
-        self.assertIn("Метрики: ISLV", markdown)
+        self.assertIn("Метрики: Цитирования", markdown)
+        self.assertIn("Метрики: Собственный сбалансированный индекс", markdown)
         self.assertIn("## Ограничения вывода", markdown)
         self.assertIn("- Метрики не заменяют экспертную оценку.", markdown)
 
@@ -467,7 +467,7 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"], {"run_id": "run_a", "dump_id": "dump_a"})
         self.assertEqual(payload["n_authors"], 1)
         self.assertEqual(payload["scope"]["cohort_filter_policy"], "current")
-        self.assertEqual(payload["scope"]["analysis_author_scope"], "all_resolved_authors")
+        self.assertEqual(payload["scope"]["analysis_author_scope"], "data_page_selection")
         self.assertEqual(payload["scope"]["rank_top_n"], 10)
         self.assertEqual(payload["cohort_context"]["analysis_filters"], {"country_code": "DE"})
 

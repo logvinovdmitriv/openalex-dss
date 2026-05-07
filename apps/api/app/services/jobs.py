@@ -183,9 +183,9 @@ def _progress_before_dispatch(action: str) -> int:
 
 def _stage_for_action(action: str) -> str:
     return {
-        "fetch_slice_dump": "fetching mini-dump",
-        "build_from_openalex": "fetching and building local mart",
-        "recalculate": "computing indices",
+        "fetch_slice_dump": "Загрузка локального среза",
+        "build_from_openalex": "Загрузка и построение локального среза",
+        "recalculate": "Расчет индексов",
     }.get(action, "running")
 
 
@@ -195,12 +195,16 @@ def _download_progress(run_id: str, progress: dict[str, Any]) -> None:
     bounded = min(95, max(25, percent))
     fetched = int(progress.get("fetched") or 0)
     total = progress.get("total_available")
+    files_seen = int(progress.get("files_seen") or 0)
+    bytes_written = int(progress.get("bytes_written") or 0)
     if total:
-        stage = f"downloading works: {fetched}/{total}"
+        stage = f"Загрузка работ: {fetched}/{total}"
     elif fetched:
-        stage = f"downloading works: {fetched}"
+        stage = f"Загрузка работ: {fetched}"
+    elif files_seen or bytes_written:
+        stage = str(progress.get("stage") or f"Загрузчик OpenAlex скачал файлов: {files_seen}")
     else:
-        stage = str(progress.get("stage") or "OpenAlex CLI is running; exact progress is unavailable until local files are packed")
+        stage = str(progress.get("stage") or "Загрузчик OpenAlex запущен; точный процент появится после упаковки локальных файлов")
     update_progress(run_id, bounded, stage, progress)
 
 

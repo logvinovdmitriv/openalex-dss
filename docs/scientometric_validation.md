@@ -5,12 +5,12 @@
 Этот документ фиксирует end-to-end проверку наукометрического DSS-контура:
 
 ```text
-OpenAlex-like Works fixture
--> local dump import
--> run-scoped indices
--> author cohort
--> scientometric analysis
--> report bundle
+локальный Works fixture в формате OpenAlex
+-> импорт локального среза
+-> расчет индексов
+-> выборка TOP-N авторов
+-> наукометрический анализ
+-> пакет отчета
 -> JSON/CSV/Markdown exports
 ```
 
@@ -18,13 +18,13 @@ OpenAlex-like Works fixture
 
 ## Режим проверки
 
-Проверка выполнена на детерминированном локальном fixture, а не на сетевом OpenAlex CLI download. Причина: в текущем окружении нет `OPENALEX_API_KEY`, а установленный `openalex` CLI требует API key для materialization.
+Проверка выполнена на детерминированном локальном fixture, а не на сетевом скачивании OpenAlex. Причина: в текущем окружении нет ключа OpenAlex, а установленный загрузчик может требовать ключ для новой загрузки.
 
-Назначение этого прогона - проверить воспроизводимый технический контур, согласованность scope и наличие всех аналитических артефактов. Он не является научным OpenAlex-срезом и не должен использоваться как содержательный результат по предметной области.
+Назначение этого прогона - проверить воспроизводимый технический контур, согласованность выбранного среза и наличие всех аналитических артефактов. Он не является научным OpenAlex-срезом и не должен использоваться как содержательный результат по предметной области.
 
 Для реального диссертационного прогона нужно выполнить тот же сценарий через
-публичный workflow `slice -> estimate -> materialization plan -> materialization run`
-с подтвержденными planner signatures и `allowed_for_final_analysis=true`.
+публичный путь `срез -> оценка -> план скачивания -> скачивание среза`
+с подтвержденными подписями оценки/загрузки и `allowed_for_final_analysis=true`.
 Внутренний шаг `build_from_openalex` остается сервисной реализацией, а не
 публичным способом запуска.
 
@@ -42,7 +42,7 @@ OpenAlex-like Works fixture
 ../openalex-dss-validation-data
 ```
 
-## Зафиксированный scope
+## Зафиксированный срез
 
 ```text
 validation_mode: deterministic_local_openalex_like_fixture
@@ -53,14 +53,14 @@ cohort_checksum: 0d5ecb3a73559e74b6d8be304386f62cc0bd0e45222d0e04b5cbff88f945aeb
 fraction_mode: integer
 baseline_metric: h
 rank_top_n: 5
-metrics: p, c, c_frac, h, i10, g, islv
+metrics: p, c, cpp, h, i10, g
 raw_works: 12
 n_authors: 5
-findings: 29
-report_scope_hash: 44919fc9808e8b60
+findings: 21
+report_scope_hash: c65f380e4da05a8e
 ```
 
-`n_authors: 5` - это число авторов в зафиксированной Top-5 cohort, а не полное число авторов raw fixture. В fixture есть шестой автор, который не входит в Top-5 когорту по `h`.
+`n_authors: 5` - это число авторов в проверочной выборке TOP-5, а не полное число авторов raw fixture. В fixture есть шестой автор, который не входит в TOP-5 по индексу Хирша.
 
 Схемы аналитических артефактов:
 
@@ -96,10 +96,10 @@ validation/exports/validation_scientometric/top-outliers.csv
 validation/exports/validation_scientometric/findings.csv
 validation/exports/validation_scientometric/conclusion.md
 validation/exports/validation_scientometric/report_bundle.json
-runs/validation_scientometric/reports/report_44919fc9808e8b60.json
+runs/validation_scientometric/reports/report_c65f380e4da05a8e.json
 ```
 
-Run-scoped pipeline artifacts:
+Артефакты расчетного запуска:
 
 ```text
 runs/validation_scientometric/tables/author_work.csv
@@ -114,9 +114,9 @@ runs/validation_scientometric/passports/checksums.json
 runs/validation_scientometric/passports/sha256_manifest.txt
 ```
 
-## Проверка согласованности scope
+## Проверка согласованности среза
 
-`scientometrics.json` и `report_bundle.json` содержат один и тот же основной scope:
+`scientometrics.json` и `report_bundle.json` содержат один и тот же выбранный срез:
 
 ```text
 run_id: validation_scientometric
@@ -146,32 +146,32 @@ scientometrics_conclusion_md
 По контрольному прогону:
 
 ```text
-descriptive.csv: 8 lines
-correlations.csv: 148 lines
-rank-shifts.csv: 31 lines
-largest-rank-shifts.csv: 31 lines
+descriptive.csv: 7 lines
+correlations.csv: 109 lines
+rank-shifts.csv: 26 lines
+largest-rank-shifts.csv: 26 lines
 outliers.csv: 2 lines
 top-outliers.csv: 2 lines
-findings.csv: 30 lines
-conclusion.md: 55 lines
-scientometrics.json: 4423 lines
-report_bundle.json: 5098 lines
+findings.csv: 22 lines
+conclusion.md: 47 lines
+scientometrics.json: 3566 lines
+report_bundle.json: 4240 lines
 ```
 
 ## Checksums
 
-`validation/scientometric_validation_manifest.json` содержит `artifact_checksums` для каждого export и run report artifact. Это фиксирует byte-level содержимое текущего validation-прогона и позволяет сравнивать артефакты между повторными запусками. Некоторые runtime artifacts могут включать системные или форматные метаданные, поэтому главным стабильным инвариантом проверки остается совпадение scope, schema markers, cohort checksum и report scope hash.
+`validation/scientometric_validation_manifest.json` содержит `artifact_checksums` для каждого export и report artifact. Это фиксирует byte-level содержимое текущего validation-прогона и позволяет сравнивать артефакты между повторными запусками. Некоторые runtime artifacts могут включать системные или форматные метаданные, поэтому главным стабильным инвариантом проверки остается совпадение выбранного среза, schema markers, checksum выборки авторов и report scope hash.
 
 ## Вывод проверки
 
 Контрольный fixture-прогон подтвердил, что DSS-контур выполняется end-to-end:
 
-1. OpenAlex-like Works JSONL импортируется как локальный dump.
-2. Run-scoped таблицы, индексы, рейтинги и паспорта создаются.
-3. Top-N cohort фиксируется с checksum.
-4. Scientometric analysis строится по тому же `run_id/dump_id/cohort_id/fraction_mode`.
+1. Works JSONL в формате OpenAlex импортируется как локальный срез.
+2. Таблицы, индексы, рейтинги и паспорта создаются.
+3. Выборка первых авторов фиксируется с checksum.
+4. Scientometric analysis строится по тому же `run_id/dump_id/fraction_mode` и выбранному TOP-N.
 5. Report bundle получает тот же scope hash и включает `scientometric_analysis`.
 6. JSON/CSV/Markdown exports создаются и трассируются к одному scope.
-7. Validation script проверяет инварианты scope, наличие report export links, существование файлов и SHA-256 checksums.
+7. Validation script проверяет инварианты выбранного среза, наличие report export links, существование файлов и SHA-256 checksums.
 
-Ограничение: это validation fixture, а не финальный OpenAlex scientific slice. Следующий содержательный контроль должен повторить тот же протокол на реальном малом OpenAlex-срезе с `OPENALEX_API_KEY`, подтвержденными planner signatures и финальным dump manifest.
+Ограничение: это validation fixture, а не финальный научный срез OpenAlex. Следующий содержательный контроль должен повторить тот же протокол на реальном малом OpenAlex-срезе с ключом OpenAlex, подтвержденными подписями оценки/загрузки и финальным manifest среза.

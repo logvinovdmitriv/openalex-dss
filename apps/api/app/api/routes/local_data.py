@@ -10,12 +10,12 @@ from app.services import warehouse
 router = APIRouter(tags=["local-data"])
 
 LOCAL_DATA_KINDS: dict[str, str] = {
+    "indices": "Авторы и индексы",
+    "ratings": "Рейтинговые позиции",
     "works": "Работы",
     "authorships": "Авторства",
     "work_topics": "Темы работ",
     "author_work": "Автор-работа",
-    "indices": "Индексы авторов",
-    "ratings": "Позиции рейтингов",
 }
 
 
@@ -28,8 +28,13 @@ def local_data_summary(run_id: str = "", dump_id: str = "") -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     scoped_tables = {kind: _summary_entry(kind, label, tables.get(kind) or {}) for kind, label in LOCAL_DATA_KINDS.items()}
+    available_kinds = [
+        {"kind": kind, "label": label}
+        for kind, label in LOCAL_DATA_KINDS.items()
+        if bool(scoped_tables.get(kind, {}).get("exists"))
+    ]
     payload = {
-        "kinds": [{"kind": kind, "label": label} for kind, label in LOCAL_DATA_KINDS.items()],
+        "kinds": available_kinds,
         "tables": scoped_tables,
         "run_id": _first_table_value(scoped_tables, "run_id") or run_id,
         "dump_id": _first_table_value(scoped_tables, "dump_id") or dump_id,
@@ -47,14 +52,17 @@ def local_data_preview(
     metric: str = "",
     author_id: str = "",
     work_id: str = "",
+    data_filters: str = "",
     sort: str = "",
     direction: str = "desc",
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=0, le=500_000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     table = _local_data_kind(kind)
     _require_local_data_scope(run_id=run_id, dump_id=dump_id)
+    _require_existing_table(table, run_id=run_id, dump_id=dump_id)
     try:
+        parsed_data_filters = warehouse.parse_column_filters(data_filters)
         payload = warehouse.query_table(
             table,
             run_id=run_id,
@@ -64,6 +72,7 @@ def local_data_preview(
             metric=metric,
             author_id=author_id,
             work_id=work_id,
+            **({"data_filters": parsed_data_filters} if parsed_data_filters else {}),
             sort=sort,
             direction=direction,
             limit=limit,
@@ -86,14 +95,17 @@ def local_data_preview_csv(
     metric: str = "",
     author_id: str = "",
     work_id: str = "",
+    data_filters: str = "",
     sort: str = "",
     direction: str = "desc",
-    limit: int = Query(100_000, ge=1, le=500_000),
+    limit: int = Query(100_000, ge=0, le=500_000),
     offset: int = Query(0, ge=0),
 ) -> Response:
     table = _local_data_kind(kind)
     _require_local_data_scope(run_id=run_id, dump_id=dump_id)
+    _require_existing_table(table, run_id=run_id, dump_id=dump_id)
     try:
+        parsed_data_filters = warehouse.parse_column_filters(data_filters)
         data = warehouse.export_table_csv(
             table,
             run_id=run_id,
@@ -103,6 +115,7 @@ def local_data_preview_csv(
             metric=metric,
             author_id=author_id,
             work_id=work_id,
+            **({"data_filters": parsed_data_filters} if parsed_data_filters else {}),
             sort=sort,
             direction=direction,
             limit=limit,
@@ -128,6 +141,15 @@ def _local_data_kind(kind: str) -> str:
         allowed = ", ".join(LOCAL_DATA_KINDS)
         raise HTTPException(status_code=400, detail=f"Unsupported local data kind: {value or '<empty>'}. Allowed kinds: {allowed}")
     return value
+
+
+def _require_existing_table(kind: str, *, run_id: str = "", dump_id: str = "") -> None:
+    try:
+        exists = warehouse.table_exists(kind, run_id=run_id, dump_id=dump_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not exists:
+        raise HTTPException(status_code=404, detail=f"Таблица «{LOCAL_DATA_KINDS.get(kind, kind)}» отсутствует в выбранном срезе.")
 
 
 def _first_table_value(tables: dict[str, dict[str, Any]], key: str) -> str:

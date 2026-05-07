@@ -201,6 +201,21 @@ def get_slice_dump_by_dump_id(dump_id: str) -> dict[str, Any] | None:
     return _row_to_slice_dump(row) if row else None
 
 
+def delete_slice_dump_by_dump_id(dump_id: str) -> dict[str, Any]:
+    _ensure_schema()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM slice_dumps
+            WHERE dump_id = ?
+            """,
+            [dump_id],
+        ).fetchall()
+        conn.execute("DELETE FROM slice_dumps WHERE dump_id = ?", [dump_id])
+    return {"deleted": len(rows), "dumps": [_row_to_slice_dump(row) for row in rows]}
+
+
 def _entity_row(entity_type: str, item: dict[str, Any], source: str, now: str) -> dict[str, Any]:
     openalex_id = str(item.get("openalex_id") or item.get("id") or "")
     short_id = str(item.get("id") or "").strip() or _short_openalex_id(openalex_id)

@@ -105,57 +105,74 @@ export const DEFAULT_FILTERS: ActiveFilters = {
 };
 
 const metricLabels: Record<string, string> = {
-  p: "Число работ",
-  c: "Все цитирования",
-  c_frac: "Фракционные цитирования",
-  cpp: "Цитирований на работу",
+  p: "Публикации",
+  c: "Цитирования",
+  c_frac: "Цитирования с долевым учетом",
+  cpp: "Средняя цитируемость",
   h: "Индекс Хирша",
-  i10: "Индекс i10",
-  g: "g-индекс",
-  m_local: "m-индекс локальный",
-  top1_share: "Доля top-1 работы",
-  lrdi: "LRDI",
-  f5: "f5 (операционный)",
-  fm5: "fm5 (операционный)",
-  iupv: "IUPV",
-  islv: "ISLV",
+  i10: "Работы с 10+ цитированиями",
+  g: "Индекс g",
+  m_local: "Индекс m внутри среза",
+  top1_share: "Доля цитирований самой цитируемой работы",
+  lrdi: "Индекс устойчивости результата",
+  f5: "Индекс Полянина f5",
+  fm5: "Долевой индекс Полянина fm5",
+  iupv: "Собственный интегральный индекс",
+  islv: "Собственный сбалансированный индекс",
   mean_authors_per_work: "Среднее число авторов",
   share_single_authored: "Доля одноавторских работ",
 };
 
 const metricDescriptions: Record<string, string> = {
-  p: "Сортирует авторов по числу работ в выбранном срезе.",
-  c: "Показывает суммарные цитирования без поправки на соавторство.",
-  c_frac: "Учитывает цитирования пропорционально числу соавторов.",
-  cpp: "Средняя цитируемость одной работы внутри среза: C / P.",
+  p: "Сколько публикаций автора попало в выбранный срез.",
+  c: "Сколько раз эти публикации процитированы в OpenAlex.",
+  c_frac: "Цитирования с поправкой на число соавторов публикации.",
+  cpp: "Среднее число цитирований на одну публикацию внутри среза.",
   h: "Классический индекс Хирша внутри выбранного среза.",
   i10: "Число работ автора с 10 и более цитированиями.",
-  g: "g-индекс с большей чувствительностью к высокоцитируемым работам.",
-  m_local: "Локальный m-index: h / длительность публикационного окна автора в срезе.",
+  g: "Показатель, который сильнее учитывает высокоцитируемые работы автора.",
+  m_local: "Индекс Хирша с учетом длительности публикационного окна автора в срезе.",
   top1_share: "Показывает концентрацию цитирований в самой цитируемой работе автора.",
-  lrdi: "Экспериментальный локальный робастный индекс с учетом соавторства и свежести публикаций.",
-  f5: "Операционная версия: число работ с 5 и более цитированиями.",
-  fm5: "Операционная версия: сумма авторских долей для работ с 5+ цитированиями.",
-  iupv: "Индекс устойчивой предметной видимости: геометрическое среднее процентильных рангов P, h и C_frac.",
-  islv: "Индекс сбалансированного локального вклада: h, C_frac, g, i10, P и штраф за top-1 концентрацию.",
+  lrdi: "Показывает устойчивость результата с учетом соавторства и свежести публикаций.",
+  f5: "Пороговый показатель: сколько публикаций автора имеют 5 и более цитирований.",
+  fm5: "Пороговый показатель с долевым учетом вклада автора в публикации с 5 и более цитированиями.",
+  iupv: "Собственный сводный показатель автора по публикациям, цитированиям и индексу Хирша.",
+  islv: "Собственный сводный показатель вклада автора с учетом нескольких библиометрических характеристик.",
   mean_authors_per_work: "Среднее число соавторов в работах автора.",
   share_single_authored: "Доля работ, где автор указан один.",
 };
 
+const metricFormulas: Record<string, string> = {
+  p: "P(a) = |W_a|",
+  c: "C(a) = Σ c_i",
+  c_frac: "Cд(a) = Σ c_i / n_i",
+  cpp: "CPP(a) = C(a) / P(a)",
+  h: "h(a) = max h: не менее h работ имеют ≥ h цитирований",
+  i10: "i10(a) = |{i: c_i ≥ 10}|",
+  g: "g(a) = max g: Σ_{i=1..g} c_i ≥ g²",
+  m_local: "m(a) = h(a) / T_a",
+  top1_share: "S₁(a) = max(c_i) / C(a)",
+  f5: "f5(a) = |{i: c_i ≥ 5}|",
+  fm5: "fm5(a) = Σ w_i для работ, где c_i ≥ 5",
+  iupv: "IUPV(a) = 100 · (pr(P) · pr(h) · pr(Cд))^(1/3)",
+  islv: "ISLV(a) = 100 · G_w(pr(h), pr(Cд), pr(g), pr(i10), pr(P)) · штраф(S₁)",
+  lrdi: "LRDI(a) = shrink(P) · Σ [ln(1 + c_i) / n_i] · exp(-λ · age_i)",
+};
+
 const modeLabels: Record<string, string> = {
-  strict_authors_count: "Строгий фракционный счёт",
-  renorm_valid_authors: "Перенормировка валидных авторов",
-  integer: "Целочисленный счёт",
+  strict_authors_count: "Долевой учет по всем авторам",
+  renorm_valid_authors: "Долевой учет по распознанным авторам",
+  integer: "Каждый автор учитывается полностью",
 };
 
 const modeDescriptions: Record<string, string> = {
-  strict_authors_count: "Делит вклад на полное число авторов работы.",
-  renorm_valid_authors: "Делит вклад только между валидно распознанными авторами.",
-  integer: "Засчитывает работу каждому автору полностью.",
+  strict_authors_count: "Вклад публикации делится на всех авторов, указанных в работе.",
+  renorm_valid_authors: "Вклад публикации делится только между авторами, которых удалось надежно распознать.",
+  integer: "Публикация полностью засчитывается каждому автору.",
 };
 
 const tableLabels: Record<string, string> = {
-  indices: "Индексы авторов",
+  indices: "Авторы и индексы",
   ratings: "Рейтинговые позиции",
   works: "Работы OpenAlex",
   authorships: "Авторства",
@@ -164,8 +181,8 @@ const tableLabels: Record<string, string> = {
 };
 
 const tableDescriptions: Record<string, string> = {
-  indices: "Готовые значения индексов по авторам.",
-  ratings: "Ранги по метрикам и режимам учёта.",
+  indices: "Авторская таблица: один автор на строку и рассчитанные показатели.",
+  ratings: "Места авторов по показателям и режимам учета.",
   works: "Плоская таблица работ, полученных из OpenAlex.",
   authorships: "Авторства и организации из OpenAlex.",
   work_topics: "Развернутый список OpenAlex topics для локального topics_any.",
@@ -173,46 +190,183 @@ const tableDescriptions: Record<string, string> = {
 };
 
 const columnLabels: Record<string, string> = {
+  id: "Идентификатор",
+  run_id: "ID расчета",
+  source_run_id: "Исходный расчет",
+  dump_id: "ID среза",
+  source_dump_id: "Исходный срез",
+  slice_id: "ID описания среза",
+  cohort_id: "ID выборки авторов",
+  schema: "Схема данных",
+  status: "Статус",
+  source: "Источник",
+  source_path: "Путь к файлу",
+  resolved_path: "Фактический путь",
+  path: "Путь",
+  exists: "Есть файл",
+  rows: "Строк",
+  total: "Всего строк",
+  limit: "Лимит строк",
+  offset: "Смещение",
+  kind: "Тип таблицы",
+  label: "Название",
   author_id: "ID автора",
   author_display_name: "Автор",
+  author_orcid: "ORCID автора",
+  author_country_code: "Страна автора",
+  country_codes_csv: "Страны автора",
+  institution_ids_csv: "Организации автора",
+  institution_id: "ID организации",
+  institution_display_name: "Организация",
+  institution_ror: "ROR организации",
   country_code: "Страна",
   subject_name: "Предметная область",
   work_id: "ID работы",
   work_display_name: "Название работы",
   title: "Название",
   display_name: "Название",
+  doi: "DOI",
+  type: "Тип публикации",
+  work_type: "Тип публикации",
+  source_id: "ID источника",
   source_display_name: "Источник",
+  source_type: "Тип источника",
+  language: "Язык",
+  open_access_is_oa: "Открытый доступ",
+  has_abstract: "Есть аннотация",
   publication_date: "Дата публикации",
   publication_year: "Год",
   cited_by_count: "Цитирования",
+  updated_date: "Дата обновления",
+  created_date: "Дата создания",
+  primary_topic_id: "ID основной темы",
+  primary_topic_display_name: "Основная тема",
+  primary_subfield_short_id: "Код подобласти",
+  primary_subfield_id: "ID подобласти",
+  primary_field_id: "ID области",
+  topic_id: "ID темы",
+  topic_display_name: "Тема",
+  subfield_id: "ID подобласти",
+  field_id: "ID области",
+  domain_id: "ID домена",
+  is_primary: "Основная тема",
+  score_topic: "Оценка темы",
+  score_topic_relevance: "Релевантность темы",
   works_count: "Работы",
   authors_count: "Число авторов",
   valid_authors_count: "Валидных авторов",
   author_seq: "Позиция автора",
-  fraction_mode: "Режим фракционирования",
-  metric_name: "Метрика",
+  authors_count_used: "Авторов учтено",
+  credit_weight: "Доля вклада",
+  cited_credit: "Долевые цитирования",
+  single_authored_flag: "Один автор",
+  qf_any: "Есть предупреждение качества",
+  qf_authorship_truncated: "Список авторов обрезан",
+  n_flagged_works: "Работ с предупреждениями",
+  n_truncated_works: "Работ с обрезанным авторством",
+  fraction_mode: "Учет вклада авторов",
+  metric_name: "Показатель",
+  rank_metric: "Показатель рейтинга",
   score: "Значение",
-  rank_competition: "Ранг",
-  rank_dense: "Плотный ранг",
-  p: "P",
-  c: "C",
-  c_frac: "Фракц. цитирования",
-  cpp: "CPP",
-  h: "Хирш",
-  i10: "i10",
-  g: "g",
-  m_local: "m локальный",
-  top1_share: "Доля top-1",
-  f5: "f5",
-  fm5: "fm5",
-  iupv: "IUPV",
-  islv: "ISLV",
-  lrdi: "LRDI",
+  value: "Значение",
+  rank_competition: "Место",
+  rank_dense: "Место без пропусков",
+  p: "Публикации",
+  c: "Цитирования",
+  c_frac: "Долевые цитирования",
+  cpp: "Средняя цитируемость",
+  h: "Индекс Хирша",
+  i10: "Работы с 10+ цитированиями",
+  g: "Индекс g",
+  m_local: "Индекс m",
+  top1_share: "Доля самой цитируемой работы",
+  f5: "Индекс Полянина f5",
+  fm5: "Долевой индекс Полянина fm5",
+  iupv: "Собственный интегральный индекс",
+  islv: "Собственный сбалансированный индекс",
+  lrdi: "Индекс устойчивости результата",
   mean_authors_per_work: "Среднее число авторов",
   share_single_authored: "Доля одноавторских",
-  rank: "Ранг",
-  spearman_vs_base: "Spearman к базе",
-  top20_retention: "Сохранение top-20",
+  rank: "Место",
+  baseline_metric: "Основной показатель",
+  compare_metric: "Сравниваемый показатель",
+  baseline_rank: "Место по основному показателю",
+  metric_rank: "Место по показателю",
+  rank_delta: "Изменение места",
+  abs_rank_delta: "Абсолютное изменение места",
+  method: "Метод",
+  left_metric: "Первый показатель",
+  right_metric: "Второй показатель",
+  min: "Минимум",
+  max: "Максимум",
+  q1: "Первый квартиль",
+  q3: "Третий квартиль",
+  median: "Медиана",
+  mean: "Среднее",
+  stddev: "Стандартное отклонение",
+  coefficient_of_variation: "Коэффициент вариации",
+  iqr: "Разброс середины",
+  p90: "90-й процентиль",
+  p95: "95-й процентиль",
+  p99: "99-й процентиль",
+  n: "Наблюдений",
+  n_authors: "Авторов",
+  missing_count: "Пропущено значений",
+  zero_count: "Нулевых значений",
+  zero_rate: "Доля нулевых значений",
+  skewness: "Перекос распределения",
+  excess_kurtosis: "Резкие крайние значения",
+  tie_rate: "Доля совпадающих значений",
+  unique_count: "Уникальных значений",
+  outlier_count_iqr: "Резко выделяющихся значений",
+  outlier_share_iqr: "Доля резко выделяющихся значений",
+  rule: "Правило",
+  lower_fence: "Нижняя граница",
+  upper_fence: "Верхняя граница",
+  severity: "Важность",
+  text: "Текст",
+  recommendation: "Рекомендация",
+  evidence_json: "Основания",
+  spearman_vs_base: "Связь с основным показателем",
+  top20_retention: "Совпадение первых 20 строк",
+};
+
+export const WORK_TYPE_LABELS: Record<string, string> = {
+  article: "Статья",
+  review: "Обзор",
+  "conference-paper": "Материалы конференции",
+  book: "Книга",
+  "book-chapter": "Глава книги",
+  "book-section": "Раздел книги",
+  preprint: "Препринт",
+  dissertation: "Диссертация",
+  report: "Отчет",
+  "report-component": "Раздел отчета",
+  dataset: "Набор данных",
+  database: "База данных",
+  software: "Программное обеспечение",
+  standard: "Стандарт",
+  editorial: "Редакционная статья",
+  erratum: "Исправление",
+  letter: "Письмо в редакцию",
+  "peer-review": "Рецензия",
+  "reference-entry": "Справочная статья",
+  retraction: "Сообщение об отзыве",
+  paratext: "Служебный текст",
+  other: "Другое",
+  libguides: "Библиотечный путеводитель",
+  "supplementary-materials": "Дополнительные материалы",
+  grant: "Грант",
+};
+
+export const SOURCE_TYPE_LABELS: Record<string, string> = {
+  journal: "Журнал",
+  repository: "Репозиторий",
+  conference: "Конференция",
+  "ebook platform": "Платформа электронных книг",
+  "book series": "Книжная серия",
+  metadata: "Метаданные",
+  other: "Другое",
 };
 
 export const METRIC_OPTIONS: SelectOption[] = METRICS.map((value) => ({
@@ -222,8 +376,8 @@ export const METRIC_OPTIONS: SelectOption[] = METRICS.map((value) => ({
   example: value === "iupv" ? "для итогового топа" : undefined,
 }));
 
-export const CORE_METRIC_OPTIONS: SelectOption[] = METRIC_OPTIONS.filter((item) => ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"].includes(item.value));
-export const PRIMARY_METRIC_OPTIONS: SelectOption[] = METRIC_OPTIONS.filter((item) => ["islv", "iupv", "p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"].includes(item.value));
+export const CORE_METRIC_OPTIONS: SelectOption[] = METRIC_OPTIONS.filter((item) => ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "f5", "fm5", "iupv", "islv", "lrdi"].includes(item.value));
+export const PRIMARY_METRIC_OPTIONS: SelectOption[] = METRIC_OPTIONS.filter((item) => ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"].includes(item.value));
 
 export const FILTER_MODE_OPTIONS: SelectOption[] = [
   { value: "primary_topic", label: "Точная тематическая принадлежность", description: "Работа относится к выбранному направлению как к основной теме." },
@@ -253,6 +407,14 @@ export function metricLabel(value: string) {
   return metricLabels[value] ?? value;
 }
 
+export function metricDescription(value: string) {
+  return metricDescriptions[value] ?? "";
+}
+
+export function metricFormula(value: string) {
+  return metricFormulas[value] ?? metricDescriptions[value] ?? "";
+}
+
 export function modeLabel(value: string) {
   return modeLabels[value] ?? value;
 }
@@ -262,8 +424,99 @@ export function tableLabel(value: string) {
 }
 
 export function columnLabel(value: string) {
-  return columnLabels[value] ?? value;
+  return columnLabels[value] ?? metricLabels[value] ?? humanizeColumnName(value);
 }
+
+export function workTypeLabel(value: string) {
+  const code = String(value || "").trim();
+  if (!code) return "";
+  return `${WORK_TYPE_LABELS[code] ?? humanizeToken(code)} (${code})`;
+}
+
+export function sourceTypeLabel(value: string) {
+  const code = String(value || "").trim();
+  if (!code) return "";
+  return `${SOURCE_TYPE_LABELS[code] ?? humanizeToken(code)} (${code})`;
+}
+
+export function languageLabel(value: string) {
+  const code = String(value || "").trim().toLowerCase();
+  if (!code) return "";
+  try {
+    const name = new Intl.DisplayNames(["ru"], { type: "language" }).of(code);
+    return name && name !== code ? `${name} (${code})` : code;
+  } catch {
+    return code;
+  }
+}
+
+export function humanizeToken(value: string) {
+  return String(value || "")
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function humanizeColumnName(value: string) {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  const expanded = clean
+    .replace(/_id$/i, "_identifier")
+    .replace(/_csv$/i, "")
+    .replace(/_/g, " ");
+  return expanded
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => COLUMN_WORDS[part] ?? part)
+    .join(" ")
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
+const COLUMN_WORDS: Record<string, string> = {
+  abs: "модуль",
+  analysis: "анализ",
+  author: "автор",
+  authors: "авторы",
+  authorship: "авторство",
+  authorships: "авторства",
+  baseline: "базовый",
+  checksum: "контрольная сумма",
+  cited: "цитирования",
+  cohort: "выборка",
+  compare: "сравнение",
+  count: "число",
+  current: "текущий",
+  data: "данные",
+  dense: "плотный",
+  display: "отображаемое",
+  dump: "срез",
+  evidence: "основания",
+  field: "область",
+  filter: "фильтр",
+  fraction: "доля",
+  identifier: "ID",
+  institution: "организация",
+  local: "локальный",
+  metric: "показатель",
+  mode: "режим",
+  name: "название",
+  outlier: "резко выделяющееся значение",
+  publication: "публикация",
+  rank: "место",
+  report: "отчет",
+  run: "расчет",
+  scope: "область",
+  score: "значение",
+  source: "источник",
+  status: "статус",
+  table: "таблица",
+  topic: "тема",
+  type: "тип",
+  value: "значение",
+  work: "работа",
+  works: "работы",
+};
 
 export function countryLabel(value: string) {
   const code = value.trim().toUpperCase();

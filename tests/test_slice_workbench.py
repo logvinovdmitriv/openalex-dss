@@ -17,6 +17,125 @@ from app.services import author_slice, slice_workbench  # noqa: E402
 
 
 class SliceWorkbenchTests(unittest.TestCase):
+    def test_subject_ids_accept_openalex_urls_but_store_short_ids(self) -> None:
+        cfg = author_slice.config_from_payload(
+            {
+                "filter_mode": "primary_topic",
+                "entity_level": "topic",
+                "entity_id_short": "https://openalex.org/T10260",
+                "entity_display_name": "Software Engineering Research",
+            }
+        )
+
+        self.assertEqual(cfg.entity_id_short, "T10260")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with (
+                patch.object(slice_workbench, "SLICES_DIR", tmp_path / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+            ):
+                doc = slice_workbench.create_slice(
+                    {
+                        "filter_mode": "primary_topic",
+                        "entity_level": "topic",
+                        "entity_id_short": "https://openalex.org/T10260",
+                        "entity_display_name": "Software Engineering Research",
+                    }
+                )
+
+                self.assertEqual(doc["technical_payload"]["entity_id_short"], "T10260")
+                self.assertEqual(doc["technical_payload"]["entity_id_full"], "https://openalex.org/T10260")
+
+    def test_delete_slice_removes_definition_and_plans(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_plan = {
+                "decision": {"status": "can_fetch", "can_execute": True, "reasons": [], "warnings": []},
+                "estimate": {"estimate_count": 10, "estimate_signature": "estimate", "download_signature": "download"},
+                "openalex_filter": "primary_topic.subfield.id:1706",
+                "filter_classes": {},
+                "download_policy": {"user_controls_download_after_estimate": True},
+                "limits": {},
+            }
+            with (
+                patch.object(slice_workbench, "SLICES_DIR", tmp_path / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan),
+            ):
+                created = slice_workbench.create_slice({"slice_id": "slice_delete", "filter_mode": "all"})
+                plan = slice_workbench.create_materialization_plan(created["slice_id"])
+
+                deleted = slice_workbench.delete_slice(created["slice_id"])
+
+                self.assertTrue(deleted["deleted"])
+                self.assertEqual(deleted["deleted_materializations"], 1)
+                with self.assertRaises(KeyError):
+                    slice_workbench.get_slice(created["slice_id"])
+                with self.assertRaises(KeyError):
+                    slice_workbench.get_materialization_plan(plan["materialization_id"])
+
+    def test_delete_dump_removes_local_slice_artifacts_and_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "data"
+            raw_dir = data / "raw/openalex_cli/slice_delete"
+            raw_dir.mkdir(parents=True)
+            raw_jsonl = raw_dir / "works.jsonl.gz"
+            raw_jsonl.write_text("data", encoding="utf-8")
+            (data / "dumps/dump_delete").mkdir(parents=True)
+            (data / "tables/dump_delete").mkdir(parents=True)
+            run_dir = data / "runs/run_delete"
+            run_dir.mkdir(parents=True)
+            (run_dir / "metric_run.json").write_text('{"dump_id": "dump_delete"}', encoding="utf-8")
+            plans_dir = root / "plans"
+            plans_dir.mkdir()
+            (plans_dir / "mat_delete.json").write_text('{"materialization_id": "mat_delete", "dump_id": "dump_delete"}', encoding="utf-8")
+            dump = {"dump_id": "dump_delete", "raw_jsonl": str(raw_jsonl)}
+            with (
+                patch.object(slice_workbench, "DATA", data),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", plans_dir),
+                patch.object(slice_workbench.metadata_store, "get_slice_dump_by_dump_id", return_value=dump),
+                patch.object(slice_workbench.metadata_store, "delete_slice_dump_by_dump_id", return_value={"deleted": 1, "dumps": [dump]}) as delete_metadata,
+                patch.object(slice_workbench.artifact_context, "read_active_context", return_value={"active_dump_id": "dump_delete"}),
+                patch.object(slice_workbench.artifact_context, "write_active_context") as write_context,
+            ):
+                deleted = slice_workbench.delete_dump("dump_delete")
+
+            self.assertTrue(deleted["deleted"])
+            self.assertFalse((data / "dumps/dump_delete").exists())
+            self.assertFalse((data / "tables/dump_delete").exists())
+            self.assertFalse(run_dir.exists())
+            self.assertFalse(raw_dir.exists())
+            self.assertFalse((plans_dir / "mat_delete.json").exists())
+            delete_metadata.assert_called_once_with("dump_delete")
+            write_context.assert_called_once()
+
+    def test_select_dump_writes_active_context(self) -> None:
+        dump = {
+            "dump_id": "dump_select",
+            "slice_id": "slice_select",
+            "allowed_for_final_analysis": True,
+            "scientific_completeness": "complete",
+        }
+        with (
+            patch.object(slice_workbench.metadata_store, "get_slice_dump_by_dump_id", return_value=dump),
+            patch.object(slice_workbench.artifact_context, "write_active_context", return_value={"active_dump_id": "dump_select"}) as write_context,
+        ):
+            result = slice_workbench.select_dump("dump_select")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["active_context"]["active_dump_id"], "dump_select")
+        write_context.assert_called_once_with(
+            run_id="",
+            dump_id="dump_select",
+            source="selected_local_slice",
+            extra={
+                "slice_id": "slice_select",
+                "allowed_for_final_analysis": True,
+                "scientific_completeness": "complete",
+            },
+        )
+
     def test_workbench_summary_carries_quality_and_slice_centric_workflow(self) -> None:
         quality = {"quality_counts": {"works_without_authorships": 2, "authorships_null_author_id": 1}}
         active_context = {
@@ -355,9 +474,11 @@ class SliceWorkbenchTests(unittest.TestCase):
 
                 materialization = slice_workbench.create_materialization_plan(
                     created["slice_id"],
-                    {"storage_profile_id": "minimal_analytics", "download_policy": payload["download_policy"]},
+                    {"storage_profile_id": "minimal_analytics", "download_policy": payload["download_policy"], "download_dir": "custom_slices"},
                 )
                 self.assertEqual(materialization["source_strategy"], "openalex_cli")
+                self.assertEqual(materialization["download_dir"], "custom_slices")
+                self.assertEqual(materialization["technical_payload"]["download_dir"], "custom_slices")
                 self.assertEqual(materialization["download_policy"]["complete_slice_required"], True)
                 self.assertEqual(materialization["download_policy"]["user_controls_download_after_estimate"], True)
                 self.assertEqual(materialization["state"], "planned")
@@ -415,6 +536,40 @@ class SliceWorkbenchTests(unittest.TestCase):
                 self.assertEqual(updated_slice["state"], "analyzed")
                 self.assertEqual(updated_plan["state"], "ready")
                 self.assertEqual(updated_plan["dump_id"], "dump_done")
+
+    def test_run_materialization_updates_download_dir_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            plan = {
+                "materialization_id": "mat_download_dir",
+                "slice_id": "slice_missing_ok",
+                "state": "planned",
+                "technical_payload": {
+                    "entity_level": "subfield",
+                    "entity_id_short": "1706",
+                    "entity_display_name": "Computer Science Applications",
+                    "filter_mode": "primary_topic",
+                    "from_publication_date": "2020-01-01",
+                    "to_publication_date": "2025-12-31",
+                },
+                "estimated": {},
+                "accepted_estimate_signature": "estimate",
+                "accepted_download_signature": "download",
+            }
+            captured: dict[str, object] = {}
+            with (
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.jobs, "create_run", side_effect=lambda action, payload, autostart=False: captured.update({"action": action, "payload": payload}) or {"run_id": "run_download_dir"}),
+                patch.object(slice_workbench.jobs, "start_run", return_value=None),
+                patch.object(slice_workbench.jobs, "get_run", return_value={"run_id": "run_download_dir", "status": "queued"}),
+            ):
+                slice_workbench._write_materialization(plan)
+                slice_workbench.run_materialization("mat_download_dir", {"download_dir": "custom_slices"})
+
+                updated = slice_workbench.get_materialization_plan("mat_download_dir")
+        self.assertEqual(updated["download_dir"], "custom_slices")
+        self.assertEqual(updated["technical_payload"]["download_dir"], "custom_slices")
+        self.assertEqual((captured["payload"] or {})["download_dir"], "custom_slices")
 
     def test_materialization_no_data_marks_slice_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -508,6 +663,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                 patch.object(slice_workbench.jobs, "create_run", return_value={"run_id": "run_retry", "status": "queued"}) as create_run,
                 patch.object(slice_workbench.jobs, "start_run", return_value={"run_id": "run_retry", "status": "queued"}),
                 patch.object(slice_workbench.jobs, "get_run", return_value={"run_id": "run_retry", "status": "queued"}),
+                patch.dict("os.environ", {"OPENALEX_API_KEY": "test-key"}),
             ):
                 created = slice_workbench.create_slice(payload)
                 materialization = slice_workbench.create_materialization_plan(created["slice_id"])
@@ -645,6 +801,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                 patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan),
                 patch.object(slice_workbench.jobs, "create_run", return_value={"run_id": "run_fast", "status": "queued"}),
                 patch.object(slice_workbench.jobs, "get_run", return_value={"run_id": "run_fast", "status": "completed"}),
+                patch.dict("os.environ", {"OPENALEX_API_KEY": "test-key"}),
             ):
                 created = slice_workbench.create_slice(payload)
                 materialization = slice_workbench.create_materialization_plan(created["slice_id"])
@@ -695,6 +852,40 @@ class SliceWorkbenchTests(unittest.TestCase):
 
                 self.assertEqual(materialization["accepted_estimate_signature"], "new-estimate")
                 self.assertEqual(materialization["accepted_download_signature"], "new-download")
+
+    def test_materialization_plan_reuses_current_estimate_without_api_replan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload = {
+                "slice_id": "slice_reuse_estimate",
+                "entity_level": "subfield",
+                "entity_id_short": "1706",
+                "entity_display_name": "Computer Science Applications",
+            }
+            cfg = author_slice.config_from_payload({**payload, "workflow_mode": "strict_works"})
+            fake_plan = {
+                "decision": {"status": "can_fetch", "can_execute": True, "reasons": [], "warnings": []},
+                "estimate": {
+                    "estimate_count": 10,
+                    "estimate_signature": slice_workbench.corpus_signature(cfg),
+                    "download_signature": slice_workbench.cli_download_signature(cfg),
+                },
+                "openalex_filter": "primary_topic.subfield.id:1706",
+                "filter_classes": {},
+                "download_policy": {"complete_slice_required": True, "allow_incomplete_preview": False, "user_controls_download_after_estimate": True},
+                "limits": {},
+            }
+            with (
+                patch.object(slice_workbench, "SLICES_DIR", tmp_path / "slices"),
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.query_planner, "plan_slice", return_value=fake_plan) as plan_slice,
+            ):
+                created = slice_workbench.create_slice(payload)
+                slice_workbench.estimate_slice(created["slice_id"])
+                materialization = slice_workbench.create_materialization_plan(created["slice_id"])
+
+            self.assertEqual(plan_slice.call_count, 1)
+            self.assertEqual(materialization["technical_payload"]["query_plan"]["estimate"]["estimate_count"], 10)
 
     def test_materialization_technical_payload_is_normalized_with_signatures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

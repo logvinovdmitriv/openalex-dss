@@ -1,13 +1,13 @@
 version: "1.0"
 top_n:
   - value: 25
-    label: "Top-25 авторов"
+    label: "25 авторов"
   - value: 50
-    label: "Top-50 авторов"
+    label: "50 авторов"
   - value: 100
-    label: "Top-100 авторов"
+    label: "100 авторов"
     default: true
   - value: 250
-    label: "Top-250 авторов"
+    label: "250 авторов"
   - value: 500
-    label: "Top-500 авторов"
+    label: "500 авторов"

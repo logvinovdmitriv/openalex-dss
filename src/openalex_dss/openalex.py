@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import hashlib
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +16,34 @@ import yaml
 from .config import SliceConfig
 
 API_BASE = "https://api.openalex.org/works"
+
+WORK_TYPE_LABELS = {
+    "article": "Статья",
+    "review": "Обзор",
+    "conference-paper": "Материалы конференции",
+    "book": "Книга",
+    "book-chapter": "Глава книги",
+    "book-section": "Раздел книги",
+    "preprint": "Препринт",
+    "dissertation": "Диссертация",
+    "report": "Отчет",
+    "report-component": "Раздел отчета",
+    "dataset": "Набор данных",
+    "database": "База данных",
+    "software": "Программное обеспечение",
+    "standard": "Стандарт",
+    "editorial": "Редакционная статья",
+    "erratum": "Исправление",
+    "letter": "Письмо в редакцию",
+    "peer-review": "Рецензия",
+    "reference-entry": "Справочная статья",
+    "retraction": "Сообщение об отзыве",
+    "paratext": "Служебный текст",
+    "other": "Другое",
+    "libguides": "Библиотечный путеводитель",
+    "supplementary-materials": "Дополнительные материалы",
+    "grant": "Грант",
+}
 _CACHE_STATS = {"hits": 0, "misses": 0}
 _LAST_RATE_LIMIT: dict[str, Any] = {}
 
@@ -135,8 +164,8 @@ def estimate_works(
         "estimated_cli_metadata_bytes": estimated_cli_metadata_bytes,
         "estimated_cli_metadata_mb": round(estimated_cli_metadata_bytes / (1024 * 1024), 3),
         "estimate_scope": {
-            "api_sample": "selected root-level Works fields for preview and facets",
-            "cli_download": "full OpenAlex CLI metadata payload; forecast is conservative because CLI currently has no select projection",
+            "api_sample": "выборка Works для оценки объема и фасетов",
+            "downloader_payload": "полные метаданные Works для локального среза; прогноз консервативный, потому что загрузчик не поддерживает select-проекцию",
         },
         "estimated_raw_bytes_for_download": estimated_raw_bytes_for_budget,
         "estimated_raw_mb_for_download": round(estimated_raw_bytes_for_budget / (1024 * 1024), 3),
@@ -182,13 +211,13 @@ def cli_download_signature(cfg: SliceConfig) -> str:
 def download_consistency(cfg: SliceConfig) -> dict[str, Any]:
     reasons: list[str] = []
     if cfg.filter_mode == "search" and cfg.text_search_query.strip():
-        reasons.append("Installed OpenAlex CLI supports --filter but not the API search parameter; use OpenAlex entity filters or a future ID-based search download mode.")
+        reasons.append("Установленный загрузчик OpenAlex поддерживает фильтры, но не текстовый поиск API; выберите тему, организацию, автора, источник или другой структурированный фильтр.")
     compatible = not reasons
     return {
         "compatible": compatible,
         "download_equivalence": {
             "equivalent": compatible,
-            "scope": "CLI --filter request covers the same Works corpus as the API estimate request",
+            "scope": "Запрос загрузчика OpenAlex покрывает тот же корпус Works, что и запрос оценки через API",
             "reasons": reasons,
         },
         "estimate_signature": corpus_signature(cfg),
@@ -222,13 +251,24 @@ def _estimate_facets(cfg: SliceConfig, count_params: dict[str, str], api_key: st
         rows = [
             {
                 "key": row.get("key"),
-                "label": row.get("key_display_name") or row.get("key") or "",
+                "label": _facet_label(name, row.get("key_display_name") or row.get("key") or ""),
                 "count": int(row.get("count") or 0),
             }
             for row in payload.get("group_by", [])
         ]
         facets[name] = {"group_by": group_by, "rows": rows, "cost_usd": _payload_cost(payload)}
     return facets
+
+
+def _facet_label(facet_name: str, value: object) -> str:
+    text = str(value or "").strip()
+    if facet_name == "work_types" and text:
+        return f"{WORK_TYPE_LABELS.get(text, _humanize_token(text))} ({text})"
+    return text
+
+
+def _humanize_token(value: str) -> str:
+    return " ".join(part[:1].upper() + part[1:] for part in value.replace("_", "-").split("-") if part)
 
 
 def _works_params(cfg: SliceConfig, per_page: int) -> dict[str, str]:
@@ -297,6 +337,10 @@ def _get_json(url: str, params: dict[str, str]) -> dict[str, Any]:
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"OpenAlex HTTP {exc.code}: {body}") from exc
+    except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+        raise RuntimeError(f"OpenAlex API is unavailable: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("OpenAlex API returned invalid JSON") from exc
 
 
 def _capture_rate_limit_headers(headers: Any) -> None:

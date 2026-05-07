@@ -2,7 +2,7 @@ version: "1.0"
 profiles:
   - profile_id: "slice_local_default"
     label: "Единый локальный рейтинг"
-    description: "Основной профиль для works-first расчета и UI. Равные значения индекса разрешаются одинаково в CSV, API и интерфейсе."
+    description: "Основная настройка для works-first расчета и UI. Равные значения индекса разрешаются одинаково в CSV, API и интерфейсе."
     metric_scope: "computed_from_slice_works"
     default_primary_metric: "islv"
     sort:

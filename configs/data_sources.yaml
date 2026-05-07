@@ -2,7 +2,7 @@ version: "1.0"
 sources:
   - id: openalex_api
     label: "OpenAlex API"
-    role: "Поиск сущностей, оценка среза, group_by/sample preview и точечное обогащение ORCID/ROR/DOI. Не используется для скачивания полного среза."
+    role: "Поиск сущностей, оценка объема среза, справочники и точечное обогащение ORCID/ROR/DOI. Не используется для скачивания полного среза."
     status: "implemented"
     default: false
     supports:
@@ -12,8 +12,8 @@ sources:
       - sample_estimate
       - select_fields
   - id: openalex_cli
-    label: "OpenAlex CLI"
-    role: "Официальная CLI-загрузка фильтрованных Works metadata с checkpointing, parallel downloads и adaptive rate limiting."
+    label: "Загрузчик OpenAlex"
+    role: "Официальное скачивание выбранных работ OpenAlex с возобновлением и параллельной загрузкой; установленный загрузчик требует ключ OpenAlex."
     status: "implemented"
     default: true
     install: "pip install openalex-official"
@@ -51,7 +51,7 @@ sources:
       - s3
   - id: local_filesystem
     label: "Локальная папка данных"
-    role: "Raw JSONL.GZ, Parquet-витрины, паспорта, отчеты и API-кэш вне репозитория."
+    role: "Уже скачанные локальные срезы: Raw JSONL.GZ, Parquet-витрины, паспорта, отчеты и API-кэш вне репозитория."
     status: "implemented"
     supports:
       - raw_jsonl_gz

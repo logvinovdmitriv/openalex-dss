@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import shutil
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -19,13 +21,17 @@ from openalex_dss.io_utils import ensure_dir, sha256_file, write_json  # noqa: E
 from openalex_dss.openalex import build_filter, cli_download_signature, corpus_signature, download_consistency  # noqa: E402
 
 
-def cli_status() -> dict[str, Any]:
+def cli_status(api_key_env: str = "OPENALEX_API_KEY") -> dict[str, Any]:
     executable = shutil.which("openalex")
+    key_env = str(api_key_env or "OPENALEX_API_KEY").strip() or "OPENALEX_API_KEY"
     return {
         "available": bool(executable),
         "executable": executable or "",
+        "api_key_env": key_env,
+        "api_key_configured": bool(os.environ.get(key_env)),
+        "api_key_required_for_remote_download": False,
         "install": "pip install openalex-official",
-        "purpose": "official OpenAlex downloader for filtered Works metadata with checkpointing and rate limiting",
+        "purpose": "скачивание выбранного среза OpenAlex локальным загрузчиком; ключ передается только если пользователь явно его указал",
     }
 
 
@@ -39,17 +45,14 @@ def download_works_metadata(
 ) -> dict[str, Any]:
     status = cli_status()
     if not status["available"]:
-        raise RuntimeError("OpenAlex CLI is not installed. Install it locally with: pip install openalex-official")
-    if not api_key.strip():
-        raise ValueError("OpenAlex CLI mode requires an OpenAlex API key.")
-
+        raise RuntimeError("Загрузчик OpenAlex не установлен. Установите его локально: pip install openalex-official")
     consistency = download_consistency(cfg)
     if consistency.get("compatible") is False:
-        raise ValueError("; ".join(consistency.get("reasons") or []) or "This slice cannot be downloaded through the installed OpenAlex CLI.")
+        raise ValueError("; ".join(consistency.get("reasons") or []) or "Этот срез нельзя скачать установленным загрузчиком OpenAlex.")
 
     filter_value = build_filter(cfg)
     if not filter_value:
-        raise ValueError("OpenAlex CLI mode requires a concrete OpenAlex filter to avoid unbounded downloads.")
+        raise ValueError("Для скачивания среза нужен конкретный фильтр OpenAlex, чтобы не запустить неограниченную загрузку.")
 
     base_dir = ensure_dir(Path(out_dir) if out_dir else DATA / "raw/openalex_cli" / cfg.slice_name)
     files_dir = ensure_dir(base_dir / "files")
@@ -63,13 +66,13 @@ def download_works_metadata(
     command = [
         str(status["executable"]),
         "download",
-        "--api-key",
-        api_key,
         "--output",
         str(files_dir),
         "--filter",
         filter_value,
     ]
+    if api_key.strip():
+        command[2:2] = ["--api-key", api_key.strip()]
     public_command = [part if part != api_key else "***" for part in command]
     cli_version = _cli_version(str(status["executable"]))
     current_corpus_signature = corpus_signature(cfg)
@@ -85,19 +88,31 @@ def download_works_metadata(
 
     if progress_callback:
         progress_callback({
-            "percent": 30,
-            "stage": "OpenAlex CLI is downloading files; exact progress is unavailable until packing starts",
-            "fetched": 0,
+            "percent": 25,
+            "stage": "Загрузка среза началась; ожидаем первые файлы",
+            "target_records": planned_records or None,
+            "estimated_raw_bytes": planned_raw_bytes or None,
+            "external_progress": True,
         })
 
-    completed = subprocess.run(command, cwd=str(base_dir), text=True, capture_output=True, check=False)
-    stdout_path.write_text(completed.stdout or "", encoding="utf-8", newline="\n")
-    stderr_path.write_text(completed.stderr or "", encoding="utf-8", newline="\n")
+    completed = _run_cli_download(
+        command,
+        base_dir=base_dir,
+        files_dir=files_dir,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        started_at=started_at,
+        planned_records=planned_records,
+        planned_raw_bytes=planned_raw_bytes,
+        progress_callback=progress_callback,
+    )
     if completed.returncode != 0:
-        raise RuntimeError((completed.stderr or completed.stdout or "OpenAlex CLI failed").strip())
+        stderr_text = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
+        stdout_text = stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else ""
+        raise RuntimeError((stderr_text or stdout_text or "Загрузка OpenAlex завершилась ошибкой").strip())
 
     if progress_callback:
-        progress_callback({"percent": 82, "stage": "packing CLI JSON files", "fetched": 0})
+        progress_callback({"percent": 82, "stage": "Упаковка файлов OpenAlex", "fetched": 0})
 
     try:
         records, files_manifest = _pack_work_json_files(files_dir, raw_path, progress_callback=progress_callback, manifest_path=manifest_path)
@@ -107,7 +122,7 @@ def download_works_metadata(
             "slice_id": cfg.slice_name,
             "dump_id": f"dump_failed_{cfg.slice_name}",
             "source_mode": "openalex_cli",
-            "source": "OpenAlex CLI works metadata",
+            "source": "Загрузка работ OpenAlex",
             "created_at_utc": finished_at.isoformat(),
             "download_started_at_utc": started_at.isoformat(),
             "download_finished_at_utc": finished_at.isoformat(),
@@ -158,7 +173,7 @@ def download_works_metadata(
         "slice_id": cfg.slice_name,
         "dump_id": dump_id,
         "source_mode": "openalex_cli",
-        "source": "OpenAlex CLI works metadata",
+        "source": "Загрузка работ OpenAlex",
         "created_at_utc": finished_at.isoformat(),
         "download_started_at_utc": started_at.isoformat(),
         "download_finished_at_utc": finished_at.isoformat(),
@@ -200,7 +215,7 @@ def download_works_metadata(
         "raw_jsonl": str(raw_path),
         "raw_jsonl_sha256": checksum,
         "files_manifest": str(manifest_path),
-        "used_api_key": True,
+        "used_api_key": bool(api_key.strip()),
         "execution_plan": {
             "strategy": "openalex_cli_filtered_metadata",
             "checkpointing": True,
@@ -211,6 +226,7 @@ def download_works_metadata(
             "download_signature_verified": download_signature_verified,
         },
         "storage_plan": {
+            "download_base_dir": str(base_dir),
             "cli_output_dir": str(files_dir),
             "raw_jsonl": str(raw_path),
             "raw_size_mb": round(actual_raw_bytes / (1024 * 1024), 3),
@@ -221,7 +237,7 @@ def download_works_metadata(
     write_json(dump_manifest_path, dump_manifest)
 
     if progress_callback:
-        progress_callback({"percent": 95, "stage": "CLI slice packed", "fetched": records})
+        progress_callback({"percent": 95, "stage": "Локальный срез упакован", "fetched": records})
 
     return dump_manifest
 
@@ -263,12 +279,75 @@ def _pack_work_json_files(
                 item["parse_error"] = error
             manifest.append(item)
             if progress_callback and (index == len(candidates) or records % 500 == 0):
-                progress_callback({"percent": 82, "stage": f"packed {records} works", "fetched": records, "files_seen": index})
+                progress_callback({"percent": 82, "stage": f"Упаковано {records} работ", "fetched": records, "files_seen": index})
     if manifest_path:
         write_json(manifest_path, {"files": manifest, "records": records, "errors": errors, "status": "failed" if errors else "ok"})
     if strict and errors:
-        raise ValueError("Failed to parse OpenAlex CLI metadata files: " + "; ".join(errors[:5]))
+        raise ValueError("Не удалось разобрать файлы загрузчика OpenAlex: " + "; ".join(errors[:5]))
     return records, manifest
+
+
+def _run_cli_download(
+    command: list[str],
+    *,
+    base_dir: Path,
+    files_dir: Path,
+    stdout_path: Path,
+    stderr_path: Path,
+    started_at: datetime,
+    planned_records: int,
+    planned_raw_bytes: int,
+    progress_callback: Callable[[dict[str, Any]], None] | None,
+) -> subprocess.CompletedProcess[str]:
+    with stdout_path.open("w", encoding="utf-8", newline="\n") as stdout_handle, stderr_path.open("w", encoding="utf-8", newline="\n") as stderr_handle:
+        process = subprocess.Popen(command, cwd=str(base_dir), text=True, stdout=stdout_handle, stderr=stderr_handle)
+        while process.poll() is None:
+            time.sleep(5)
+            if progress_callback:
+                snapshot = _cli_download_snapshot(files_dir)
+                elapsed = max(0, int((datetime.now(timezone.utc) - started_at).total_seconds()))
+                percent = _cli_download_percent(snapshot["bytes_written"], planned_raw_bytes, elapsed)
+                progress_callback({
+                    "percent": percent,
+                    "stage": _cli_download_stage(snapshot["files_seen"], snapshot["bytes_written"], elapsed),
+                    "fetched": 0,
+                    "files_seen": snapshot["files_seen"],
+                    "bytes_written": snapshot["bytes_written"],
+                    "elapsed_seconds": elapsed,
+                    "target_records": planned_records or None,
+                    "estimated_raw_bytes": planned_raw_bytes or None,
+                    "external_progress": True,
+                })
+    return subprocess.CompletedProcess(command, process.returncode)
+
+
+def _cli_download_snapshot(files_dir: Path) -> dict[str, int]:
+    files_seen = 0
+    bytes_written = 0
+    if not files_dir.exists():
+        return {"files_seen": 0, "bytes_written": 0}
+    for path in files_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        files_seen += 1
+        try:
+            bytes_written += path.stat().st_size
+        except OSError:
+            continue
+    return {"files_seen": files_seen, "bytes_written": bytes_written}
+
+
+def _cli_download_percent(bytes_written: int, planned_raw_bytes: int, elapsed_seconds: int) -> int:
+    if planned_raw_bytes > 0 and bytes_written > 0:
+        return min(80, max(30, 30 + int((bytes_written / planned_raw_bytes) * 45)))
+    return min(75, 25 + elapsed_seconds // 15)
+
+
+def _cli_download_stage(files_seen: int, bytes_written: int, elapsed_seconds: int) -> str:
+    mb = round(bytes_written / (1024 * 1024), 1)
+    if files_seen or bytes_written:
+        return f"Загрузка среза: {files_seen} файлов, {mb} МБ на диске"
+    return f"Загрузчик OpenAlex запущен, ожидание первых файлов; прошло {elapsed_seconds} сек."
 
 
 def _supported_metadata_file(path: Path) -> bool:

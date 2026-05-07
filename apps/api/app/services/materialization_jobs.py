@@ -64,7 +64,7 @@ def _build_from_openalex(
     if not analysis_eligibility["allowed_for_final_analysis"] and not allow_unchecked_download:
         raise ValueError("Дамп не допущен к финальному анализу. Обновите оценку и скачивание либо используйте явный dev-режим.")
     if update_progress_callback:
-        update_progress_callback(96, "normalizing local file", {"source_path": raw_jsonl})
+        update_progress_callback(96, "Нормализация локального среза", {"source_path": raw_jsonl})
     built = pipeline.import_local_file(
         normalize_internal_pipeline_payload(
             {

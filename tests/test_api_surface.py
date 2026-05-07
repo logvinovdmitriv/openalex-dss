@@ -20,6 +20,7 @@ for path in (API, SRC):
         sys.path.insert(0, str(path))
 
 from app.main import app  # noqa: E402
+from app.api.routes import openalex as openalex_routes  # noqa: E402
 from app.api.routes import runs as runs_routes  # noqa: E402
 from app.api.routes import slices as slices_routes  # noqa: E402
 from app.api import schemas as public_schemas  # noqa: E402
@@ -45,6 +46,9 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertNotIn("/api/v1/snapshot/manifest", route_paths)
         self.assertIn("/api/v1/workbench", route_paths)
         self.assertIn("/api/v1/catalog", route_paths)
+        self.assertIn("/api/v1/slices/{slice_id}", route_paths)
+        self.assertIn("/api/v1/dumps/{dump_id}/select", route_paths)
+        self.assertIn("/api/v1/dumps/{dump_id}", route_paths)
 
     def test_local_data_preview_routes_are_public(self) -> None:
         route_paths = {getattr(route, "path", "") for route in app.routes}
@@ -114,6 +118,14 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 502)
         self.assertIn("OpenAlex HTTP 400", str(raised.exception.detail))
 
+    def test_openalex_catalog_routes_map_runtime_errors_to_http(self) -> None:
+        with patch.object(openalex_routes.openalex_catalog, "search_subjects", side_effect=RuntimeError("OpenAlex subjects is unavailable")):
+            with self.assertRaises(HTTPException) as raised:
+                openalex_routes.search_subjects("math")
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertIn("OpenAlex subjects is unavailable", str(raised.exception.detail))
+
     def test_internal_pipeline_payload_is_not_a_public_schema(self) -> None:
         public_exports = set(vars(public_schemas))
         internal_props = InternalPipelinePayload.model_json_schema()["properties"]
@@ -131,6 +143,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertIn("active_context_source", internal_props)
         self.assertIn("run_id", internal_props)
         self.assertIn("dump_id", internal_props)
+        self.assertIn("query_plan", internal_props)
         internal = InternalPipelinePayload(filter_mode="all", api_key="secret", workflow_mode="strict_works", extra_field="ignored")
         self.assertEqual(internal.api_key, "secret")
         self.assertEqual(internal.workflow_mode, "strict_works")
@@ -147,6 +160,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
                 "dump_manifest": {"dump_id": "dump_a"},
                 "analysis_eligibility": {"status": "final", "allowed_for_final_analysis": True},
                 "active_context_source": "materialization",
+                "query_plan": {"estimate": {"estimate_count": 1}, "decision": {"status": "can_fetch"}},
                 "unknown_extra": "drop-me",
             }
         )
@@ -159,6 +173,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertEqual(normalized["dump_manifest"], {"dump_id": "dump_a"})
         self.assertEqual(normalized["analysis_eligibility"]["status"], "final")
         self.assertEqual(normalized["active_context_source"], "materialization")
+        self.assertEqual(normalized["query_plan"]["estimate"]["estimate_count"], 1)
         self.assertNotIn("unknown_extra", normalized)
 
     def test_run_request_exposes_only_recalculate_action(self) -> None:

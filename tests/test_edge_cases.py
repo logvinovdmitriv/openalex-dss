@@ -4,11 +4,13 @@ import json
 import os
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
 import _path  # noqa: F401
 from openalex_dss.config import load_config, replace_config
+from openalex_dss.io_utils import read_table_dicts, write_parquet_dicts
 from openalex_dss.metrics import build_author_work_metrics, compute_indices
 from openalex_dss.normalize import normalize_raw
 from openalex_dss.openalex import build_filter, download_consistency, estimate_works
@@ -74,6 +76,26 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertGreater(a1["islv"], 0.0)
             self.assertTrue(ratings)
 
+    def test_parquet_writer_stabilizes_mixed_openalex_column_types(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            parquet = root / "table.parquet"
+            rows = [
+                {"id": "W1", "score": 1, "metadata": {"source": "fixture"}},
+                {"id": "W2", "score": 0.5, "metadata": ["unexpected", "shape"]},
+            ]
+
+            count = write_parquet_dicts(parquet, rows, ["id", "score", "metadata"])
+            if count == 0:
+                self.skipTest("polars is not installed")
+
+            loaded = read_table_dicts(parquet)
+
+        self.assertEqual(count, 2)
+        self.assertEqual([row["id"] for row in loaded], ["W1", "W2"])
+        self.assertEqual([row["score"] for row in loaded], [1.0, 0.5])
+        self.assertEqual(loaded[0]["metadata"], '{"source": "fixture"}')
+
     def test_topic_filter_keeps_openalex_t_prefix_and_no_hidden_date_filters(self) -> None:
         cfg = replace_config(
             load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
@@ -120,6 +142,14 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertNotIn("sort", called_params[1])
             self.assertIn("sample", called_params[1])
 
+    def test_estimate_works_maps_openalex_connectivity_failure_to_runtime_error(self) -> None:
+        cfg = replace_config(load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"))
+        with patch("openalex_dss.openalex.urllib.request.urlopen", side_effect=urllib.error.URLError("offline")):
+            with self.assertRaises(RuntimeError) as raised:
+                estimate_works(cfg, sample_size=2)
+
+        self.assertIn("OpenAlex API is unavailable", str(raised.exception))
+
     def test_search_mode_is_not_cli_download_compatible(self) -> None:
         cfg = replace_config(
             load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
@@ -128,7 +158,7 @@ class EdgeCaseTests(unittest.TestCase):
         )
         result = download_consistency(cfg)
         self.assertFalse(result["compatible"])
-        self.assertIn("search", result["reasons"][0])
+        self.assertIn("текстовый поиск", result["reasons"][0])
 
     def test_build_passports_requires_scoped_primary_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

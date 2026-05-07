@@ -26,6 +26,7 @@ class InternalPipelinePayload(SliceDefinitionPayload):
     api_key: str | None = None
     source_path: str | None = None
     source_strategy: str | None = None
+    download_dir: str | None = None
     download_policy: dict[str, Any] | None = None
     dump_manifest: dict[str, Any] | None = None
     analysis_eligibility: dict[str, Any] | None = None
@@ -33,6 +34,7 @@ class InternalPipelinePayload(SliceDefinitionPayload):
     active_context_source: str | None = None
     accepted_estimate_signature: str | None = None
     accepted_download_signature: str | None = None
+    query_plan: dict[str, Any] | None = None
 
     @field_validator("workflow_mode")
     @classmethod

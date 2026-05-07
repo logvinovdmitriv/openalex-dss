@@ -29,6 +29,23 @@ class WarehouseTests(unittest.TestCase):
         self.assertEqual(warehouse.filter_rows_by_author_ids(rows, set()), [])
         self.assertEqual(warehouse.filter_rows_by_author_ids(rows, ["https://openalex.org/A2"]), [rows[1]])
 
+    def test_apply_data_selection_filters_sorts_and_limits_metric_rows(self) -> None:
+        rows = [
+            {"author_id": "A1", "h": 3, "p": 2},
+            {"author_id": "A2", "h": 8, "p": 5},
+            {"author_id": "A3", "h": 5, "p": 4},
+        ]
+
+        selected = warehouse.apply_data_selection(
+            rows,
+            data_filters={"p": {"min": "3"}, "work_type": {"contains": "article"}},
+            data_sort="h",
+            data_direction="asc",
+            data_limit=1,
+        )
+
+        self.assertEqual([row["author_id"] for row in selected], ["A3"])
+
     def test_metric_ranking_with_empty_author_id_filter_returns_no_rows(self) -> None:
         rows = [
             {"author_id": "https://openalex.org/A1", "author_display_name": "Author One", "h": 3, "p": 4, "c": 10},

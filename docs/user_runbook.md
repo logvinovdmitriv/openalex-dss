@@ -1,11 +1,10 @@
-# User Runbook
+# Руководство пользователя
 
-This runbook describes the normal operator path for building a reproducible
-OpenAlex DSS analysis.
+Документ описывает обычный путь работы с OpenAlex DSS без внутренних терминов.
 
-## Start The System
+## Запуск
 
-Install dependencies once:
+Один раз установите зависимости:
 
 ```bash
 python3.12 -m venv .venv
@@ -14,70 +13,78 @@ python3.12 -m venv .venv
 npm install
 ```
 
-Start backend and frontend:
+Запустите backend и frontend:
 
 ```bash
 python3 scripts/run_dss.py
 ```
 
-Open:
+Откройте:
 
 ```text
-UI:  http://127.0.0.1:5173
-API: http://127.0.0.1:8000/api/v1
-Docs: http://127.0.0.1:8000/docs
+Интерфейс: http://127.0.0.1:5173
+API:        http://127.0.0.1:8000/api/v1
+Документация API: http://127.0.0.1:8000/docs
 ```
 
-## Normal Workflow
+## Основной путь
 
-1. Open `Срез`.
-2. Select the OpenAlex entity level and entity identifier.
-3. Resolve the slice and review the resolved entity.
-4. Build the estimate and inspect expected volume, facets, and budget.
-5. Build a materialization plan.
-6. Run materialization after accepting the estimate and download signatures.
-7. Wait until the job completes and active context points to the new `run_id`
-   and `dump_id`.
-8. Open `Данные` and verify that local scoped tables are present.
-9. Open `Индексы` and inspect `indices` and `ratings`.
-10. Create or select a cohort in `Когорты`.
-11. Open `Графики` and inspect distributions, rank shifts, outliers, and
-    comparisons.
-12. Open `Отчеты` and download the report bundle, findings CSV, conclusion
-    Markdown, and supporting exports.
-13. Open `Паспорта` and verify slice, calculation, checksums, pipeline summary,
-    quality report, and provenance.
+1. Откройте вкладку `Срез`.
+2. Задайте тему, страну, организацию, период и типы публикаций.
+3. Нажмите `Оценить объем`.
+4. Если подходящий срез уже скачан, выберите его в блоке `Срезы`. Это не использует OpenAlex API.
+5. Если нужен новый срез, при необходимости укажите `Папку загрузки`, проверьте прогноз объема и нажмите `Скачать срез`.
+6. Дождитесь статуса `Срез готов`.
+7. Откройте `Данные`.
+8. Выберите нужную физическую таблицу среза кнопками: работы, авторства, темы, связи автор-работа, индексы или рейтинги.
+9. На этой же таблице задайте ограничения по столбцам через заголовки: текстовое `содержит`, числовые `от/до`, сортировку и TOP-N. Активные ограничения подсвечиваются над таблицей и в заголовках столбцов.
+10. Откройте `Индексы`: авторская таблица индексов и рейтинг будут построены по выборке из `Данные`.
+11. Откройте `Аналитика`: распределения, корреляции и выводы разнесены по подразделам и также используют выборку из `Данные`.
+12. В `Аналитика` скачайте таблицы распределений, корреляций, выбросов или черновик заключения из соответствующего подраздела.
+13. Откройте `Отчеты`, чтобы скачать пакет отчета, локальные таблицы и проверить подраздел `Паспорта`: параметры среза, расчет, качество данных и контрольные суммы.
 
-## Scope Rules
+## Что такое срез
 
-All analytical reads require scope:
+Срез — это выбранная часть OpenAlex: тема, страна, организация, период и другие фильтры.
 
-```text
-run_id
-dump_id
-cohort-resolved run/dump scope
-```
+В интерфейсе это одно понятие:
 
-The active context is a UI pointer. It helps the interface select the current
-run and dump, but report acceptance should still be tied to explicit `run_id`,
-`dump_id`, and `report_scope_hash`.
+- до скачивания срез хранит описание фильтров и оценку объема;
+- после скачивания у него появляются локальные файлы и таблицы;
+- выбранный срез используется во вкладках `Данные`, `Индексы`, `Аналитика` и `Отчеты`.
 
-## Operational Limits
+Сохранять срез нужно не ради дублирования данных, а ради повторяемости: можно вернуться к тем же фильтрам, увидеть оценку объема, выбрать уже скачанную локальную версию или удалить срез вместе с локальными файлами.
 
-- OpenAlex metadata quality and author disambiguation affect all downstream
-  metrics.
-- The system does not infer demographic attributes.
-- Local indices describe authors inside the selected slice; they are not global
-  author scores.
-- OpenAlex API calls are used for resolving, estimates, catalogs, and targeted
-  enrichment. The analytical corpus is the locally materialized dump.
-- Final analysis requires an eligible dump manifest and scoped run artifacts.
-- The deterministic validation fixture is a system check, not scientific
-  evidence.
-- Report findings and conclusion drafts support expert review; they do not
-  replace domain judgment.
+## Где используется OpenAlex API
 
-## Acceptance Before Handoff
+OpenAlex API используется для:
 
-Before handing a run to a user, complete the gate in
-`docs/acceptance.md` and keep the validation output with the delivery notes.
+- подсказок и поиска тем, организаций, авторов и источников;
+- оценки объема среза;
+- проверки лимитов;
+- явного добавления автора, организации, источника или работы к срезу во вкладке `Срез`;
+- новой загрузки среза только в той части, где установленный загрузчик OpenAlex явно требует ключ.
+
+Выбор, просмотр, пересчет и удаление уже скачанного локального среза API не используют.
+
+## Выборка авторов
+
+Отдельного раздела для списков авторов нет. Выборка задается во вкладке `Данные`:
+
+- выберите таблицу `Авторы и индексы`;
+- отсортируйте нужный столбец кликом по заголовку;
+- задайте TOP-N;
+- при необходимости используйте ограничения столбцов через меню заголовка.
+
+`Индексы`, `Аналитика` и `Отчеты` используют именно эту текущую выборку: `data_filters`, `data_sort`, `data_direction` и `data_limit`.
+
+## Ограничения
+
+- Качество метаданных OpenAlex и качество идентификации авторов влияют на все индексы.
+- Система не определяет пол, возраст и другие демографические признаки.
+- Локальные индексы описывают авторов только внутри выбранного среза, а не во всем OpenAlex.
+- Автоматический текст отчета помогает интерпретировать таблицы и графики, но не заменяет экспертное заключение.
+
+## Приемка перед передачей
+
+Перед передачей результата пользователю выполните проверку из `docs/acceptance.md` и сохраните validation output вместе с материалами передачи.

@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.services.analysis_filters import build_analysis_filters
-from app.services import cohorts, reports
+from app.services import cohorts, reports, warehouse
 
 
 router = APIRouter(tags=["reports"])
@@ -14,7 +14,7 @@ router = APIRouter(tags=["reports"])
 
 @router.post("/reports/build")
 def build_report(
-    metric: str = "islv",
+    metric: str = "h",
     fraction_mode: str = "strict_authors_count",
     run_id: str = "",
     dump_id: str = "",
@@ -47,9 +47,13 @@ def build_report(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     limit: int = Query(50, ge=1, le=500),
-    scientometric_metrics: str = "p,c,c_frac,h,i10,g,islv",
+    scientometric_metrics: str = "p,c,cpp,h,i10,g",
     baseline_metric: str = "h",
     rank_top_n: int = Query(100, ge=1, le=1000),
+    data_filters: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = Query(0, ge=0, le=500_000),
 ) -> dict[str, Any]:
     filters = build_analysis_filters(
         country_code=country_code,
@@ -89,9 +93,13 @@ def build_report(
             scientometric_metrics=scientometric_metrics,
             baseline_metric=baseline_metric,
             rank_top_n=rank_top_n,
+            data_filters=warehouse.parse_column_filters(data_filters),
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=data_limit,
         )
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -100,7 +108,7 @@ def build_report(
 def report_bundle(
     run_id: str = "",
     dump_id: str = "",
-    metric: str = "islv",
+    metric: str = "h",
     fraction_mode: str = "strict_authors_count",
     country_code: str = "",
     filter_mode: str = "",
@@ -131,9 +139,13 @@ def report_bundle(
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
     limit: int = Query(50, ge=1, le=500),
-    scientometric_metrics: str = "p,c,c_frac,h,i10,g,islv",
+    scientometric_metrics: str = "p,c,cpp,h,i10,g",
     baseline_metric: str = "h",
     rank_top_n: int = Query(100, ge=1, le=1000),
+    data_filters: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = Query(0, ge=0, le=500_000),
 ) -> Response:
     filters = build_analysis_filters(
         country_code=country_code,
@@ -173,9 +185,13 @@ def report_bundle(
             scientometric_metrics=scientometric_metrics,
             baseline_metric=baseline_metric,
             rank_top_n=rank_top_n,
+            data_filters=warehouse.parse_column_filters(data_filters),
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=data_limit,
         )
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(

@@ -9,6 +9,7 @@ from functools import lru_cache
 from typing import Any
 
 from app.services import metadata_store, registry
+from app.services.work_type_labels import work_type_label
 
 
 OPENALEX_BASE = "https://api.openalex.org"
@@ -234,7 +235,7 @@ def rate_limit(api_key: str) -> dict[str, Any]:
         return {
             "available": False,
             "requires_api_key": True,
-            "message": "OpenAlex /rate-limit requires an API key.",
+            "message": "Для проверки лимита OpenAlex нужен ключ OpenAlex.",
         }
     payload = _get("rate-limit", {"api_key": key})
     limit = payload.get("rate_limit") or {}
@@ -356,6 +357,8 @@ def _group_item(row: dict[str, Any], entity_type: str) -> dict[str, Any]:
 
 
 def _group_label(entity_type: str, short_id: str, name: str) -> str:
+    if entity_type == "work_type":
+        return work_type_label(short_id or name)
     return name if name != short_id else short_id
 
 
@@ -471,7 +474,7 @@ def _work_result(item: dict[str, Any]) -> dict[str, Any]:
         "name": item.get("display_name") or item.get("title") or item.get("name") or _short_openalex_id(full_id),
         "level": "work",
         "level_label": "Работа",
-        "description": " · ".join(str(part) for part in [year, work_type, f"{cited_by} цитирований"] if part != ""),
+        "description": " · ".join(str(part) for part in [year, work_type_label(str(work_type)) if work_type else "", f"{cited_by} цитирований"] if part != ""),
         "doi": doi,
         "work_type": work_type,
         "publication_year": year,

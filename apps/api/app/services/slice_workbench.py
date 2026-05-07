@@ -4,6 +4,7 @@ import json
 import re
 import uuid
 import hashlib
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,8 @@ from typing import Any
 from app.core.paths import DATA
 from app.services.internal_payloads import normalize_internal_pipeline_payload
 from app.services import artifact_context, author_slice, jobs, metadata_store, query_planner, registry, warehouse
-from openalex_dss.openalex import cli_download_signature, corpus_request
+from openalex_dss.config import config_to_dict
+from openalex_dss.openalex import cli_download_signature, corpus_request, corpus_signature
 
 
 SLICES_DIR = DATA / "slices"
@@ -30,7 +32,7 @@ def create_slice(payload: dict[str, Any]) -> dict[str, Any]:
     cfg = author_slice.config_from_payload({**technical_payload, "workflow_mode": "strict_works"})
     slice_fingerprint = _slice_fingerprint(cfg)
     slice_id = _slice_id(payload, cfg, slice_fingerprint)
-    technical_payload = normalize_internal_pipeline_payload({**technical_payload, "slice_name": slice_id})
+    technical_payload = _canonical_payload(cfg, slice_name=slice_id)
     cfg = author_slice.config_from_payload({**technical_payload, "workflow_mode": "strict_works"})
     now = _now()
     doc = {
@@ -78,6 +80,33 @@ def get_slice(slice_id: str) -> dict[str, Any]:
     return _read_json(path)
 
 
+def delete_slice(slice_id: str) -> dict[str, Any]:
+    doc = get_slice(slice_id)
+    deleted_materializations = 0
+    for path in MATERIALIZATIONS_DIR.glob("*.json"):
+        plan = _read_json(path)
+        if str(plan.get("slice_id") or "") != slice_id:
+            continue
+        if str(plan.get("state") or "") == "materializing":
+            raise ValueError("Cannot delete a slice while its materialization is running.")
+        try:
+            path.unlink()
+            deleted_materializations += 1
+        except OSError:
+            continue
+    path = _slice_path(slice_id)
+    try:
+        path.unlink()
+        path.parent.rmdir()
+    except OSError:
+        pass
+    return {
+        "deleted": True,
+        "slice_id": str(doc.get("slice_id") or slice_id),
+        "deleted_materializations": deleted_materializations,
+    }
+
+
 def resolve_slice(slice_id: str) -> dict[str, Any]:
     doc = get_slice(slice_id)
     preview = author_slice.preview(doc["technical_payload"])
@@ -114,13 +143,26 @@ def estimate_slice(slice_id: str, payload: dict[str, Any] | None = None) -> dict
         "download_policy": plan["download_policy"],
         "execution_limits": plan["limits"],
     }
-    doc["technical_payload"] = _public_payload(merged_payload)
+    cfg = author_slice.config_from_payload({**merged_payload, "workflow_mode": "strict_works"})
+    doc["technical_payload"] = _public_payload(_canonical_payload(cfg, slice_name=slice_id))
     doc["state"] = _advance_state(str(doc.get("state") or "draft"), "estimated")
     doc["updated_at_utc"] = _now()
     doc["current_estimate"] = estimate
     doc["lifecycle"] = _lifecycle(doc["state"])
     _write_slice(doc)
     return estimate
+
+
+def _current_estimate_or_refresh(slice_id: str, doc: dict[str, Any], cfg: Any, download_policy: dict[str, Any]) -> dict[str, Any]:
+    current = doc.get("current_estimate") if isinstance(doc.get("current_estimate"), dict) else {}
+    current_estimate = current.get("estimate") if isinstance(current.get("estimate"), dict) else {}
+    if (
+        current_estimate.get("estimate_signature") == corpus_signature(cfg)
+        and current_estimate.get("download_signature") == cli_download_signature(cfg)
+        and _download_policy(current.get("download_policy") or {}, fallback=doc.get("download_policy_default")) == download_policy
+    ):
+        return current
+    return estimate_slice(slice_id, {"download_policy": download_policy})
 
 
 def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -130,9 +172,11 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
     profiles = _storage_profiles()
     profile = profiles.get(profile_id) or next(iter(profiles.values()))
     source_strategy = str(payload.get("source_strategy") or payload.get("data_source_id") or "openalex_cli")
+    download_dir = str(payload.get("download_dir") or "").strip()
     download_policy = _download_policy(payload, fallback=doc.get("download_policy_default"))
     plan_id = _safe_id(f"mat_{slice_id}_{profile['profile_id']}_{uuid.uuid4().hex[:8]}")
-    estimate = estimate_slice(slice_id, {"download_policy": download_policy})
+    cfg = author_slice.config_from_payload({**doc["technical_payload"], "workflow_mode": "strict_works"})
+    estimate = _current_estimate_or_refresh(slice_id, doc, cfg, download_policy)
     doc = get_slice(slice_id)
     cfg = author_slice.config_from_payload({**doc["technical_payload"], "workflow_mode": "strict_works"})
     materialization_fingerprint = _materialization_fingerprint(
@@ -146,9 +190,11 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         {
             **doc["technical_payload"],
             "source_strategy": source_strategy,
+            **({"download_dir": download_dir} if download_dir else {}),
             "download_policy": download_policy,
             "accepted_estimate_signature": (estimate.get("estimate") or {}).get("estimate_signature"),
             "accepted_download_signature": (estimate.get("estimate") or {}).get("download_signature"),
+            "query_plan": estimate,
         }
     )
     materialization = {
@@ -161,6 +207,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         "storage_profile": profile,
         "profile": profile,
         "source_strategy": source_strategy,
+        "download_dir": download_dir,
         "download_policy": download_policy,
         "estimated": estimate,
         "accepted_estimate_signature": (estimate.get("estimate") or {}).get("estimate_signature"),
@@ -194,7 +241,24 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
 
 def run_materialization(materialization_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     plan = get_materialization_plan(materialization_id)
-    run_payload = normalize_internal_pipeline_payload({**plan["technical_payload"], "materialization_id": plan["materialization_id"], **(payload or {})})
+    payload = payload or {}
+    if "download_dir" in payload:
+        download_dir = str(payload.get("download_dir") or "").strip()
+        plan["download_dir"] = download_dir
+        technical_payload = dict(plan.get("technical_payload") or {})
+        if download_dir:
+            technical_payload["download_dir"] = download_dir
+        else:
+            technical_payload.pop("download_dir", None)
+        plan["technical_payload"] = normalize_internal_pipeline_payload(technical_payload)
+    run_payload = normalize_internal_pipeline_payload({
+        **plan["technical_payload"],
+        "materialization_id": plan["materialization_id"],
+        "query_plan": plan.get("estimated"),
+        "accepted_estimate_signature": plan.get("accepted_estimate_signature"),
+        "accepted_download_signature": plan.get("accepted_download_signature"),
+        **payload,
+    })
     run = jobs.create_run("build_from_openalex", run_payload, autostart=False)
     plan["state"] = "materializing"
     plan["run_id"] = run["run_id"]
@@ -230,6 +294,58 @@ def list_materialization_plans(limit: int = 50) -> dict[str, Any]:
 def list_dumps(limit: int = 50) -> dict[str, Any]:
     dumps = metadata_store.list_slice_dumps(limit=limit)
     return {"dumps": dumps, "total": len(dumps)}
+
+
+def delete_dump(dump_id: str) -> dict[str, Any]:
+    raw_dump_id = str(dump_id or "").strip()
+    if not raw_dump_id:
+        raise ValueError("dump_id is required")
+    dump = metadata_store.get_slice_dump_by_dump_id(raw_dump_id)
+    if not dump:
+        raise KeyError(raw_dump_id)
+    deleted_paths: list[str] = []
+    for path in _dump_delete_paths(raw_dump_id, dump):
+        if not path.exists():
+            continue
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        deleted_paths.append(str(path))
+    deleted_runs = _delete_runs_for_dump(raw_dump_id)
+    deleted_materializations = _delete_materializations_for_dump(raw_dump_id)
+    db_result = metadata_store.delete_slice_dump_by_dump_id(raw_dump_id)
+    active_context = artifact_context.read_active_context()
+    if str(active_context.get("active_dump_id") or "") == raw_dump_id:
+        artifact_context.write_active_context(run_id="", dump_id="", source="deleted_local_slice")
+    return {
+        "deleted": True,
+        "dump_id": raw_dump_id,
+        "deleted_paths": deleted_paths,
+        "deleted_runs": deleted_runs,
+        "deleted_materializations": deleted_materializations,
+        "metadata_rows_deleted": db_result["deleted"],
+    }
+
+
+def select_dump(dump_id: str) -> dict[str, Any]:
+    raw_dump_id = str(dump_id or "").strip()
+    if not raw_dump_id:
+        raise ValueError("dump_id is required")
+    dump = metadata_store.get_slice_dump_by_dump_id(raw_dump_id)
+    if not dump:
+        raise KeyError(raw_dump_id)
+    active_context = artifact_context.write_active_context(
+        run_id="",
+        dump_id=raw_dump_id,
+        source="selected_local_slice",
+        extra={
+            "slice_id": str(dump.get("slice_id") or ""),
+            "allowed_for_final_analysis": dump.get("allowed_for_final_analysis"),
+            "scientific_completeness": str(dump.get("scientific_completeness") or ""),
+        },
+    )
+    return {"status": "ok", "dump": dump, "active_context": active_context}
 
 
 def mark_materialization_run_completed(run_id: str, result: dict[str, Any], *, materialization_id: str = "") -> None:
@@ -324,16 +440,16 @@ def workbench_summary() -> dict[str, Any]:
 
 
 SLICE_STATES = [
-    {"id": "draft", "label": "Draft", "description": "Логический срез задан пользователем."},
-    {"id": "resolved", "label": "Resolved", "description": "Срез сопоставлен с OpenAlex-проекцией."},
-    {"id": "estimated", "label": "Estimated", "description": "Оценены объем и API-бюджет."},
-    {"id": "planned", "label": "Planned", "description": "Выбран режим хранения и технический бюджет загрузки."},
-    {"id": "materializing", "label": "Materializing", "description": "Идет загрузка или сборка локального набора."},
-    {"id": "empty", "label": "Empty", "description": "OpenAlex вернул пустой корпус для выбранного среза."},
-    {"id": "ready", "label": "Ready", "description": "Мини-дамп и локальные таблицы готовы."},
-    {"id": "analyzed", "label": "Analyzed", "description": "Индексы и рейтинги рассчитаны."},
-    {"id": "reported", "label": "Reported", "description": "Отчет и паспорта подготовлены."},
-    {"id": "failed", "label": "Failed", "description": "Загрузка или расчет завершились ошибкой."},
+    {"id": "draft", "label": "Черновик", "description": "Срез задан пользователем."},
+    {"id": "resolved", "label": "Сопоставлен", "description": "Срез сопоставлен со справочниками OpenAlex."},
+    {"id": "estimated", "label": "Оценен", "description": "Оценены объем, прогноз загрузки и использование API."},
+    {"id": "planned", "label": "План готов", "description": "Выбраны режим хранения и папка загрузки."},
+    {"id": "materializing", "label": "Загружается", "description": "Идет загрузка или сборка локального среза."},
+    {"id": "empty", "label": "Нет работ", "description": "OpenAlex вернул пустой корпус для выбранного среза."},
+    {"id": "ready", "label": "Готов", "description": "Локальные файлы и таблицы готовы."},
+    {"id": "analyzed", "label": "Индексы готовы", "description": "Индексы и рейтинги рассчитаны."},
+    {"id": "reported", "label": "Отчет готов", "description": "Отчет и паспорта подготовлены."},
+    {"id": "failed", "label": "Ошибка", "description": "Загрузка или расчет завершились ошибкой."},
 ]
 
 
@@ -348,6 +464,13 @@ def _technical_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key != "api_key"}
+
+
+def _canonical_payload(cfg: Any, *, slice_name: str | None = None) -> dict[str, Any]:
+    payload = config_to_dict(cfg)
+    if slice_name is not None:
+        payload["slice_name"] = slice_name
+    return normalize_internal_pipeline_payload(payload)
 
 
 def _download_policy(payload: dict[str, Any], fallback: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -373,12 +496,36 @@ def _storage_profiles() -> dict[str, dict[str, Any]]:
     if not out:
         out["minimal_analytics"] = {
             "profile_id": "minimal_analytics",
-            "label": "Минимальный состав данных",
-            "description": "Базовый профиль хранения из конфигурации не найден.",
+            "label": "Стандартные данные среза",
+            "description": "Базовая настройка хранения из конфигурации не найдена.",
             "format": "jsonl.gz + parquet",
             "selected_fields": [],
         }
     return out
+
+
+def select_directory(initial_dir: str = "") -> dict[str, Any]:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:  # pragma: no cover - depends on local desktop runtime
+        raise RuntimeError("Системный выбор папки недоступен в текущем окружении. Укажите путь вручную.") from exc
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        initial = Path(str(initial_dir or "")).expanduser()
+        kwargs: dict[str, Any] = {"title": "Выберите папку для скачивания среза"}
+        if initial.is_dir():
+            kwargs["initialdir"] = str(initial)
+        selected = filedialog.askdirectory(**kwargs)
+    finally:
+        root.destroy()
+    return {"path": str(selected or "")}
 
 
 def _workbench_workflow(
@@ -549,6 +696,76 @@ def _read_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _dump_delete_paths(dump_id: str, dump: dict[str, Any]) -> list[Path]:
+    safe_dump_id = _safe_id(dump_id)
+    paths = [
+        DATA / "dumps" / safe_dump_id,
+        DATA / "tables" / safe_dump_id,
+    ]
+    raw_jsonl = Path(str(dump.get("raw_jsonl") or ""))
+    if raw_jsonl.is_file():
+        paths.append(raw_jsonl)
+        raw_base = raw_jsonl.parent
+        storage_plan = dump.get("storage_plan") if isinstance(dump.get("storage_plan"), dict) else {}
+        raw_download_base = str(storage_plan.get("download_base_dir") or "").strip()
+        if raw_download_base:
+            download_base = Path(raw_download_base)
+            if download_base.exists():
+                paths.append(download_base)
+        if raw_base.name == "openalex_cli":
+            paths.append(raw_base)
+        elif raw_base.parent.name == "openalex_cli":
+            paths.append(raw_base)
+        elif raw_base.parent.parent.name == "openalex_cli":
+            paths.append(raw_base.parent)
+    return _unique_child_paths(paths)
+
+
+def _delete_runs_for_dump(dump_id: str) -> list[str]:
+    deleted: list[str] = []
+    runs_dir = DATA / "runs"
+    for metric_run in runs_dir.glob("run_*/metric_run.json"):
+        manifest = _read_json(metric_run)
+        if str(manifest.get("dump_id") or manifest.get("input_dump_id") or "") != dump_id:
+            continue
+        run_dir = metric_run.parent
+        shutil.rmtree(run_dir, ignore_errors=True)
+        deleted.append(run_dir.name)
+    return deleted
+
+
+def _delete_materializations_for_dump(dump_id: str) -> list[str]:
+    deleted: list[str] = []
+    for path in MATERIALIZATIONS_DIR.glob("*.json"):
+        plan = _read_json(path)
+        dump_manifest = plan.get("dump_manifest") if isinstance(plan.get("dump_manifest"), dict) else {}
+        plan_dump_id = str(plan.get("dump_id") or dump_manifest.get("dump_id") or "")
+        if plan_dump_id != dump_id:
+            continue
+        try:
+            path.unlink()
+            deleted.append(str(plan.get("materialization_id") or path.stem))
+        except OSError:
+            continue
+    return deleted
+
+
+def _unique_child_paths(paths: list[Path]) -> list[Path]:
+    resolved: list[Path] = []
+    data_root = DATA.resolve()
+    for path in paths:
+        try:
+            current = path.expanduser().resolve()
+            current.relative_to(data_root)
+        except (OSError, ValueError):
+            continue
+        if current == data_root:
+            continue
+        if current not in resolved:
+            resolved.append(current)
+    return sorted(resolved, key=lambda item: len(item.parts), reverse=True)
 
 
 def _now() -> str:

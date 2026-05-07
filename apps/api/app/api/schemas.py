@@ -52,10 +52,12 @@ class MaterializationPlanRequest(BaseModel):
     source_strategy: str = "openalex_cli"
     download_policy: DownloadPolicy = Field(default_factory=DownloadPolicy)
     profile_id: str | None = None
+    download_dir: str | None = None
 
 
 class MaterializationRunRequest(BaseModel):
     api_key: str | None = None
+    download_dir: str | None = None
 
 
 class AuthorCohortCreateRequest(BaseModel):

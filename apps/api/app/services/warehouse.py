@@ -180,6 +180,7 @@ def query_table(
     metric: str = "",
     author_id: str = "",
     work_id: str = "",
+    data_filters: dict[str, Any] | None = None,
     sort: str = "",
     direction: str = "desc",
     limit: int = 100,
@@ -203,6 +204,7 @@ def query_table(
             metric=metric,
             author_id=author_id,
             work_id=work_id,
+            data_filters=data_filters,
             sort=sort,
             direction=direction,
             limit=limit,
@@ -226,6 +228,7 @@ def _query_registered_table(
     metric: str = "",
     author_id: str = "",
     work_id: str = "",
+    data_filters: dict[str, Any] | None = None,
     sort: str = "",
     direction: str = "desc",
     limit: int = 100,
@@ -250,21 +253,79 @@ def _query_registered_table(
     if work_id and "work_id" in fields:
         where.append("work_id = ?")
         args.append(work_id)
+    _append_column_filter_clauses(where, args, fields, data_filters)
 
     where_sql = "WHERE " + " AND ".join(where) if where else ""
     order_sql = ""
     if sort and sort in fields:
         order_sql = f"ORDER BY {sort} {'DESC' if direction == 'desc' else 'ASC'}"
-    limit = max(1, min(1000, int(limit)))
+    raw_limit = max(0, min(500_000, int(limit or 0)))
     offset = max(0, int(offset))
 
     total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
-    rel = conn.execute(
-        f"SELECT * FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
-        [*args, limit, offset],
-    )
+    if raw_limit > 0:
+        rel = conn.execute(
+            f"SELECT * FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
+            [*args, raw_limit, offset],
+        )
+        effective_limit = raw_limit
+    else:
+        rel = conn.execute(
+            f"SELECT * FROM {table} {where_sql} {order_sql} OFFSET ?",
+            [*args, offset],
+        )
+        effective_limit = 0
     rows = _records(rel)
-    return {"table": table, "fields": fields, "rows": rows, "total": total, "limit": limit, "offset": offset}
+    return {"table": table, "fields": fields, "rows": rows, "total": total, "limit": effective_limit, "offset": offset}
+
+
+def _append_column_filter_clauses(where: list[str], args: list[Any], fields: list[str], data_filters: dict[str, Any] | None) -> None:
+    filters = parse_column_filters(data_filters)
+    field_set = set(fields)
+    for field, filter_payload in filters.items():
+        if field not in field_set:
+            continue
+        contains = str(filter_payload.get("contains") or "").strip()
+        if contains:
+            where.append(f"CAST({field} AS VARCHAR) ILIKE ?")
+            args.append(f"%{contains}%")
+        min_text = str(filter_payload.get("min") or "").strip().replace(",", ".")
+        if min_text:
+            min_value = _parse_filter_number(min_text, field)
+            where.append(f"TRY_CAST({field} AS DOUBLE) >= ?")
+            args.append(min_value)
+        max_text = str(filter_payload.get("max") or "").strip().replace(",", ".")
+        if max_text:
+            max_value = _parse_filter_number(max_text, field)
+            where.append(f"TRY_CAST({field} AS DOUBLE) <= ?")
+            args.append(max_value)
+
+
+def _row_matches_column_filters(row: dict[str, Any], filters: dict[str, dict[str, str]], *, ignore_unknown_fields: bool = False) -> bool:
+    for field, filter_payload in filters.items():
+        if field not in row:
+            if ignore_unknown_fields:
+                continue
+            return False
+        contains = str(filter_payload.get("contains") or "").strip().lower()
+        if contains and contains not in str(row.get(field) or "").lower():
+            return False
+        min_text = str(filter_payload.get("min") or "").strip().replace(",", ".")
+        max_text = str(filter_payload.get("max") or "").strip().replace(",", ".")
+        if min_text or max_text:
+            value = _as_float(row.get(field))
+            if min_text and value < _parse_filter_number(min_text, field):
+                return False
+            if max_text and value > _parse_filter_number(max_text, field):
+                return False
+    return True
+
+
+def _parse_filter_number(value: str, field: str) -> float:
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(f"Invalid numeric filter for {field}: {value}") from exc
 
 
 def export_table(
@@ -277,6 +338,7 @@ def export_table(
     metric: str = "",
     author_id: str = "",
     work_id: str = "",
+    data_filters: dict[str, Any] | None = None,
     sort: str = "",
     direction: str = "desc",
     limit: int = 100_000,
@@ -309,24 +371,35 @@ def export_table(
     if work_id and "work_id" in fields:
         where.append("work_id = ?")
         args.append(work_id)
+    _append_column_filter_clauses(where, args, fields, data_filters)
 
     where_sql = "WHERE " + " AND ".join(where) if where else ""
     order_sql = ""
     if sort and sort in fields:
         order_sql = f"ORDER BY {sort} {'DESC' if direction == 'desc' else 'ASC'}"
-    limit = max(1, min(500_000, int(limit)))
+    raw_limit = max(0, min(500_000, int(limit or 0)))
     offset = max(0, int(offset))
 
     source_path = resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id)
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
         total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
-        rows = _records(
-            conn.execute(
-                f"SELECT * FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
-                [*args, limit, offset],
+        if raw_limit > 0:
+            rows = _records(
+                conn.execute(
+                    f"SELECT * FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
+                    [*args, raw_limit, offset],
+                )
             )
-        )
-    payload = {"table": table, "fields": fields, "rows": rows, "total": total, "limit": limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
+            effective_limit = raw_limit
+        else:
+            rows = _records(
+                conn.execute(
+                    f"SELECT * FROM {table} {where_sql} {order_sql} OFFSET ?",
+                    [*args, offset],
+                )
+            )
+            effective_limit = 0
+    payload = {"table": table, "fields": fields, "rows": rows, "total": total, "limit": effective_limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
     if source_path:
         payload["source_path"] = str(source_path)
     return payload
@@ -339,6 +412,84 @@ def export_table_csv(table: str, **kwargs: Any) -> str:
     writer.writeheader()
     writer.writerows(payload["rows"])
     return output.getvalue()
+
+
+def parse_column_filters(raw: str | dict[str, Any] | None) -> dict[str, dict[str, str]]:
+    if not raw:
+        return {}
+    payload: Any = raw
+    if isinstance(raw, str):
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("data_filters must be a JSON object.") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("data_filters must be a JSON object.")
+    out: dict[str, dict[str, str]] = {}
+    for field, filter_payload in payload.items():
+        field_name = str(field or "").strip()
+        if not field_name or not isinstance(filter_payload, dict):
+            continue
+        clean: dict[str, str] = {}
+        for key in ("contains", "min", "max"):
+            value = str(filter_payload.get(key) or "").strip()
+            if value:
+                clean[key] = value
+        if clean:
+            out[field_name] = clean
+    return out
+
+
+def filter_rows_by_column_filters(
+    rows: list[dict[str, Any]],
+    data_filters: dict[str, Any] | None,
+    *,
+    ignore_unknown_fields: bool = False,
+) -> list[dict[str, Any]]:
+    filters = parse_column_filters(data_filters)
+    if not filters:
+        return rows
+    return [row for row in rows if _row_matches_column_filters(row, filters, ignore_unknown_fields=ignore_unknown_fields)]
+
+
+def apply_data_selection(
+    rows: list[dict[str, Any]],
+    *,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
+) -> list[dict[str, Any]]:
+    """Apply the Data-page author selection contract to in-memory metric rows."""
+    selected = filter_rows_by_column_filters(rows, data_filters, ignore_unknown_fields=True)
+    search = str(data_search or "").strip().lower()
+    if search:
+        selected = [row for row in selected if any(search in str(value or "").lower() for value in row.values())]
+    sort_field = str(data_sort or "").strip()
+    if sort_field and any(sort_field in row and row.get(sort_field) not in (None, "") for row in selected):
+        selected = _sort_rows_by_field(selected, sort_field, data_direction=data_direction)
+    try:
+        limit = int(data_limit or 0)
+    except (TypeError, ValueError):
+        limit = 0
+    if limit > 0:
+        selected = selected[: max(1, min(limit, 500_000))]
+    return selected
+
+
+def _sort_rows_by_field(rows: list[dict[str, Any]], field: str, *, data_direction: str = "desc") -> list[dict[str, Any]]:
+    present = [row for row in rows if field in row and row.get(field) not in (None, "")]
+    missing = [row for row in rows if field not in row or row.get(field) in (None, "")]
+    reverse = str(data_direction or "desc").strip().lower() != "asc"
+    return sorted(present, key=lambda row: _selection_sort_key(row.get(field)), reverse=reverse) + missing
+
+
+def _selection_sort_key(value: Any) -> tuple[int, float, str]:
+    try:
+        return (0, float(value), "")
+    except (TypeError, ValueError):
+        return (1, 0.0, str(value or "").casefold())
 
 
 def filtered_indices(
@@ -638,11 +789,24 @@ def metric_ranking(
     run_id: str = "",
     dump_id: str = "",
     author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
     rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     rows = filter_rows_by_author_ids(rows, author_ids)
+    rows = apply_data_selection(
+        rows,
+        data_filters=data_filters,
+        data_search=data_search,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
+    )
     return metric_ranking_from_rows(
         rows,
         fraction_mode,
@@ -681,7 +845,8 @@ def metric_ranking_from_rows(
             item[field] = row.get(field)
         ranked.append(item)
     _assign_competition_rank(ranked, "score", "rank_competition")
-    limit = max(1, min(int(limit), max(1, int(max_limit))))
+    requested_limit = max(0, min(int(limit or 0), max(1, int(max_limit))))
+    visible_rows = ranked if requested_limit <= 0 else ranked[:requested_limit]
     fields = ["rank_competition", "author_display_name", "score", *visible_metrics, "author_id"]
     return {
         "table": "filtered_rating",
@@ -694,9 +859,9 @@ def metric_ranking_from_rows(
         "run_id": scope["run_id"],
         "dump_id": scope["dump_id"],
         "fields": fields,
-        "rows": ranked[:limit],
+        "rows": visible_rows,
         "total": len(ranked),
-        "limit": limit,
+        "limit": requested_limit,
         "offset": 0,
     }
 
@@ -709,11 +874,24 @@ def metric_distribution(
     run_id: str = "",
     dump_id: str = "",
     author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
     rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     rows = filter_rows_by_author_ids(rows, author_ids)
+    rows = apply_data_selection(
+        rows,
+        data_filters=data_filters,
+        data_search=data_search,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
+    )
     return metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id)
 
 
@@ -826,12 +1004,25 @@ def metric_bundle(
     run_id: str = "",
     dump_id: str = "",
     author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
 ) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     rows = filtered_indices(fraction_mode, filters, run_id=scope["run_id"], dump_id=scope["dump_id"])
     rows = filter_rows_by_author_ids(rows, author_ids)
+    rows = apply_data_selection(
+        rows,
+        data_filters=data_filters,
+        data_search=data_search,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
+    )
     return {
         "rows": rows,
         "distribution": metric_distribution_from_rows(rows, fraction_mode, metric, run_id=scope["run_id"], dump_id=scope["dump_id"]),

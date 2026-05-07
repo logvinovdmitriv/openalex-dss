@@ -117,7 +117,7 @@ special_parameters:
     api_parameter: "search"
     api_estimate_supported: true
     cli_supported: false
-    reason: "Installed OpenAlex CLI accepts --filter but not the API search parameter; search slices require a future ID-based download mode."
+    reason: "Установленный загрузчик OpenAlex принимает --filter, но не параметр search из Works API; для поисковых срезов нужен отдельный режим скачивания по списку work IDs."
 facets:
   work_types:
     label: "Типы публикаций"

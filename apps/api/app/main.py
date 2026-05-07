@@ -22,7 +22,7 @@ from app.api.routes import (
 app = FastAPI(
     title="OpenAlex DSS API",
     version="0.3.0",
-    description="Versioned API for the OpenAlex scientometric decision support workspace.",
+    description="Current API for the OpenAlex scientometric decision support workspace.",
 )
 app.add_middleware(
     CORSMiddleware,

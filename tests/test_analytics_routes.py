@@ -170,6 +170,35 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(payload["reproducible"], True)
         self.assertEqual(payload["warnings"], [])
 
+    def test_ranking_json_forwards_data_selection_contract(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_ranking(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> dict[str, object]:
+            del fraction_mode, metric, filters
+            captured.update(kwargs)
+            return {"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "run_a", "dump_id": "dump_a"}
+
+        with (
+            patch.object(analytics_routes.warehouse, "metric_ranking", side_effect=fake_ranking),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            analytics_routes.ranking_json(
+                run_id="run_a",
+                dump_id="dump_a",
+                fraction_mode="integer",
+                metric="h",
+                data_filters='{"h":{"min":"3"}}',
+                data_sort="h",
+                data_direction="asc",
+                data_limit=25,
+                limit=100,
+            )
+
+        self.assertEqual(captured["data_filters"], {"h": {"min": "3"}})
+        self.assertEqual(captured["data_sort"], "h")
+        self.assertEqual(captured["data_direction"], "asc")
+        self.assertEqual(captured["data_limit"], 25)
+
     def test_distribution_without_scope_requires_scope(self) -> None:
         with (
             patch.object(
@@ -421,7 +450,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertIn("# Вывод по сравнению наукометрических индексов", conclusion_text)
         self.assertIn("## Распределения", conclusion_text)
         self.assertIn("Основания: heavy_tail:c", conclusion_text)
-        self.assertIn("Метрики: C", conclusion_text)
+        self.assertIn("Метрики: Цитирования", conclusion_text)
         self.assertIn("- Метрики не заменяют экспертную оценку.", conclusion_text)
         self.assertEqual(conclusion.headers["X-OpenAlex-DSS-Scope-Status"], "explicit_scope")
 

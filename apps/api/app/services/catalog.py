@@ -4,33 +4,35 @@ from typing import Any
 
 from app.providers import openalex_cli_provider
 from app.services import filesystem, registry, snapshot, warehouse, workflow
+from openalex_dss.config import load_config
 
 
 METRICS = [
-    {"id": "p", "label": "P: число работ автора в срезе", "group": "Авторские индексы"},
-    {"id": "c", "label": "C: суммарные цитирования работ", "group": "Авторские индексы"},
-    {"id": "c_frac", "label": "C_frac: фракционные цитирования", "group": "Фракционный учет"},
-    {"id": "cpp", "label": "CPP: средние цитирования на работу", "group": "Авторские индексы"},
-    {"id": "h", "label": "h-index внутри выбранного среза", "group": "Авторские индексы"},
-    {"id": "i10", "label": "i10: работы с 10+ цитированиями", "group": "Авторские индексы"},
-    {"id": "g", "label": "g-index внутри выбранного среза", "group": "Авторские индексы"},
-    {"id": "m_local", "label": "m_local: h-index на локальный публикационный возраст", "group": "Авторские индексы"},
-    {"id": "top1_share", "label": "top1_share: доля цитирований top-1 работы", "group": "Диагностика"},
-    {"id": "lrdi", "label": "LRDI: экспериментальный локальный робастный индекс", "group": "Экспериментальные"},
-    {"id": "f5", "label": "f5: операционная threshold-метрика 5+ цитирований", "group": "Экспериментальные"},
-    {"id": "fm5", "label": "fm5: операционная сумма долей для 5+ цитирований", "group": "Экспериментальные"},
-    {"id": "iupv", "label": "IUPV: геометрическое среднее процентилей P/h/C_frac", "group": "Интегральная оценка"},
-    {"id": "islv", "label": "ISLV: сбалансированный локальный вклад со штрафом top-1", "group": "Собственная формула"},
+    {"id": "p", "label": "Публикации", "group": "Публикационная активность"},
+    {"id": "c", "label": "Цитирования", "group": "Цитируемость"},
+    {"id": "c_frac", "label": "Цитирования с долевым учетом", "group": "Цитируемость"},
+    {"id": "cpp", "label": "Средняя цитируемость", "group": "Цитируемость"},
+    {"id": "h", "label": "Индекс Хирша", "group": "Общепринятые индексы"},
+    {"id": "i10", "label": "Работы с 10+ цитированиями", "group": "Общепринятые индексы"},
+    {"id": "g", "label": "Индекс g", "group": "Общепринятые индексы"},
+    {"id": "m_local", "label": "Индекс m внутри среза", "group": "Общепринятые индексы"},
+    {"id": "top1_share", "label": "Доля самой цитируемой работы", "group": "Диагностика"},
+    {"id": "lrdi", "label": "Индекс устойчивости результата", "group": "Дополнительные показатели"},
+    {"id": "f5", "label": "Индекс Полянина f5", "group": "Дополнительные показатели"},
+    {"id": "fm5", "label": "Долевой индекс Полянина fm5", "group": "Дополнительные показатели"},
+    {"id": "iupv", "label": "Собственный интегральный индекс", "group": "Дополнительные показатели"},
+    {"id": "islv", "label": "Собственный сбалансированный индекс", "group": "Дополнительные показатели"},
 ]
 
 FRACTION_MODES = [
-    {"id": "strict_authors_count", "label": "Строгий фракционный счет"},
-    {"id": "renorm_valid_authors", "label": "Перенормировка валидных авторов"},
-    {"id": "integer", "label": "Целочисленный счет"},
+    {"id": "strict_authors_count", "label": "Долевой учет по всем авторам"},
+    {"id": "renorm_valid_authors", "label": "Долевой учет по распознанным авторам"},
+    {"id": "integer", "label": "Каждый автор учитывается полностью"},
 ]
 
 def system_catalog() -> dict[str, Any]:
     config_registry = registry.registry()
+    storage = filesystem.storage_overview()
     metric_registry = config_registry.get("metric_registry") or []
     native_metric_registry = config_registry.get("native_metric_registry") or []
     ranking_profiles = config_registry.get("ranking_profiles") or []
@@ -45,11 +47,12 @@ def system_catalog() -> dict[str, Any]:
         "storage_profiles": config_registry.get("storage_profiles") or [],
         "ui_options": config_registry.get("ui_options") or {},
         "openalex_filter_registry": config_registry.get("openalex_filter_registry") or {},
-        "openalex_cli": openalex_cli_provider.cli_status(),
+        "openalex_cli": openalex_cli_provider.cli_status(_api_key_env()),
         "domain_presets": config_registry.get("domain_presets") or [],
         "organization_presets": config_registry.get("organization_presets") or [],
         "filter_schema": config_registry.get("filter_schema") or {},
-        "safe_roots": filesystem.storage_overview()["safe_roots"],
+        "data_root": storage["data_root"],
+        "safe_roots": storage["safe_roots"],
         "openalex_snapshot_entities": snapshot.ENTITIES,
         "export_formats": ["csv", "json"],
         "workflow_stages": workflow.STAGE_DEFINITIONS,
@@ -75,6 +78,13 @@ def _catalog_metrics(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return metrics
+
+
+def _api_key_env() -> str:
+    try:
+        return load_config().api_key_env
+    except Exception:
+        return "OPENALEX_API_KEY"
 
 
 def _openalex_filter_options(filter_registry: dict[str, Any]) -> list[dict[str, str]]:

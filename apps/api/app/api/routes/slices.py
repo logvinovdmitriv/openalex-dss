@@ -29,7 +29,17 @@ def get_slice(slice_id: str) -> dict[str, Any]:
     try:
         return slice_workbench.get_slice(slice_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Slice not found") from exc
+        raise HTTPException(status_code=404, detail="Срез не найден") from exc
+
+
+@router.delete("/slices/{slice_id}")
+def delete_slice(slice_id: str) -> dict[str, Any]:
+    try:
+        return slice_workbench.delete_slice(slice_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Срез не найден") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/slices/{slice_id}/resolve")
@@ -37,7 +47,7 @@ def resolve_slice(slice_id: str) -> dict[str, Any]:
     try:
         return slice_workbench.resolve_slice(slice_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Slice not found") from exc
+        raise HTTPException(status_code=404, detail="Срез не найден") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -49,7 +59,7 @@ def estimate_slice(slice_id: str, payload: SliceEstimateRequest = Body(default_f
     try:
         return slice_workbench.estimate_slice(slice_id, payload.model_dump(exclude_none=True))
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Slice not found") from exc
+        raise HTTPException(status_code=404, detail="Срез не найден") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -61,7 +71,7 @@ def create_materialization_plan(slice_id: str, payload: MaterializationPlanReque
     try:
         return slice_workbench.create_materialization_plan(slice_id, payload.model_dump(exclude_none=True))
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Slice not found") from exc
+        raise HTTPException(status_code=404, detail="Срез не найден") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -78,7 +88,7 @@ def run_materialization(materialization_id: str, payload: MaterializationRunRequ
     try:
         return slice_workbench.run_materialization(materialization_id, payload.model_dump(exclude_none=True))
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Materialization plan not found") from exc
+        raise HTTPException(status_code=404, detail="План скачивания не найден") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -88,6 +98,34 @@ def list_dumps(limit: int = Query(50, ge=1, le=250)) -> dict[str, Any]:
     return slice_workbench.list_dumps(limit=limit)
 
 
+@router.post("/dumps/{dump_id}/select")
+def select_dump(dump_id: str) -> dict[str, Any]:
+    try:
+        return slice_workbench.select_dump(dump_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Локальный срез не найден") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/dumps/{dump_id}")
+def delete_dump(dump_id: str) -> dict[str, Any]:
+    try:
+        return slice_workbench.delete_dump(dump_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Локальный срез не найден") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/workbench")
 def workbench_summary() -> dict[str, Any]:
     return slice_workbench.workbench_summary()
+
+
+@router.post("/system/select-directory")
+def select_directory(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        return slice_workbench.select_directory(str(payload.get("initial_dir") or ""))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

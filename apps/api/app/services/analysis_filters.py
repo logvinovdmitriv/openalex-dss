@@ -28,6 +28,7 @@ def build_analysis_filters(
     from_publication_date: str = "",
     to_publication_date: str = "",
     work_type: str = "",
+    q: str = "",
 ) -> dict[str, str]:
     return clean_analysis_filters(
         {
@@ -54,6 +55,7 @@ def build_analysis_filters(
             "from_publication_date": from_publication_date.strip(),
             "to_publication_date": to_publication_date.strip(),
             "work_type": work_type.strip(),
+            "q": q.strip(),
         }
     )
 

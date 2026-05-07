@@ -1,83 +1,88 @@
-# Artifact Model
+# Модель артефактов
 
-The DSS uses scoped artifacts as the source of truth. Data access is addressed
-by explicit `dump_id`, `run_id`, and `report_scope_hash`; endpoints do not read
-global fallback files.
+DSS использует только артефакты выбранного среза как источник истины. Доступ к
+данным привязан к явным `dump_id`, `run_id` и `report_scope_hash`; endpoints не
+читают глобальные запасные файлы. В пользовательском интерфейсе `dump_id`
+называется локальным срезом.
 
-## Artifact Classes
+## Классы артефактов
 
-| Artifact | Class | Scope | Used by |
+| Артефакт | Класс | Владелец | Для чего используется |
 | --- | --- | --- | --- |
-| `raw/openalex_cli/{slice_id}/works.jsonl.gz` | canonical | dump | OpenAlex CLI materialization, immutable raw mini-dump |
-| `raw/openalex_cli/{slice_id}/dump_manifest.json` | canonical | dump | download provenance, signatures, final-analysis eligibility |
-| `dumps/{dump_id}/dump_manifest.json` | canonical | dump | reproducibility checks and analysis eligibility recovery |
-| `dumps/{dump_id}/normalized/*.csv` | canonical | dump | dump-scoped normalized CSV staging for import |
-| `dumps/{dump_id}/parquet/*_flat.parquet` | canonical | dump | dump-scoped normalized parquet staging for canonical tables |
-| `dumps/{dump_id}/quality_report.json` | canonical | dump | normalization quality report for the local corpus |
-| `dumps/{dump_id}/fetch_meta.json` | canonical | dump | import/fetch provenance for the local corpus |
-| `tables/{dump_id}/works.parquet` | canonical | dump | local-data preview, ranking/scientometrics input |
-| `tables/{dump_id}/authorships.parquet` | canonical | dump | local-data preview, author-work materialization |
-| `tables/{dump_id}/work_topics.parquet` | canonical | dump | topic diagnostics for the local corpus |
-| `runs/{run_id}/tables/author_work.csv` | canonical | run | author-work evidence and local exports |
-| `runs/{run_id}/tables/indices.csv` | canonical | run | rankings, cohorts, scientometrics |
-| `runs/{run_id}/tables/ratings.csv` | canonical | run | rank table and ranking exports |
-| `runs/{run_id}/passports/slice_passport.json` | canonical | run | slice passport for report bundles |
-| `runs/{run_id}/passports/calculation_passport.json` | canonical | run | analysis/run passport and final-analysis eligibility |
-| `runs/{run_id}/passports/checksums.json` | canonical | run | scoped checksum manifest for report bundles |
-| `runs/{run_id}/passports/sha256_manifest.txt` | canonical | run | plain-text SHA-256 manifest beside `checksums.json` |
-| `runs/{run_id}/passports/pipeline_summary.json` | canonical | run | pipeline summary for report bundles |
-| `runs/{run_id}/reports/report_{report_scope_hash}.json` | canonical | report | reproducible report bundle for an analysis scope |
-| `workbench/active_context.json` | pointer | active context | small pointer to the current active `run_id` and `dump_id` |
+| `raw/openalex_cli/{slice_id}/works.jsonl.gz` | основной | срез | неизменяемая сырая загрузка Works из установленного загрузчика OpenAlex |
+| `raw/openalex_cli/{slice_id}/dump_manifest.json` | основной | срез | происхождение загрузки, подписи и пригодность для итогового анализа |
+| `dumps/{dump_id}/dump_manifest.json` | основной | срез | проверки воспроизводимости и восстановление статуса пригодности |
+| `dumps/{dump_id}/normalized/*.csv` | основной | срез | нормализованные CSV для импорта |
+| `dumps/{dump_id}/parquet/*_flat.parquet` | основной | срез | нормализованные parquet-таблицы для канонических таблиц |
+| `dumps/{dump_id}/quality_report.json` | основной | срез | качество нормализации локального корпуса |
+| `dumps/{dump_id}/fetch_meta.json` | основной | срез | происхождение импорта или скачивания локального корпуса |
+| `tables/{dump_id}/works.parquet` | основной | срез | просмотр локальных данных, рейтинги, наукометрический анализ |
+| `tables/{dump_id}/authorships.parquet` | основной | срез | просмотр локальных данных и построение таблицы авторов |
+| `tables/{dump_id}/work_topics.parquet` | основной | срез | диагностика тематик локального корпуса |
+| `runs/{run_id}/tables/author_work.csv` | основной | расчет | публикации авторов и локальные выгрузки |
+| `runs/{run_id}/tables/indices.csv` | основной | расчет | рейтинги авторов, выборка TOP-N, наукометрический анализ |
+| `runs/{run_id}/tables/ratings.csv` | основной | расчет | ранги и выгрузки рейтингов |
+| `runs/{run_id}/passports/slice_passport.json` | основной | расчет | паспорт среза для пакета отчета |
+| `runs/{run_id}/passports/calculation_passport.json` | основной | расчет | паспорт расчета и пригодность к итоговому анализу |
+| `runs/{run_id}/passports/checksums.json` | основной | расчет | checksums артефактов выбранного среза |
+| `runs/{run_id}/passports/sha256_manifest.txt` | основной | расчет | текстовый SHA-256 manifest рядом с `checksums.json` |
+| `runs/{run_id}/passports/pipeline_summary.json` | основной | расчет | сводка расчета для пакета отчета |
+| `runs/{run_id}/reports/report_{report_scope_hash}.json` | основной | отчет | воспроизводимый пакет отчета |
+| `workbench/active_context.json` | указатель | текущий срез | маленький указатель на активные `run_id` и `dump_id` |
 
-## Rules
+## Правила
 
-- `dump_id` owns the local corpus: raw manifest plus `works`,
-  `authorships`, and `work_topics`.
-- Raw imports normalize directly into `dumps/{dump_id}/normalized` and
-  `dumps/{dump_id}/parquet`, then materialize canonical parquet tables under
-  `tables/{dump_id}`. The import path does not use global `data/normalized` or
-  `data/parquet` as staging.
-- Import/fetch metadata is written under `dumps/{dump_id}/fetch_meta.json` and
-  copied into `runs/{run_id}/passports/fetch_meta.json` from that scoped source.
-  It is not written to a global passport path.
-- Import runs include `dumps/{dump_id}/fetch_meta.json` and
-  `dumps/{dump_id}/quality_report.json` in scoped checksum passports alongside
-  dump tables and run outputs. If a dump manifest is provided during import, it
-  is written before calculation and included as `dump/dump_manifest.json`.
-- Recalculation runs include existing dump provenance files from
-  `dumps/{dump_id}` in scoped checksum passports when those files are present.
-- `run_id` owns derived calculations: author-work rows, indices,
-  ratings, run passports, and scoped report bundles.
-- Slice, calculation, checksum, and pipeline summary passports are written
-  directly under `runs/{run_id}/passports` when a `run_id` is available.
-  Global passport paths are not the source for these run-scoped passport
-  artifacts.
-- Run checksum passports are built from scoped dump/run artifacts. Scoped
-  checksum manifests are written beside
-  `runs/{run_id}/passports/checksums.json` as
+- `dump_id` владеет локальным корпусом: raw manifest плюс `works`,
+  `authorships` и `work_topics`.
+- Сырые импорты нормализуются прямо в `dumps/{dump_id}/normalized` и
+  `dumps/{dump_id}/parquet`, затем создают канонические parquet-таблицы в
+  `tables/{dump_id}`. Путь импорта не использует глобальные `data/normalized`
+  или `data/parquet` как промежуточный слой.
+- Метаданные импорта или скачивания пишутся в
+  `dumps/{dump_id}/fetch_meta.json` и копируются в
+  `runs/{run_id}/passports/fetch_meta.json` из этого scoped-источника. Они не
+  пишутся в глобальный путь паспортов.
+- Запуски импорта включают `dumps/{dump_id}/fetch_meta.json` и
+  `dumps/{dump_id}/quality_report.json` в checksum-паспорта вместе с таблицами
+  среза и результатами расчета. Если manifest среза передан при импорте, он
+  записывается до расчета и включается как `dump/dump_manifest.json`.
+- Перерасчеты включают существующие файлы происхождения из `dumps/{dump_id}` в
+  checksum-паспорта, если эти файлы есть.
+- `run_id` владеет производными расчетами: строками автор-публикация,
+  индексами, рейтингами, паспортами расчета и пакетами отчета.
+- Паспорта среза, расчета, checksums и сводки pipeline пишутся прямо в
+  `runs/{run_id}/passports`, когда известен `run_id`. Глобальные пути паспортов
+  не являются источником для этих артефактов.
+- Checksum-паспорта строятся из артефактов выбранного среза и расчета.
+  Текстовый checksum manifest пишется рядом с
+  `runs/{run_id}/passports/checksums.json` как
   `runs/{run_id}/passports/sha256_manifest.txt`.
-- Passport generation requires the pipeline to provide an explicit scoped
-  primary artifact map. It does not scan global normalized/results/passport
-  paths and does not write shared checksum manifests outside the run scope.
-- Run archiving records/copies `run_id` artifacts from scoped compute outputs
-  and dump tables from the scoped input table manifest. It does not use
-  global fallback table paths as the archive source.
-- `author_work` belongs to `run_id`; it must not be archived as a dump-owned
-  table under `tables/{dump_id}`.
-- `report_scope_hash` owns report reproducibility for a selected metric,
-  filters, cohort, baseline, rank Top-N, and scientometric analysis parameters.
-- Local-data preview and CSV routes require explicit `run_id`/`dump_id`.
-- Analytics JSON, CSV, and Markdown routes require explicit `run_id`/`dump_id`
-  or a cohort-resolved scope.
-- `/workbench` table summaries are resolved from `active_context` when it has
-  an active `run_id` or `dump_id`. Without active context, `/workbench` does not
-  expose global fallback table counts as current scoped data.
-- `/workbench` quality summary is resolved from the active `run_id`. Without an
-  active run, `/workbench` does not read global fallback quality reports.
-- Final report and analytics paths require scoped artifacts and avoid implicit
-  fallback.
+- Создание паспортов требует явную карту primary artifacts от pipeline. Оно не
+  сканирует глобальные normalized/results/passport пути и не пишет общий
+  checksum manifest вне `runs/{run_id}`.
+- Архивация расчета записывает или копирует артефакты `run_id` из scoped
+  outputs и таблицы среза из scoped input manifest. Глобальные запасные пути не
+  используются как источник архива.
+- `author_work` принадлежит `run_id`; его нельзя архивировать как таблицу среза
+  в `tables/{dump_id}`.
+- `report_scope_hash` фиксирует воспроизводимость отчета для выбранной метрики,
+  фильтров среза, ограничений из вкладки `Данные`, сортировки, TOP-N, базовой
+  метрики и параметров наукометрического анализа.
+- Выборка из вкладки `Данные` передается как единый контракт:
+  `data_filters`, `data_sort`, `data_direction`, `data_limit`. Эти параметры
+  применяются к индексам, графикам, наукометрическим CSV/Markdown export и
+  пакету отчета.
+- Просмотр локальных данных и CSV требуют явный `run_id`/`dump_id`.
+- Analytics JSON, CSV и Markdown требуют явный `run_id`/`dump_id`.
+- `/workbench` читает сводки таблиц из `active_context`, когда там есть активный
+  `run_id` или `dump_id`. Без активного среза `/workbench` не показывает
+  глобальные или запасные counts как текущие данные.
+- `/workbench` читает quality summary из активного `run_id`. Без активного
+  расчета quality summary пустая.
+- Итоговый отчет и analytics paths требуют scoped artifacts и не используют
+  неявные запасные пути.
 
-## Active Context Pointer
+## Указатель активного среза
 
 `workbench/active_context.json` is intentionally small:
 
@@ -92,9 +97,10 @@ global fallback files.
 }
 ```
 
-`/workbench` exposes this pointer for UI state. The UI may use active context as
-the default preview scope for local data, rankings, cohorts, and
-scientometrics, but final reports should still use explicit scope parameters.
-`/workbench` uses the pointer to read scoped table counts and returns an empty
-table summary when the pointer is absent. Run quality is read from the active
-run only; dump-only or missing active context returns an empty quality summary.
+`/workbench` отдает этот указатель для состояния интерфейса. UI может
+использовать активный срез как значение по умолчанию для локальных таблиц,
+рейтингов и наукометрического анализа, но итоговые отчеты
+должны передавать явные параметры выбранного среза. Если указателя нет,
+`/workbench` возвращает пустую сводку таблиц. Качество расчета читается только
+из активного `run_id`; при срезе без расчета или без активного среза quality
+summary пустая.

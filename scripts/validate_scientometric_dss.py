@@ -20,7 +20,7 @@ DUMP_ID = "validation_fixture_dump"
 FRACTION_MODE = "integer"
 BASELINE_METRIC = "h"
 RANK_TOP_N = 5
-METRICS = ["p", "c", "c_frac", "h", "i10", "g", "islv"]
+METRICS = ["p", "c", "cpp", "h", "i10", "g"]
 
 
 def main() -> None:
@@ -74,7 +74,7 @@ def main() -> None:
     with patch.object(cohorts.uuid, "uuid4", return_value=SimpleNamespace(hex="validation000000000000000000000000")):
         cohort = cohorts.create_cohort(
             {
-                "name": "Validation Top-5 by h",
+                "name": "Первые 5 авторов по индексу Хирша",
                 "source": "top_n",
                 "run_id": RUN_ID,
                 "dump_id": DUMP_ID,
@@ -428,7 +428,7 @@ def _assert_validation_invariants(
         _require(report_analysis_scope.get(key) == expected, f"report scientometric scope mismatch for {key}: {report_analysis_scope.get(key)!r} != {expected!r}")
     _require(manifest["status"] == "ok", "manifest status is not ok")
     _require(manifest["cohort_checksum"] == cohort["checksum"], "manifest cohort checksum does not match cohort checksum")
-    _require(manifest["n_authors"] == payload["n_authors"] == RANK_TOP_N, "validated author count does not match the fixed Top-N cohort")
+    _require(manifest["n_authors"] == payload["n_authors"] == RANK_TOP_N, "validated author count does not match the fixed author group")
     _require(manifest["raw_works"] == len(_fixture_works()), "validated raw work count does not match fixture")
     _require(manifest["analysis_schema"] == scientometrics_module.SCIENTOMETRIC_ANALYSIS_SCHEMA, "analysis schema mismatch")
     _require(manifest["findings_schema"] == scientometrics_module.SCIENTOMETRIC_FINDINGS_SCHEMA, "findings schema mismatch")

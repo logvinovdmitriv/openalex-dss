@@ -14,7 +14,7 @@ OPENALEX_DSS_DATA_DIR/* -> external lakehouse and warehouse layer
 
 `apps/web` is a React + TypeScript application with Vite, TanStack Query,
 Recharts, Framer Motion and Lucide icons. The first screen is a Russian
-workspace: choose a slice, create or import a fixed dump, inspect author
+workspace: choose a slice, create or import a fixed local slice, inspect author
 ratings, compare metric lines, inspect whitelisted local data previews, and export reproducible
 tables, passports and report bundles.
 
@@ -29,14 +29,14 @@ mode and ranking metric.
 `apps/api` is a FastAPI backend under `/api/v1`; Swagger is available at
 `/docs`. It owns:
 
-- OpenAlex ID/autocomplete/enrichment access;
-- compact OpenAlex Works dump creation;
+- OpenAlex ID/autocomplete and explicit lookup access;
+- compact OpenAlex Works slice creation;
 - local OpenAlex Works JSONL/JSONL.GZ import;
 - filesystem/lakehouse source catalog;
 - normalization into works/authorships/author-work tables;
 - author index calculation and scientometric analysis;
 - report bundle assembly with passports, quality funnel, findings and conclusion exports;
-- domain exports for rankings, cohorts, local data previews and scientometric reports.
+- domain exports for rankings, author groups, local data tables and scientometric reports.
 
 HTTP/REST is the primary UI-backend protocol. WebSocket or SSE should be added
 later for long-running progress events. gRPC is reserved for future
@@ -56,7 +56,7 @@ GET  /api/v1/runs/{run_id}
 ```
 
 `POST /runs` is public only for `recalculate`, i.e. recomputing indices from
-an already materialized local dump. Its payload must include the target
+an already materialized local slice. Its payload must include the target
 `dump_id`; it is not a generic job dispatcher. OpenAlex downloads are launched
 through the slice/materialization workflow:
 
@@ -80,7 +80,7 @@ The DSS treats OpenAlex as an external source, not as the working database.
 Every heavy run should follow:
 
 ```text
-resolve -> estimate -> plan -> fetch works dump through OpenAlex CLI -> normalize minimal fields -> analyze locally
+resolve -> estimate -> plan -> download Works slice through the installed OpenAlex downloader -> normalize minimal fields -> analyze locally
 ```
 
 The supported estimate endpoint is:
@@ -94,9 +94,9 @@ It sends lightweight `/works` estimate/sample/group_by requests, reads
 `can_fetch`, `medium_slice`, `large_slice`, `very_large_slice` or `no_data`.
 These statuses are user-facing guidance, not hard download caps.
 The planner also records `estimate_signature` and `download_signature`.
-If the API estimate uses a parameter that the installed OpenAlex CLI cannot
-express, such as `search`, the run is marked `unsupported_cli_filter` instead
-of silently downloading a different corpus.
+If the API estimate uses a parameter that the installed OpenAlex downloader
+cannot express, such as `search`, the run is marked `unsupported_cli_filter`
+instead of silently downloading a different corpus.
 The same planner feeds slice estimates and materialization plans; it is not
 exposed as a public `/runs` action.
 
@@ -120,9 +120,9 @@ The local data layout follows a lakehouse pattern under the external
 only a small README/placeholder and is ignored by git.
 
 ```text
-$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/               CLI-downloaded raw JSONL.GZ mini-dumps
+$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/               raw JSONL.GZ local slices downloaded by the installed loader
 $OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/snapshot/  S3 snapshot manifests and downloaded partitions
-$OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/files/     local user-provided OpenAlex dumps
+$OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/files/     local user-provided OpenAlex slices
 $OPENALEX_DSS_DATA_DIR/lake/silver/openalex/           normalized works and authorships
 $OPENALEX_DSS_DATA_DIR/lake/gold/scientometrics/       indices, ratings and scientometric exports
 $OPENALEX_DSS_DATA_DIR/warehouse/openalex_dss.duckdb   query warehouse/catalog
@@ -132,7 +132,7 @@ The current DSS keeps CSV/JSON as primary reproducibility artifacts and
 registers them as DuckDB views for interactive querying. The production
 upgrade path is Parquet for silver/gold tables with CSV as export only.
 
-SQLite is used only for local metadata catalogs, entity suggestions and dump
+SQLite is used only for local metadata catalogs, entity suggestions and slice
 passports. It is not the analytical store. Analytical tables should move toward
 Parquet + DuckDB/Polars; PostgreSQL is reserved for later multi-user server
 mode with roles, durable jobs and permissions.
@@ -145,13 +145,13 @@ conclusions about indices must use this mode.
 
 For reproducible dissertation runs, `scripts/01_fetch_openalex_slice.py` or
 `POST /api/v1/materializations/{materialization_id}/run` materializes the
-strict Works request through the installed official OpenAlex CLI. API calls are
+strict Works request through the installed OpenAlex downloader. API calls are
 kept for field catalogs, entity resolving, estimates, rate-limit visibility and
-point enrichment. The CLI output is packed as
+explicit selected-entity lookup. The downloader output is packed as
 `$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/works.jsonl.gz` with a
 passport and checksum. The calculation step imports this fixed file locally;
-the materialization endpoint does not calculate rankings. This is the DSS dump
-mode and is intentionally separate from the full S3 snapshot.
+the materialization endpoint does not calculate rankings. This is the DSS local
+slice mode and is intentionally separate from the full S3 snapshot.
 
 ## Primary Workflow
 
@@ -160,8 +160,8 @@ The primary DSS workflow is:
 1. choose OpenAlex field, subfield or topic by name;
 2. choose filter mode: primary topic, any topic or keyword; fixed text search is estimate-only until an ID-based CLI download mode is added;
 3. optionally restrict by organization and country code;
-4. materialize the Works request as a fixed JSONL.GZ dump through OpenAlex CLI;
-5. import the fixed dump, then flatten works and authorships locally;
+4. download the Works request as a fixed JSONL.GZ local slice through the installed OpenAlex downloader;
+5. import the fixed local slice, then flatten works and authorships locally;
 6. build run-scoped `author_work`;
 7. compute core indices P, C, C_frac, CPP, h, i10, g and m_local;
 8. compute ISLV as the default balanced local ranking and IUPV/LRDI/f5/fm5 as
@@ -195,6 +195,6 @@ manifest did not change during download, and upsert by OpenAlex entity ID.
 
 The full snapshot is a future bulk-ingestion mode. For the DSS, API calls are
 reserved for dropdown suggestions, field catalogs, estimates, usage limits and
-point enrichment of selected authors/publications. Materializing the actual
-works corpus uses the installed OpenAlex CLI, then local offline calculation
+explicit lookup of selected authors/publications. Materializing the actual
+works corpus uses the installed OpenAlex downloader, then local offline calculation
 from the fixed raw file.

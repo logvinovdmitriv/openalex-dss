@@ -132,12 +132,14 @@ def _clean_updates(payload: dict[str, Any], *, base: SliceConfig) -> dict[str, A
     elif filter_mode in {"primary_topic", "topics_any"}:
         if level not in SUBJECT_LEVELS:
             raise ValueError("entity_level must be one of: field, subfield, topic")
+        subject_id = _clean_subject_id(level, subject_id)
         _validate_subject_id(level, subject_id)
     else:
         has_subject = bool(level or subject_id)
         if has_subject:
             if level not in SUBJECT_LEVELS:
                 raise ValueError("entity_level must be one of: field, subfield, topic")
+            subject_id = _clean_subject_id(level, subject_id)
             _validate_subject_id(level, subject_id)
         else:
             level = ""
@@ -243,6 +245,16 @@ def _validate_subject_id(level: str, subject_id: str) -> None:
         raise ValueError("OpenAlex topic IDs must look like T11572")
     if level in {"field", "subfield"} and not re.match(r"^\d+$", subject_id):
         raise ValueError(f"OpenAlex {level} IDs must be numeric")
+
+
+def _clean_subject_id(level: str, subject_id: str) -> str:
+    text = subject_id.strip().rstrip("/")
+    if not text:
+        return ""
+    short = text.rsplit("/", 1)[-1]
+    if level == "topic":
+        return short
+    return re.sub(r"^[A-Za-z]+:", "", short)
 
 
 def _openalex_entity_url(level: str, subject_id: str) -> str:

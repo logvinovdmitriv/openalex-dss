@@ -1,13 +1,12 @@
-# Acceptance Gate
+# Приемочный gate
 
-This document defines the release-readiness gate for the scoped OpenAlex DSS.
-The gate is intentionally local and reproducible: it checks the Python backend,
-the frontend build, repository hygiene, and the deterministic scientometric
-validation flow.
+Документ фиксирует минимальную проверку перед передачей OpenAlex DSS в пилотное
+использование. Проверка локальная и воспроизводимая: backend-тесты, frontend
+build, чистота репозитория и детерминированный end-to-end сценарий.
 
-## Required Commands
+## Обязательные команды
 
-Run from the repository root:
+Запускайте из корня репозитория:
 
 ```bash
 pytest tests/test_repository_hygiene.py -q
@@ -22,7 +21,7 @@ pytest tests/test_validation_script.py -q
 pytest tests/test_scientometrics.py -q
 ```
 
-Then run the frontend build:
+Затем соберите frontend:
 
 ```bash
 cd apps/web
@@ -30,32 +29,38 @@ npm run build
 cd ../..
 ```
 
-Then run the deterministic end-to-end validation:
+Затем запустите детерминированную end-to-end проверку:
 
 ```bash
 python scripts/validate_scientometric_dss.py --reset
 ```
 
-## Acceptance Criteria
+## Критерии приемки
 
-The DSS is ready for pilot handoff when all criteria below are true:
+Система готова к пилотной передаче, если выполнены все условия:
 
-- The repository hygiene test passes.
-- The backend test suite listed above passes.
-- The frontend production build passes.
-- The deterministic validation script returns `status: ok`.
-- The validation output contains `report_bundle_schema: report_bundle`.
-- The validation output contains `analysis_schema: scientometric_analysis`.
-- The validation output contains `findings_schema: scientometric_findings`.
-- The validation output contains `conclusion_schema: scientometric_conclusion`.
-- The validation output includes artifact checksums for the report bundle,
-  scientometric JSON, findings CSV, conclusion Markdown, and tabular exports.
-- Report bundles are produced from explicit `run_id` and `dump_id` scope.
-- Local-data and analytics routes require scoped inputs.
+- Тест чистоты репозитория проходит.
+- Перечисленные backend-тесты проходят.
+- Production build frontend проходит.
+- Validation script возвращает `status: ok`.
+- Validation output содержит `report_bundle_schema: report_bundle`.
+- Validation output содержит `analysis_schema: scientometric_analysis`.
+- Validation output содержит `findings_schema: scientometric_findings`.
+- Validation output содержит `conclusion_schema: scientometric_conclusion`.
+- Validation output содержит checksums для пакета отчета, наукометрического JSON,
+  findings CSV, conclusion Markdown и табличных export-файлов.
+- Пакет отчета строится из явных `run_id` и `dump_id`.
+- Local-data и analytics routes требуют выбранный срез.
+- Ошибки OpenAlex API возвращаются как контролируемые `502` с диагностикой, а не
+  как необработанный Internal Server Error.
+- Уже скачанные срезы можно выбрать, проанализировать и удалить без API.
+- Использование ключа OpenAlex видно пользователю: справочники, оценка объема,
+  проверка лимитов, точечное обогащение и новая загрузка среза. Установленный
+  загрузчик OpenAlex может требовать ключ для новой загрузки.
 
-## Contract Invariants
+## Инварианты контракта
 
-The accepted system uses this artifact ownership model:
+Принятая система использует такую модель владения артефактами:
 
 ```text
 dumps/<dump_id>/...
@@ -66,7 +71,7 @@ runs/<run_id>/reports/report_<report_scope_hash>.json
 workbench/active_context.json
 ```
 
-The accepted public table names are:
+Публичные названия таблиц:
 
 ```text
 works
@@ -77,7 +82,7 @@ indices
 ratings
 ```
 
-The accepted report layer is:
+Слой отчета:
 
 ```text
 scientometric_analysis
@@ -87,10 +92,10 @@ checksums
 exports
 ```
 
-## Handoff Note
+## Примечание для передачи
 
-The deterministic validation fixture proves that the pipeline, scoped artifact
-model, report bundle, exports, and checksums are internally consistent. It does
-not prove any scientific claim about a real OpenAlex subject area. A real
-analysis still requires a qualified corpus, accepted materialization signatures,
-and review of the generated report bundle.
+Детерминированная validation fixture подтверждает внутреннюю согласованность
+pipeline, артефактов, пакета отчета, export-файлов и checksums. Она не доказывает
+научные утверждения по реальной предметной области OpenAlex. Реальный анализ
+требует подходящий корпус, подтвержденные подписи оценки/загрузки и экспертную
+проверку сформированного отчета.

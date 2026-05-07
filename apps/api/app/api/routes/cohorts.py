@@ -30,7 +30,7 @@ def get_cohort(cohort_id: str) -> dict[str, Any]:
     try:
         return cohorts.get_cohort(cohort_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
 
 
 @router.get("/cohorts/{cohort_id}/statistics")
@@ -96,7 +96,7 @@ def cohort_statistics(
     try:
         return cohorts.cohort_statistics(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -166,7 +166,7 @@ def cohort_author_metrics_json(
     try:
         return cohorts.cohort_author_metrics(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy, metric=metric, limit=limit, offset=offset)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -236,7 +236,7 @@ def cohort_author_metrics_csv(
     try:
         data = cohorts.cohort_author_metrics_csv(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy, metric=metric, limit=limit, offset=offset)
     except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Cohort not found") from exc
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(

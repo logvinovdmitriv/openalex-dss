@@ -12,7 +12,7 @@ from openalex_dss.config import load_config
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Download a reproducible OpenAlex Works slice through the official OpenAlex CLI."
+        description="Download a reproducible OpenAlex Works slice through the installed OpenAlex downloader."
     )
     parser.add_argument("--config", default="config/slice.yaml")
     parser.add_argument("--out-dir", default=None, help="Default: OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_name}")
