@@ -7,6 +7,10 @@ export type TableResponse = {
   total: number;
   limit: number;
   offset: number;
+  scope_status?: string;
+  reproducible?: boolean;
+  scope_warnings?: string[];
+  warnings?: string[];
 };
 
 export async function getJson<T>(path: string): Promise<T> {

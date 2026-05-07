@@ -37,6 +37,9 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   filters, cohort, baseline, rank Top-N, and scientometric version set.
 - Latest-view files are compatibility artifacts. They are not a stable source
   for dissertation-grade reports.
+- Local-data preview routes may still read latest-view files during the
+  transition, but no-scope responses are marked as
+  `scope_status=implicit_latest_preview` and `reproducible=false`.
 - Final report and analytics paths must prefer explicit `run_id`/`dump_id` and
   avoid implicit latest fallback.
 

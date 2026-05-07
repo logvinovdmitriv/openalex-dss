@@ -27,12 +27,13 @@ def local_data_summary(run_id: str = "", dump_id: str = "") -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     scoped_tables = {kind: _summary_entry(kind, label, tables.get(kind) or {}) for kind, label in LOCAL_DATA_KINDS.items()}
-    return {
+    payload = {
         "kinds": [{"kind": kind, "label": label} for kind, label in LOCAL_DATA_KINDS.items()],
         "tables": scoped_tables,
         "run_id": _first_table_value(scoped_tables, "run_id") or run_id,
         "dump_id": _first_table_value(scoped_tables, "dump_id") or dump_id,
     }
+    return _annotate_local_data_payload(payload, run_id=run_id, dump_id=dump_id)
 
 
 @router.get("/local-data/preview")
@@ -70,7 +71,7 @@ def local_data_preview(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     payload["kind"] = table
     payload["label"] = LOCAL_DATA_KINDS[table]
-    return payload
+    return _annotate_local_data_payload(payload, run_id=run_id, dump_id=dump_id)
 
 
 @router.get("/local-data/preview.csv")
@@ -107,10 +108,14 @@ def local_data_preview_csv(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     filename = f"openalex_dss_local_data_{table}.csv"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        **_local_data_scope_headers(run_id=run_id, dump_id=dump_id),
+    }
     return Response(
         content=data,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=headers,
     )
 
 
@@ -138,3 +143,42 @@ def _summary_entry(kind: str, label: str, raw: dict[str, Any]) -> dict[str, Any]
         "exists": bool(raw.get("exists")),
         "rows": int(raw.get("rows") or 0),
     }
+
+
+def _local_data_scope_metadata(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    if str(run_id or "").strip() or str(dump_id or "").strip():
+        return {"scope_status": "explicit_scope", "reproducible": True, "scope_warnings": []}
+    return {
+        "scope_status": "implicit_latest_preview",
+        "reproducible": False,
+        "scope_warnings": [
+            (
+                "No run_id or dump_id was provided; this local-data preview uses compatibility "
+                "latest-view data and is not suitable for final analysis."
+            )
+        ],
+    }
+
+
+def _annotate_local_data_payload(payload: dict[str, Any], *, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    metadata = _local_data_scope_metadata(run_id=run_id, dump_id=dump_id)
+    payload.update(metadata)
+    existing = payload.get("warnings")
+    warnings = list(existing) if isinstance(existing, list) else ([] if existing is None else [existing])
+    for warning in metadata["scope_warnings"]:
+        if warning not in warnings:
+            warnings.append(warning)
+    payload["warnings"] = warnings
+    return payload
+
+
+def _local_data_scope_headers(*, run_id: str = "", dump_id: str = "") -> dict[str, str]:
+    metadata = _local_data_scope_metadata(run_id=run_id, dump_id=dump_id)
+    headers = {
+        "X-OpenAlex-DSS-Scope-Status": str(metadata["scope_status"]),
+        "X-OpenAlex-DSS-Reproducible": "true" if metadata["reproducible"] else "false",
+    }
+    warnings = metadata["scope_warnings"]
+    if warnings:
+        headers["X-OpenAlex-DSS-Scope-Warning"] = "; ".join(str(warning) for warning in warnings)
+    return headers

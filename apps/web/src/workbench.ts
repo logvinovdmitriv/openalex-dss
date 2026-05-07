@@ -210,6 +210,10 @@ export type LocalDataSummary = {
   tables?: Record<LocalDataKind, Record<string, unknown>>;
   run_id?: string;
   dump_id?: string;
+  scope_status?: string;
+  reproducible?: boolean;
+  scope_warnings?: string[];
+  warnings?: string[];
 };
 
 export const LOCAL_DATA_KIND_OPTIONS: Array<{ value: LocalDataKind; label: string }> = [
