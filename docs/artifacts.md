@@ -48,7 +48,8 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   The global `data/passports/fetch_meta.json` path is legacy-only.
 - Import runs include `dumps/{dump_id}/fetch_meta.json` and
   `dumps/{dump_id}/quality_report.json` in scoped checksum passports alongside
-  dump tables and run outputs.
+  dump tables and run outputs. If a dump manifest is provided during import, it
+  is written before calculation and included as `dump/dump_manifest.json`.
 - Recalculation runs include existing dump provenance files from
   `dumps/{dump_id}` in scoped checksum passports when those files are present.
 - `run_id` owns derived calculations: author-work rows, author indices,

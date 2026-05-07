@@ -139,6 +139,12 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(run["status"], "queued")
 
     def test_cli_origin_fetch_meta_keeps_dump_manifest_context(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_compute(*args: object, **kwargs: object) -> dict[str, object]:
+            captured["extra_primary_artifacts"] = kwargs["extra_primary_artifacts"]
+            return {"input_tables": {}, "input_table_checksums": {}}
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw = root / "works.jsonl"
@@ -161,7 +167,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 patch.object(pipeline, "resolve_safe_path", return_value=raw),
                 patch.object(pipeline, "file_profile", return_value=profile),
                 patch.object(pipeline, "_materialize_dump_tables", return_value={"works": raw, "authorships": raw, "work_topics": raw}),
-                patch.object(pipeline, "_run_compute", return_value={"input_tables": {}, "input_table_checksums": {}}),
+                patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
                 patch.object(pipeline, "_archive_run_artifacts", return_value={}),
                 patch.object(pipeline, "_write_pipeline_summary", return_value=None),
             ):
@@ -176,12 +182,17 @@ class PipelineIntegrityTests(unittest.TestCase):
                     }
                 )
 
+            dump_manifest_path = root / "data/dumps/dump_ctx/dump_manifest.json"
             fetch_meta = json.loads((root / "data/dumps/dump_ctx/fetch_meta.json").read_text(encoding="utf-8"))
+            scoped_manifest = json.loads(dump_manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(fetch_meta["source_type"], "openalex_cli_dump_import")
             self.assertEqual(fetch_meta["dump_id"], "dump_ctx")
+            self.assertEqual(fetch_meta["dump_manifest_path"], str(dump_manifest_path))
             self.assertEqual(fetch_meta["openalex_filter"], "primary_topic.subfield.id:1706")
             self.assertEqual(fetch_meta["accepted_download_signature"], "download-ok")
             self.assertEqual(fetch_meta["analysis_eligibility"]["status"], "blocked_not_for_final_analysis")
+            self.assertEqual(scoped_manifest["dump_id"], "dump_ctx")
+            self.assertEqual(captured["extra_primary_artifacts"]["dump/dump_manifest.json"], dump_manifest_path)
             self.assertFalse((root / "data/passports/fetch_meta.json").exists())
 
     def test_import_local_file_normalizes_dump_tables_under_dump_scope(self) -> None:
@@ -243,6 +254,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual(captured["archive_payload"]["quality_report"], str(dump_dir / "quality_report.json"))
             self.assertEqual(captured["extra_primary_artifacts"]["dump/fetch_meta.json"], dump_dir / "fetch_meta.json")
             self.assertEqual(captured["extra_primary_artifacts"]["dump/quality_report.json"], dump_dir / "quality_report.json")
+            self.assertNotIn("dump/dump_manifest.json", captured["extra_primary_artifacts"])
             self.assertEqual(result["fetch_meta"], str(dump_dir / "fetch_meta.json"))
             self.assertEqual(result["quality_report"], str(dump_dir / "quality_report.json"))
 

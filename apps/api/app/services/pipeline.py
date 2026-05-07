@@ -151,6 +151,9 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             "Локальный дамп пуст: OpenAlex вернул 0 работ для выбранных фильтров. "
             "Расширьте период, уберите организацию или выберите более широкую предметную область."
         )
+    if dump_manifest:
+        dump_manifest = {**dump_manifest, "dump_id": dump_id}
+    dump_manifest_path = _write_dump_manifest_if_present(dump_id, dump_manifest)
     quality, dump_table_sources, quality_report = _normalize_dump_to_scope(source, dump_id)
     input_tables = _materialize_dump_tables_from_sources(dump_id, dump_table_sources)
     source_type = "openalex_cli_dump_import" if dump_manifest else "local_file"
@@ -159,7 +162,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         "source_entity": "works",
         "source_file": profile,
         "dump_id": dump_id,
-        "dump_manifest_path": str(Path(str(dump_manifest.get("raw_jsonl") or source)).with_name("dump_manifest.json")) if dump_manifest else "",
+        "dump_manifest_path": str(dump_manifest_path) if dump_manifest_path else "",
         "raw_jsonl_sha256": dump_manifest.get("raw_jsonl_sha256") or profile.get("sha256"),
         "openalex_filter": ((dump_manifest.get("openalex_request") or {}).get("filter") if dump_manifest else "") or "",
         "accepted_estimate_signature": ((dump_manifest.get("signatures") or {}).get("accepted_estimate_signature") if dump_manifest else None),
@@ -190,6 +193,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         cfg,
         {
             **payload,
+            "dump_manifest": dump_manifest,
             "run_id": run_id,
             "source_file": profile,
             "dump_id": dump_id,
@@ -300,6 +304,16 @@ def _write_dump_fetch_meta(dump_id: str, fetch_meta: dict[str, Any]) -> Path:
     dump_dir.mkdir(parents=True, exist_ok=True)
     path = dump_dir / "fetch_meta.json"
     write_json(path, fetch_meta)
+    return path
+
+
+def _write_dump_manifest_if_present(dump_id: str, dump_manifest: dict[str, Any]) -> Path | None:
+    if not dump_manifest:
+        return None
+    dump_dir = DATA / "dumps" / _safe_id(str(dump_id or ""))
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    path = dump_dir / "dump_manifest.json"
+    write_json(path, {**dump_manifest, "dump_id": dump_id})
     return path
 
 
