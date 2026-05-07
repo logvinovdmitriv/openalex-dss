@@ -10,7 +10,7 @@ from typing import Any
 
 import duckdb
 
-from app.core.paths import DATA, SRC, TABLE_FILES, WAREHOUSE
+from app.core.paths import DATA, SRC, TABLE_KINDS, WAREHOUSE
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -39,20 +39,14 @@ INDEX_NUMERIC_FIELDS = {
 
 NATIVE_LINE_CHART_METRICS = ("p", "c", "h", "i10")
 CORE_LINE_CHART_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local")
-LEGACY_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "iupv", "islv", "lrdi")
-LINE_CHART_METRICS = LEGACY_LINE_CHART_METRICS
+EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "iupv", "islv", "lrdi")
+LINE_CHART_METRICS = EXTENDED_LINE_CHART_METRICS
 
 
 FilterSet = dict[str, Any]
 
 DUMP_TABLES = {"works", "authorships", "work_topics"}
-RUN_TABLE_ALIASES = {
-    "author_indices": "indices",
-    "rating_positions": "ratings",
-    "authors_local_metrics": "indices",
-}
-RUN_JSON_FILES = {
-    "report_bundle": ("results", "report_bundle.json"),
+RUN_JSON_DOCS = {
     "fetch_meta": ("passports", "fetch_meta.json"),
     "quality": ("passports", "quality_report.json"),
     "checksums": ("passports", "checksums.json"),
@@ -75,7 +69,7 @@ def connect_scope(*, run_id: str = "", dump_id: str = "") -> duckdb.DuckDBPyConn
 
 
 def register_views(conn: duckdb.DuckDBPyConnection, *, run_id: str = "", dump_id: str = "") -> None:
-    for name in TABLE_FILES:
+    for name in TABLE_KINDS:
         table_path = resolve_scoped_table_path(name, run_id=run_id, dump_id=dump_id)
         if table_path and table_path.exists():
             _register_file_view(conn, name, table_path)
@@ -99,25 +93,24 @@ def resolve_scoped_table_path(
     run_id: str | None = None,
     dump_id: str | None = None,
 ) -> Path | None:
-    if table not in TABLE_FILES:
+    if table not in TABLE_KINDS:
         raise ValueError(f"Unknown table: {table}")
     scope = resolve_analysis_scope(run_id=run_id or "", dump_id=dump_id or "")
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
 
     if run_id:
-        canonical = _canonical_table_name(table)
-        if canonical in DUMP_TABLES:
+        if table in DUMP_TABLES:
             if dump_id:
-                return _dump_table_path(dump_id, canonical)
+                return _dump_table_path(dump_id, table)
             return None
-        run_path = _run_table_path(run_id, canonical)
+        run_path = _run_table_path(run_id, table)
         if run_path:
             return run_path
         return None
 
-    if dump_id and _canonical_table_name(table) in DUMP_TABLES:
-        return _dump_table_path(dump_id, _canonical_table_name(table))
+    if dump_id and table in DUMP_TABLES:
+        return _dump_table_path(dump_id, table)
 
     return None
 
@@ -132,8 +125,7 @@ def resolve_analysis_scope(*, run_id: str = "", dump_id: str = "") -> dict[str, 
 
 
 def table_exists(name: str, *, run_id: str = "", dump_id: str = "") -> bool:
-    path = TABLE_FILES.get(name)
-    if not path:
+    if name not in TABLE_KINDS:
         return False
     table_path = resolve_scoped_table_path(name, run_id=run_id, dump_id=dump_id)
     return bool(table_path and table_path.exists())
@@ -144,7 +136,7 @@ def list_tables(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
     if not (scope["run_id"] or scope["dump_id"]):
         return {}
     tables: dict[str, Any] = {}
-    for name in TABLE_FILES:
+    for name in TABLE_KINDS:
         resolved_path = resolve_scoped_table_path(name, run_id=scope["run_id"], dump_id=scope["dump_id"])
         exists = bool(resolved_path and resolved_path.exists())
         tables[name] = {
@@ -160,7 +152,7 @@ def list_tables(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
 
 
 def count_rows(table: str, *, run_id: str = "", dump_id: str = "") -> int:
-    if table not in TABLE_FILES:
+    if table not in TABLE_KINDS:
         return 0
     path = resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id)
     if not path or not path.exists():
@@ -200,7 +192,7 @@ def query_table(
     limit: int = 100,
     offset: int = 0,
 ) -> dict[str, Any]:
-    if table not in TABLE_FILES:
+    if table not in TABLE_KINDS:
         raise ValueError(f"Unknown table: {table}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
@@ -245,7 +237,7 @@ def query_table_file(
     limit: int = 100,
     offset: int = 0,
 ) -> dict[str, Any]:
-    if table not in TABLE_FILES:
+    if table not in TABLE_KINDS:
         raise ValueError(f"Unknown table: {table}")
     table_path = Path(path)
     if not table_path.exists():
@@ -337,7 +329,7 @@ def export_table(
     limit: int = 100_000,
     offset: int = 0,
 ) -> dict[str, Any]:
-    if table not in TABLE_FILES:
+    if table not in TABLE_KINDS:
         raise ValueError(f"Unknown table: {table}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     run_id = scope["run_id"]
@@ -396,17 +388,17 @@ def export_table_csv(table: str, **kwargs: Any) -> str:
     return output.getvalue()
 
 
-def filtered_author_indices(
+def filtered_indices(
     fraction_mode: str,
     filters: FilterSet | None = None,
     *,
     run_id: str = "",
     dump_id: str = "",
 ) -> list[dict[str, Any]]:
-    return _filtered_work_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    return _filtered_work_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
 
 
-def _filtered_work_author_indices(
+def _filtered_work_indices(
     fraction_mode: str,
     filters: FilterSet | None = None,
     *,
@@ -696,7 +688,7 @@ def metric_ranking(
 ) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
-    rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     rows = filter_rows_by_author_ids(rows, author_ids)
     return metric_ranking_from_rows(
         rows,
@@ -767,7 +759,7 @@ def metric_distribution(
 ) -> dict[str, Any]:
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
-    rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     rows = filter_rows_by_author_ids(rows, author_ids)
     return metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id)
 
@@ -807,7 +799,7 @@ def metric_line_series(
 ) -> dict[str, Any]:
     if rank_metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported rank metric: {rank_metric}")
-    rows = filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     return metric_line_series_from_rows(
         rows,
         fraction_mode,
@@ -885,7 +877,7 @@ def metric_bundle(
     if metric not in INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
-    rows = filtered_author_indices(fraction_mode, filters, run_id=scope["run_id"], dump_id=scope["dump_id"])
+    rows = filtered_indices(fraction_mode, filters, run_id=scope["run_id"], dump_id=scope["dump_id"])
     rows = filter_rows_by_author_ids(rows, author_ids)
     return {
         "rows": rows,
@@ -1174,7 +1166,7 @@ def _visible_metrics(rows: list[dict[str, Any]]) -> list[str]:
     if any("two_year_mean_citedness" in row for row in rows):
         order = NATIVE_LINE_CHART_METRICS
     else:
-        order = LEGACY_LINE_CHART_METRICS
+        order = EXTENDED_LINE_CHART_METRICS
     return [metric for metric in order if any(metric in row for row in rows)]
 
 
@@ -1197,10 +1189,6 @@ def _first_nonempty(values: Any) -> str | None:
     return None
 
 
-def _canonical_table_name(table: str) -> str:
-    return RUN_TABLE_ALIASES.get(table, table)
-
-
 def _safe_id(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "_.-" else "_" for ch in str(value).strip())[:140] or "artifact"
 
@@ -1215,16 +1203,9 @@ def _dump_table_path(dump_id: str, table: str) -> Path:
 
 def _run_table_path(run_id: str, table: str) -> Path | None:
     run_dir = _run_dir(run_id)
-    canonical = _canonical_table_name(table)
     candidates: list[Path] = []
     for suffix in (".parquet", ".csv"):
-        candidates.append(run_dir / "tables" / f"{canonical}{suffix}")
-    if canonical == "indices":
-        for suffix in (".parquet", ".csv"):
-            candidates.append(run_dir / "tables" / f"author_indices{suffix}")
-    if canonical == "ratings":
-        for suffix in (".parquet", ".csv"):
-            candidates.append(run_dir / "tables" / f"rating_positions{suffix}")
+        candidates.append(run_dir / "tables" / f"{table}{suffix}")
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -1233,7 +1214,7 @@ def _run_table_path(run_id: str, table: str) -> Path | None:
 
 def _run_json_path(run_id: str, name: str) -> Path | None:
     run_dir = _run_dir(run_id)
-    mapped = RUN_JSON_FILES.get(name)
+    mapped = RUN_JSON_DOCS.get(name)
     if mapped:
         path = run_dir / mapped[0] / mapped[1]
         if path.exists():

@@ -1,6 +1,6 @@
 export const METRICS = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "lrdi", "f5", "fm5", "iupv", "islv"] as const;
 export const FRACTION_MODES = ["strict_authors_count", "renorm_valid_authors", "integer"] as const;
-export const TABLES = ["authors_local_metrics", "indices", "ratings", "works", "authorships", "work_topics", "author_work"] as const;
+export const TABLES = ["indices", "ratings", "works", "authorships", "work_topics", "author_work"] as const;
 
 export type Metric = (typeof METRICS)[number];
 export type FractionMode = (typeof FRACTION_MODES)[number];
@@ -156,7 +156,6 @@ const modeDescriptions: Record<string, string> = {
 
 const tableLabels: Record<string, string> = {
   indices: "Индексы авторов",
-  authors_local_metrics: "Локальные метрики авторов",
   ratings: "Рейтинговые позиции",
   works: "Работы OpenAlex",
   authorships: "Авторства",
@@ -166,7 +165,6 @@ const tableLabels: Record<string, string> = {
 
 const tableDescriptions: Record<string, string> = {
   indices: "Готовые значения индексов по авторам.",
-  authors_local_metrics: "Строгие локальные индексы, рассчитанные по works/authorships.",
   ratings: "Ранги по метрикам и режимам учёта.",
   works: "Плоская таблица работ, полученных из OpenAlex.",
   authorships: "Авторства и организации из OpenAlex.",

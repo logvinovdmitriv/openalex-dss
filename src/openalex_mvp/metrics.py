@@ -173,9 +173,9 @@ def lrdi(
 
 
 def build_author_work_metrics(
-    works_path: str | Path = "data/normalized/works_flat.csv",
-    authorships_path: str | Path = "data/normalized/authorships_flat.csv",
-    out_path: str | Path = "data/marts/author_work_metrics.csv",
+    works_path: str | Path = "data/tables/local/works.parquet",
+    authorships_path: str | Path = "data/tables/local/authorships.parquet",
+    out_path: str | Path = "data/runs/local/tables/author_work.csv",
     fraction_modes: tuple[str, ...] = ("strict_authors_count", "renorm_valid_authors", "integer"),
     run_id: str = "base",
 ) -> list[dict[str, Any]]:
@@ -247,8 +247,8 @@ def build_author_work_metrics(
 
 
 def compute_indices(
-    author_work_path: str | Path = "data/marts/author_work_metrics.csv",
-    out_path: str | Path = "data/results/author_indices.csv",
+    author_work_path: str | Path = "data/runs/local/tables/author_work.csv",
+    out_path: str | Path = "data/runs/local/tables/indices.csv",
     n0: float = 5.0,
     lam: float = 0.35,
     lrdi_p0: float = 5.0,

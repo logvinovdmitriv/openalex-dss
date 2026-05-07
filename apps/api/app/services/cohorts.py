@@ -39,7 +39,7 @@ def create_cohort(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Manual cohort requires run_id for reproducible analysis.")
         author_ids = [str(item).strip() for item in payload.get("author_ids") or [] if str(item).strip()]
     elif source == "metric_filter":
-        rows = warehouse.filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+        rows = warehouse.filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
         min_publications = int(payload.get("min_publications") or 0)
         min_h = int(payload.get("min_h") or 0)
         min_metric_value = payload.get("min_metric_value")
@@ -211,7 +211,7 @@ def cohort_author_metrics(
     sort_metric = str(metric or (ctx.get("cohort") or {}).get("metric") or "h")
     if sort_metric not in warehouse.INDEX_NUMERIC_FIELDS:
         raise ValueError(f"Unsupported metric: {sort_metric}")
-    rows = warehouse.filtered_author_indices(
+    rows = warehouse.filtered_indices(
         resolved_fraction_mode,
         ctx.get("filters") or {},
         run_id=str(ctx.get("run_id") or ""),
@@ -259,7 +259,7 @@ def cohort_statistics(
 ) -> dict[str, Any]:
     ctx = resolve_cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=filter_policy)
     resolved_fraction_mode = str(ctx.get("fraction_mode") or "strict_authors_count")
-    rows = warehouse.filtered_author_indices(
+    rows = warehouse.filtered_indices(
         resolved_fraction_mode,
         ctx.get("filters") or {},
         run_id=str(ctx.get("run_id") or ""),
@@ -306,7 +306,7 @@ def _apply_metric_thresholds(
     dump_id: str = "",
 ) -> list[str]:
     allowed = set(author_ids)
-    rows = warehouse.filtered_author_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    rows = warehouse.filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     out: list[str] = []
     for row in rows:
         author_id = str(row.get("author_id") or "")

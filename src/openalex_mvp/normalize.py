@@ -74,10 +74,10 @@ WORK_TOPIC_FIELDS = [
 
 def normalize_raw(
     raw_path: str | Path = "data/raw/openalex_cli/current/works.jsonl.gz",
-    works_out: str | Path = "data/normalized/works_flat.csv",
-    authorships_out: str | Path = "data/normalized/authorships_flat.csv",
-    quality_out: str | Path = "data/passports/quality_report.json",
-    work_topics_out: str | Path = "data/normalized/work_topics_flat.csv",
+    works_out: str | Path = "data/dumps/local/normalized/works_flat.csv",
+    authorships_out: str | Path = "data/dumps/local/normalized/authorships_flat.csv",
+    quality_out: str | Path = "data/dumps/local/quality_report.json",
+    work_topics_out: str | Path = "data/dumps/local/normalized/work_topics_flat.csv",
 ) -> dict[str, Any]:
     works = read_jsonl(raw_path)
     works_rows: list[dict[str, Any]] = []

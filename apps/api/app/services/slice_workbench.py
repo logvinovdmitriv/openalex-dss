@@ -171,7 +171,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
             "tables/{dump_id}/works.parquet",
             "tables/{dump_id}/authorships.parquet",
             "tables/{dump_id}/work_topics.parquet",
-            "runs/{run_id}/tables/author_indices.parquet",
+            "runs/{run_id}/tables/indices.parquet",
             "runs/{run_id}/passports/slice_passport.json",
         ],
     }

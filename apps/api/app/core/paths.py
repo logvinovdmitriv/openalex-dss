@@ -18,20 +18,11 @@ def _data_root() -> Path:
 DATA = _data_root()
 WAREHOUSE = DATA / "warehouse" / "openalex_dss.duckdb"
 
-TABLE_FILES = {
-    "works": DATA / "normalized" / "works_flat.csv",
-    "authorships": DATA / "normalized" / "authorships_flat.csv",
-    "work_topics": DATA / "normalized" / "work_topics_flat.csv",
-    "author_work": DATA / "marts" / "author_work_metrics.csv",
-    "authors_local_metrics": DATA / "results" / "author_indices.csv",
-    "indices": DATA / "results" / "author_indices.csv",
-    "ratings": DATA / "results" / "rating_positions.csv",
-}
-
-JSON_FILES = {
-    "fetch_meta": DATA / "passports" / "fetch_meta.json",
-    "quality": DATA / "passports" / "quality_report.json",
-    "checksums": DATA / "passports" / "checksums.json",
-    "pipeline": DATA / "passports" / "pipeline_summary.json",
-    "report_bundle": DATA / "results" / "report_bundle.json",
-}
+TABLE_KINDS = (
+    "works",
+    "authorships",
+    "work_topics",
+    "author_work",
+    "indices",
+    "ratings",
+)

@@ -44,7 +44,7 @@ def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) 
         "error": None,
         "payload": _public_payload(payload),
         "result": None,
-        "artifacts": _artifact_links(),
+        "artifacts": _artifact_links(run_id),
     }
     _save(doc)
     with _LOCK:
@@ -111,7 +111,7 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
         _save(doc)
         result = _dispatch(run_id, action, payload)
         materialization_jobs.mark_completed(run_id, action, result, payload)
-        doc.update({"status": "completed", "progress_percent": 100, "progress_stage": "completed", "finished_at": _now(), "result": result, "artifacts": _artifact_links()})
+        doc.update({"status": "completed", "progress_percent": 100, "progress_stage": "completed", "finished_at": _now(), "result": result, "artifacts": _artifact_links(run_id)})
     except Exception as exc:  # pragma: no cover - defensive job boundary
         materialization_jobs.mark_failed(run_id, action, str(exc), payload)
         doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
@@ -203,12 +203,13 @@ def _allow_unchecked_download() -> bool:
     return os.environ.get("OPENALEX_DSS_ALLOW_UNCHECKED_DOWNLOAD") == "1"
 
 
-def _artifact_links() -> dict[str, str]:
+def _artifact_links(run_id: str) -> dict[str, str]:
+    run_prefix = f"runs/{run_id}"
     return {
-        "slice_passport": "data/passports/slice_passport.json",
-        "calculation_passport": "data/passports/calculation_passport.json",
-        "quality_report": "data/passports/quality_report.json",
-        "author_indices": "data/results/author_indices.csv",
-        "rating_positions": "data/results/rating_positions.csv",
-        "report_bundle": "data/reports/report_bundle.json",
+        "slice_passport": f"{run_prefix}/passports/slice_passport.json",
+        "calculation_passport": f"{run_prefix}/passports/calculation_passport.json",
+        "quality_report": f"{run_prefix}/passports/quality_report.json",
+        "indices": f"{run_prefix}/tables/indices.csv",
+        "ratings": f"{run_prefix}/tables/ratings.csv",
+        "report_bundle": f"{run_prefix}/reports",
     }

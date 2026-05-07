@@ -97,7 +97,7 @@ OpenAlex Works API возвращает вложенные `authorships`; MVP н
 
 ## Ранжирование
 
-Одинаковое правило ранжирования используется в `rating_positions.csv`,
+Одинаковое правило ранжирования используется в `ratings.csv`,
 интерактивном API и UI:
 
 1. выбранный индекс по убыванию;
@@ -125,7 +125,7 @@ OpenAlex Works API возвращает вложенные `authorships`; MVP н
    `authorships_flat`; dependency-light реализация пишет CSV, production-слой
    зарезервирован под slice-based Parquet.
 7. Собирается mart `author_work_metrics.csv`.
-8. Считаются `author_indices.csv`, `rating_positions.csv` и паспорта
+8. Считаются `indices.csv`, `ratings.csv` и паспорта
    воспроизводимости.
 9. UI обновляет рейтинг, ящик с усами, линейное сравнение индексов, плоские
    таблицы и CSV/JSON export.

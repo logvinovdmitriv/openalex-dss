@@ -27,8 +27,8 @@ RATING_FIELDS = [
 
 
 def build_ratings(
-    indices_path: str | Path = "data/results/author_indices.csv",
-    out_path: str | Path = "data/results/rating_positions.csv",
+    indices_path: str | Path = "data/runs/local/tables/indices.csv",
+    out_path: str | Path = "data/runs/local/tables/ratings.csv",
     metrics: tuple[str, ...] = METRICS,
 ) -> list[dict[str, Any]]:
     rows = read_table_dicts(indices_path)
@@ -74,7 +74,7 @@ def build_ratings(
 def sort_metric_rows(rows: list[dict[str, Any]], metric: str) -> list[dict[str, Any]]:
     """Sort author metric rows with the single reproducible ranking profile.
 
-    The same rule is used by generated `rating_positions.csv` and by the
+    The same rule is used by generated `ratings.csv` and by the
     interactive API views, so equal metric values resolve identically across
     exports and UI.
     """

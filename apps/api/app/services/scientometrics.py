@@ -1041,7 +1041,7 @@ def _analysis_context(
         raise ValueError("run_id or dump_id is required for scientometric analysis.")
 
     rank_top_n = max(1, min(int(top_n or 100), 1000))
-    rows = warehouse.filtered_author_indices(fraction_mode, resolved_filters, run_id=run_id, dump_id=dump_id)
+    rows = warehouse.filtered_indices(fraction_mode, resolved_filters, run_id=run_id, dump_id=dump_id)
     rows = warehouse.filter_rows_by_author_ids(rows, author_ids)
     selected_metrics = [metric for metric in selected_metrics if _has_metric_data(rows, metric) or metric in warehouse.INDEX_NUMERIC_FIELDS]
     return {

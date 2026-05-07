@@ -23,8 +23,8 @@ class RankingConsistencyTests(unittest.TestCase):
     def test_rating_csv_uses_same_tie_break_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            source = root / "author_indices.csv"
-            out = root / "rating_positions.csv"
+            source = root / "indices.csv"
+            out = root / "ratings.csv"
             fields = ["run_id", "fraction_mode", "author_id", "author_display_name", "h", "c", "p"]
             write_csv_dicts(
                 source,

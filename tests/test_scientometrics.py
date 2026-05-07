@@ -449,7 +449,7 @@ class ScientometricServiceTests(unittest.TestCase):
 
         with (
             patch.object(scientometrics.cohorts, "resolve_cohort_context", return_value=cohort_ctx),
-            patch.object(scientometrics.warehouse, "filtered_author_indices", side_effect=fake_filtered),
+            patch.object(scientometrics.warehouse, "filtered_indices", side_effect=fake_filtered),
         ):
             payload = scientometrics.build_scientometric_analysis(
                 fraction_mode="integer",
@@ -472,7 +472,7 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(payload["cohort_context"]["analysis_filters"], {"country_code": "DE"})
 
     def test_empty_analysis_returns_warning_without_crashing(self) -> None:
-        with patch.object(scientometrics.warehouse, "filtered_author_indices", return_value=[]):
+        with patch.object(scientometrics.warehouse, "filtered_indices", return_value=[]):
             payload = scientometrics.build_scientometric_analysis(
                 fraction_mode="integer",
                 metrics=["h", "g"],

@@ -45,7 +45,7 @@ global fallback files.
   is written before calculation and included as `dump/dump_manifest.json`.
 - Recalculation runs include existing dump provenance files from
   `dumps/{dump_id}` in scoped checksum passports when those files are present.
-- `run_id` owns derived calculations: author-work rows, author indices,
+- `run_id` owns derived calculations: author-work rows, indices,
   ratings, run passports, and scoped report bundles.
 - Slice, calculation, checksum, and pipeline summary passports are written
   directly under `runs/{run_id}/passports` when a `run_id` is available.

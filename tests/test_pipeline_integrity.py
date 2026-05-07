@@ -567,7 +567,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             lrdi_lambda=0.15,
             analysis_year=2026,
             fraction_mode_default="integer",
-            slice_name="slice_latest_opt_in",
+            slice_name="slice_scoped_outputs",
         )
 
         def fake_build_passports(*args: object, **_kwargs: object) -> dict[str, object]:
@@ -595,11 +595,11 @@ class PipelineIntegrityTests(unittest.TestCase):
                 patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
                 patch.dict("os.environ", {}, clear=True),
             ):
-                result = pipeline._run_compute(cfg, run_id="run_no_latest", dump_id="dump_no_latest", input_tables=input_tables)
+                result = pipeline._run_compute(cfg, run_id="run_scoped", dump_id="dump_scoped", input_tables=input_tables)
 
-            self.assertTrue((root / "runs" / "run_no_latest" / "tables" / "indices.csv").is_file())
-            self.assertTrue((root / "runs" / "run_no_latest" / "passports" / "checksums.json").is_file())
-            self.assertEqual(result["passport_outputs"]["checksums"], str(root / "runs" / "run_no_latest" / "passports" / "checksums.json"))
+            self.assertTrue((root / "runs" / "run_scoped" / "tables" / "indices.csv").is_file())
+            self.assertTrue((root / "runs" / "run_scoped" / "passports" / "checksums.json").is_file())
+            self.assertEqual(result["passport_outputs"]["checksums"], str(root / "runs" / "run_scoped" / "passports" / "checksums.json"))
 
     def test_recalculate_writes_pipeline_summary_before_archive_and_report(self) -> None:
         events: list[str] = []
@@ -883,29 +883,21 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIsNone(archive["active_context"]["analysis_eligibility_status"])
         self.assertIsNone(archive["active_context"]["allowed_for_final_analysis"])
 
-    def test_run_scoped_report_does_not_fallback_to_latest_artifacts(self) -> None:
+    def test_run_scoped_report_does_not_fallback_to_global_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            latest_quality = root / "passports" / "quality_report.json"
-            latest_quality.parent.mkdir(parents=True)
-            latest_quality.write_text(json.dumps({"quality_counts": {"latest_only": 1}}), encoding="utf-8")
-            json_files = {
-                "quality": latest_quality,
-                "checksums": root / "passports" / "checksums.json",
-                "pipeline": root / "passports" / "pipeline_summary.json",
-                "report_bundle": root / "results" / "report_bundle.json",
-            }
+            global_quality = root / "passports" / "quality_report.json"
+            global_quality.parent.mkdir(parents=True)
+            global_quality.write_text(json.dumps({"quality_counts": {"global_only": 1}}), encoding="utf-8")
 
             with (
                 patch.object(reports, "DATA", root),
-                patch.object(reports, "JSON_FILES", json_files),
                 patch.object(warehouse, "DATA", root),
             ):
                 bundle = reports.build_report_bundle(run_id="run_missing", dump_id="dump_missing")
 
         self.assertEqual(bundle["status"], "incomplete_run_artifacts")
         self.assertEqual(bundle["schema"], "report_bundle")
-        self.assertEqual(bundle["no_latest_fallback"], True)
         self.assertIn("pipeline", bundle["missing_artifacts"])
         self.assertIn("quality", bundle["missing_artifacts"])
         self.assertNotIn("quality_report", bundle)
@@ -914,9 +906,21 @@ class PipelineIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = root / "runs" / "run_a"
-            (run_dir / "results").mkdir(parents=True)
+            run_dir.mkdir(parents=True)
             (run_dir / "metric_run.json").write_text(json.dumps({"run_id": "run_a", "dump_id": "dump_a"}), encoding="utf-8")
-            report_path = run_dir / "results" / "report_bundle.json"
+            scope = reports._report_scope(
+                run_id="run_a",
+                dump_id="dump_a",
+                filters={},
+                cohort_id="",
+                cohort_checksum="",
+                cohort_n_authors=0,
+                metric="islv",
+                fraction_mode="strict_authors_count",
+                limit=50,
+            )
+            report_path = run_dir / "reports" / f"report_{scope['report_scope_hash']}.json"
+            report_path.parent.mkdir(parents=True)
             report_path.write_text(json.dumps({"status": "ok", "run_id": "run_a", "dump_id": "dump_b"}), encoding="utf-8")
 
             with (
@@ -1250,7 +1254,6 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(bundle["scientometric_analysis"]["schema"], "scientometric_analysis")
         self.assertEqual(bundle["scientometric_analysis"]["findings"][0]["id"], "heavy_tail:c")
         self.assertNotIn("statistics", bundle)
-        self.assertNotIn("stability_report", bundle)
         self.assertEqual(captured["metrics"], ["h", "g", "islv"])
         self.assertEqual(captured["baseline_metric"], "g")
         self.assertEqual(captured["top_n"], 25)
@@ -1273,7 +1276,6 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIn("kind=works", bundle["exports"]["local_works_csv"])
         self.assertIn("kind=authorships", bundle["exports"]["local_authorships_csv"])
         self.assertIn("kind=work_topics", bundle["exports"]["local_work_topics_csv"])
-        self.assertNotIn("authors_local_metrics_csv", bundle["exports"])
         self.assertEqual(bundle["export_notes"]["scientometrics_rank_shifts_csv"], "Contains all rank deltas for every author present in both baseline and comparison metric ranks.")
         self.assertEqual(bundle["export_notes"]["scientometrics_findings_csv"], "Contains structured interpretation findings with evidence JSON for the selected scientometric analysis scope.")
         self.assertEqual(bundle["export_notes"]["scientometrics_conclusion_md"], "Contains the deterministic conclusion draft rendered as Markdown for the selected scientometric analysis scope.")
@@ -1315,7 +1317,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                     "slice_passport": {"slice_id": "slice_a"},
                     "calculation_passport": {"dump_id": "dump_a"},
                 }),
-                patch.object(warehouse, "filtered_author_indices", return_value=rows),
+                patch.object(warehouse, "filtered_indices", return_value=rows),
                 patch.object(warehouse, "count_rows", return_value=1),
             ):
                 bundle = reports.build_report_bundle(metric="h", fraction_mode="integer", run_id="run_a", dump_id="dump_a", cohort_id="cohort_empty")
@@ -1351,7 +1353,7 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         with (
             patch.object(cohorts, "resolve_cohort_context", return_value=cohort_ctx),
-                patch.object(warehouse, "filtered_author_indices", side_effect=fake_filtered),
+                patch.object(warehouse, "filtered_indices", side_effect=fake_filtered),
             ):
             payload = cohorts.cohort_author_metrics("cohort_a", run_id="run_a", dump_id="dump_a", fraction_mode="integer", filters={"country_code": "DE"}, metric="islv")
             csv_data = cohorts.cohort_author_metrics_csv("cohort_a", run_id="run_a", dump_id="dump_a", fraction_mode="integer", filters={"country_code": "DE"}, metric="islv")
@@ -1392,7 +1394,7 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         with (
             patch.object(cohorts, "resolve_cohort_context", return_value=cohort_ctx),
-            patch.object(warehouse, "filtered_author_indices", side_effect=fake_filtered),
+            patch.object(warehouse, "filtered_indices", side_effect=fake_filtered),
         ):
             stats = cohorts.cohort_statistics("cohort_a", run_id="run_a", dump_id="dump_a", fraction_mode="integer", filters={"country_code": "DE"})
 
@@ -1457,7 +1459,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(dump_only["schema"], "report_bundle")
         self.assertNotIn("local_indices_csv", dump_only.get("exports") or {})
 
-    def test_report_bundle_json_without_run_does_not_return_cached_latest_report(self) -> None:
+    def test_report_bundle_json_without_run_does_not_return_global_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             scope = reports._report_scope(
@@ -1494,7 +1496,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with (
                 patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": "dump_a"}),
-                patch.object(warehouse, "filtered_author_indices", return_value=rows),
+                patch.object(warehouse, "filtered_indices", return_value=rows),
                 patch.object(cohorts, "COHORTS_DIR", Path(tmp)),
             ):
                 cohort = cohorts.create_cohort(
@@ -1611,7 +1613,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(captured["analysis_eligibility"], eligibility)
         self.assertFalse(global_summary.exists())
 
-    def test_pipeline_summary_skips_global_latest_without_run_by_default(self) -> None:
+    def test_pipeline_summary_without_run_does_not_write_global_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             global_summary = root / "passports" / "pipeline_summary.json"

@@ -154,7 +154,7 @@ class EdgeCaseTests(unittest.TestCase):
             scoped.mkdir()
             works = scoped / "works.parquet"
             indices = scoped / "indices.csv"
-            global_indices = data / "results" / "author_indices.csv"
+            global_indices = data / "runs" / "global" / "tables" / "indices.csv"
             global_indices.parent.mkdir(parents=True)
             works.write_text("scoped works", encoding="utf-8")
             indices.write_text("scoped indices", encoding="utf-8")
@@ -178,7 +178,7 @@ class EdgeCaseTests(unittest.TestCase):
             primary = checksums["primary_artifacts"]
             self.assertIn("dump/tables/works.parquet", primary)
             self.assertIn("run/tables/indices.csv", primary)
-            self.assertNotIn("data/results/author_indices.csv", primary)
+            self.assertNotIn("data/runs/global/tables/indices.csv", primary)
             manifest = data / "runs/run_a/passports/sha256_manifest.txt"
             self.assertTrue(manifest.is_file())
             self.assertEqual(checksums["sha256_manifest"], "data/runs/run_a/passports/sha256_manifest.txt")

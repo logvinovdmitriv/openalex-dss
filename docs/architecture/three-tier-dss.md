@@ -124,7 +124,7 @@ $OPENALEX_DSS_DATA_DIR/raw/openalex_cli/               CLI-downloaded raw JSONL.
 $OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/snapshot/  S3 snapshot manifests and downloaded partitions
 $OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/files/     local user-provided OpenAlex dumps
 $OPENALEX_DSS_DATA_DIR/lake/silver/openalex/           normalized works and authorships
-$OPENALEX_DSS_DATA_DIR/lake/gold/scientometrics/       author indices, ratings, stats and exports
+$OPENALEX_DSS_DATA_DIR/lake/gold/scientometrics/       indices, ratings and scientometric exports
 $OPENALEX_DSS_DATA_DIR/warehouse/openalex_dss.duckdb   query warehouse/catalog
 ```
 

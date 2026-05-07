@@ -36,7 +36,7 @@ class WarehouseTests(unittest.TestCase):
         ]
 
         with (
-            patch.object(warehouse, "filtered_author_indices", return_value=rows),
+            patch.object(warehouse, "filtered_indices", return_value=rows),
             patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": "dump_a"}),
         ):
             ranking = warehouse.metric_ranking("integer", "h", run_id="run_a", author_ids=set())
@@ -44,7 +44,7 @@ class WarehouseTests(unittest.TestCase):
         self.assertEqual(ranking["rows"], [])
         self.assertEqual(ranking["total"], 0)
 
-    def test_filtered_author_indices_reads_scoped_parquet_when_csv_is_absent(self) -> None:
+    def test_filtered_indices_reads_scoped_parquet_when_csv_is_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_dump_tables(root, "dump_a", "W1", "A1", "Author One", 12)
@@ -52,10 +52,9 @@ class WarehouseTests(unittest.TestCase):
 
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
                 patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
             ):
-                rows = warehouse.filtered_author_indices("integer", {"country_code": "RU"}, run_id="run_a")
+                rows = warehouse.filtered_indices("integer", {"country_code": "RU"}, run_id="run_a")
 
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["author_display_name"], "Author One")
@@ -71,28 +70,8 @@ class WarehouseTests(unittest.TestCase):
             _write_run_author_work(root, "run_a", "dump_a", "W_A", "A_A", "Author A", 5)
             _write_run_author_work(root, "run_b", "dump_b", "W_B", "A_B", "Author B", 50)
 
-            # Deliberately point global table constants at run_b-like data. A
-            # scoped query for run_a must not leak this author into the result.
-            global_author_work = root / "global" / "author_work.parquet"
-            write_parquet_dicts(
-                global_author_work,
-                [_author_work_row("W_B", "A_B", "Author B", 50)],
-                _author_work_fields(),
-            )
-            parquet_paths = {
-                "author_work": global_author_work,
-                "works": root / "missing" / "works.parquet",
-                "authorships": root / "missing" / "authorships.parquet",
-                "work_topics": root / "missing" / "work_topics.parquet",
-                "indices": root / "missing" / "indices.parquet",
-                "authors_local_metrics": root / "missing" / "indices.parquet",
-                "ratings": root / "missing" / "ratings.parquet",
-            }
-            csv_paths = {name: path.with_suffix(".csv") for name, path in parquet_paths.items()}
-
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", csv_paths),
                 patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
             ):
                 ranking = warehouse.metric_ranking("integer", "h", run_id="run_a", limit=10)
@@ -115,14 +94,13 @@ class WarehouseTests(unittest.TestCase):
 
         self.assertIn("incompatible", str(raised.exception))
 
-    def test_list_tables_does_not_use_latest_fallback_for_run_scope(self) -> None:
+    def test_list_tables_does_not_synthesize_missing_run_tables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_run_author_work(root, "run_a", "dump_a", "W_A", "A_A", "Author A", 5)
 
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
             ):
                 tables = warehouse.list_tables(run_id="run_a")
 
@@ -137,7 +115,6 @@ class WarehouseTests(unittest.TestCase):
 
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
             ):
                 tables = warehouse.list_tables()
 
@@ -151,7 +128,6 @@ class WarehouseTests(unittest.TestCase):
 
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
                 patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
             ):
                 table = warehouse.query_table("works", run_id="run_a")
@@ -185,7 +161,6 @@ class WarehouseTests(unittest.TestCase):
             _write_many_author_scope(root, "run_many", "dump_many", 250)
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
                 patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
             ):
                 ranking = warehouse.metric_ranking("integer", "h", run_id="run_many", limit=250, max_limit=1000)
@@ -203,7 +178,6 @@ class WarehouseTests(unittest.TestCase):
 
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
                 patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
             ):
                 detail = warehouse.author_detail("https://openalex.org/A_A", run_id="run_a")
@@ -235,7 +209,6 @@ class WarehouseTests(unittest.TestCase):
 
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
                 patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
             ):
                 primary = warehouse.metric_ranking("integer", "h", {"filter_mode": "primary_topic", "subject_level": "subfield", "subject_id": "9999"}, run_id="run_a")
@@ -253,7 +226,6 @@ class WarehouseTests(unittest.TestCase):
 
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
                 patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
             ):
                 matched = warehouse.metric_ranking("integer", "h", {"filter_mode": "search", "text_search_query": "Work W_A"}, run_id="run_a")
@@ -270,7 +242,6 @@ class WarehouseTests(unittest.TestCase):
 
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
                 patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
             ):
                 matched = warehouse.metric_ranking("integer", "h", {"doi": "doi:10.123/w_a"}, run_id="run_a")
@@ -287,7 +258,6 @@ class WarehouseTests(unittest.TestCase):
 
             with (
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "TABLE_FILES", _latest_csv_paths(root)),
                 patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
             ):
                 with self.assertRaises(ValueError) as raised:
@@ -413,22 +383,6 @@ def _write_many_author_scope(root: Path, run_id: str, dump_id: str, n: int) -> N
     )
     write_parquet_dicts(dump_dir / "authorships.parquet", authorships, ["work_id", "author_id", "author_display_name", "country_codes_csv", "institution_ids_csv"])
     write_parquet_dicts(run_dir / "tables" / "author_work.parquet", author_work, _author_work_fields())
-
-
-def _latest_parquet_paths(root: Path) -> dict[str, Path]:
-    return {
-        "author_work": root / "missing" / "author_work.parquet",
-        "works": root / "missing" / "works.parquet",
-        "authorships": root / "missing" / "authorships.parquet",
-        "work_topics": root / "missing" / "work_topics.parquet",
-        "indices": root / "missing" / "indices.parquet",
-        "authors_local_metrics": root / "missing" / "indices.parquet",
-        "ratings": root / "missing" / "ratings.parquet",
-    }
-
-
-def _latest_csv_paths(root: Path) -> dict[str, Path]:
-    return {name: path.with_suffix(".csv") for name, path in _latest_parquet_paths(root).items()}
 
 
 def _author_work_row(work_id: str, author_id: str, author_name: str, citations: int) -> dict[str, object]:

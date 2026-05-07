@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from app.core.paths import DATA, JSON_FILES
+from app.core.paths import DATA
 from app.services import cohorts, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
@@ -184,7 +184,6 @@ def build_report_bundle(
     report = {
         "schema": REPORT_BUNDLE_SCHEMA,
         "status": "ok",
-        "no_latest_fallback": bool(run_id),
         "run_id": run_id,
         "dump_id": resolved_dump_id,
         "report_scope": report_scope,
@@ -220,7 +219,7 @@ def build_report_bundle(
         },
         "mvp_protocol": {
             "source_mode": "openalex_cli_filtered_metadata",
-            "storage_rule": "raw immutable dump -> thin curated slice -> transient marts",
+            "storage_rule": "raw immutable dump -> dump tables -> run-scoped metric tables",
             "topic_mapping_rule": "ВАК-код не является OpenAlex-фильтром; mapping фиксируется отдельно как resolved entities / mapping file.",
             "iupv_formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
             "islv_formula": "100 * weighted_geomean(pr(h), pr(C_frac), pr(g), pr(i10), pr(P)) * (1 - lambda * max(0, top1_share - tau))",
@@ -291,12 +290,6 @@ def report_bundle_json(
             return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
         if not run_id or cached.get("status") != "incomplete_run_artifacts":
             return cached
-    legacy_path = _report_bundle_path(run_id)
-    if legacy_path.exists():
-        legacy = _read_json(legacy_path)
-        cached_dump_id = str(legacy.get("dump_id") or "").strip()
-        if run_id and dump_id and cached_dump_id and cached_dump_id != dump_id:
-            raise ValueError(f"Cached report dump_id={cached_dump_id} is incompatible with requested dump_id={dump_id}")
     return build_report_bundle(metric=metric, fraction_mode=fraction_mode, limit=limit, run_id=run_id, dump_id=dump_id, filters=filters, cohort_id=cohort_id, cohort_filter_policy=cohort_filter_policy, scientometric_metrics=scientometric_metric_list, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
 
 
@@ -316,14 +309,10 @@ def _quality_funnel(quality: dict[str, Any], *, run_id: str = "") -> list[dict[s
     ]
 
 
-def _report_bundle_path(run_id: str = "", scope_hash: str = "") -> Path:
-    if run_id:
-        if scope_hash:
-            return DATA / "runs" / _safe_id(run_id) / "reports" / f"report_{_safe_id(scope_hash)}.json"
-        return DATA / "runs" / _safe_id(run_id) / "results" / "report_bundle.json"
-    if scope_hash:
-        return DATA / "results" / f"report_bundle_{_safe_id(scope_hash)}.json"
-    return JSON_FILES["report_bundle"]
+def _report_bundle_path(run_id: str, scope_hash: str) -> Path:
+    if not str(run_id or "").strip() or not str(scope_hash or "").strip():
+        raise ValueError("run_id and report_scope_hash are required for report bundle persistence")
+    return DATA / "runs" / _safe_id(run_id) / "reports" / f"report_{_safe_id(scope_hash)}.json"
 
 
 def _run_report_artifacts(run_id: str) -> dict[str, dict[str, Any]]:
@@ -348,8 +337,7 @@ def _incomplete_run_report(*, run_id: str, dump_id: str, missing: list[str], rep
         "dump_id": dump_id,
         "report_scope": report_scope,
         "missing_artifacts": missing,
-        "no_latest_fallback": True,
-        "message": "Run-scoped report was not built because one or more artifacts are missing for the selected run_id. Latest-view artifacts were intentionally not used.",
+        "message": "Run-scoped report was not built because one or more artifacts are missing for the selected run_id.",
     }
 
 
@@ -409,7 +397,6 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
         "dump_id": str(report_scope.get("dump_id") or ""),
         "report_scope": report_scope,
         "message": "Final report build requires explicit run_id with run-scoped passports, checksums and local metric tables.",
-        "no_latest_fallback": True,
     }
 
 
