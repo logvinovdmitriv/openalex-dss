@@ -65,8 +65,8 @@ POST /api/v1/slices/{slice_id}/materialization-plans
 POST /api/v1/materializations/{materialization_id}/run
 ```
 
-Legacy actions such as `plan`, `fetch_slice_dump`, `build_from_openalex` and
-`import_file` are internal orchestration/service paths, not public API actions.
+Actions such as `plan`, `fetch_slice_dump`, and `build_from_openalex` are
+internal orchestration/service paths, not public API actions.
 Generic table browser endpoints are not public; local data inspection goes through
 whitelisted `/api/v1/local-data/*` previews.
 Jobs execute in one in-process worker and persist status JSON under

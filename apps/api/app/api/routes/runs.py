@@ -19,8 +19,7 @@ def create_run(request: RunRequest) -> dict[str, Any]:
             status_code=400,
             detail=(
                 f"Unsupported public run action: {request.action}. "
-                "Use the slice/materialization workflow for OpenAlex downloads; "
-                "fixture import and legacy pipeline actions are internal."
+                "Use the slice/materialization workflow for OpenAlex downloads."
             ),
         )
     payload = request.payload.model_dump(exclude_none=True)

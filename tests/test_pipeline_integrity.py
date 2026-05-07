@@ -124,21 +124,15 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(run["status"], "queued")
         self.assertEqual(run["artifacts"], {})
 
-    def test_import_file_job_action_is_dev_supported_without_signatures(self) -> None:
-        self.assertNotIn("import_file", materialization_jobs.MATERIALIZATION_ACTIONS)
-        self.assertIn("import_file", materialization_jobs.DEV_MATERIALIZATION_ACTIONS)
-        self.assertIn("import_file", materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS)
-        self.assertNotIn("import_file", materialization_jobs.REQUIRES_ACCEPTED_SIGNATURE_ACTIONS)
-        self.assertNotIn("import_file", materialization_jobs.MATERIALIZATION_LIFECYCLE_ACTIONS)
+    def test_local_file_import_is_not_a_job_action(self) -> None:
+        self.assertEqual(materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS, {"fetch_slice_dump", "build_from_openalex"})
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(jobs, "RUNS_DIR", Path(tmp) / "runs"):
-                run = jobs.create_run("import_file", {"source_path": "/tmp/works.jsonl.gz"}, autostart=False)
+                with self.assertRaises(ValueError) as raised:
+                    jobs.create_run("local_file_import", {"source_path": "/tmp/works.jsonl.gz"}, autostart=False)
 
-        self.assertEqual(run["action"], "import_file")
-        self.assertEqual(run["payload"]["source_path"], "/tmp/works.jsonl.gz")
-        self.assertEqual(run["status"], "queued")
-        self.assertEqual(run["artifacts"], {})
+        self.assertIn("Unsupported run action: local_file_import", str(raised.exception))
 
     def test_job_artifact_links_are_fetch_result_scoped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -684,31 +678,19 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertEqual(events, ["compute", "summary", "archive", "report"])
 
-    def test_jobs_dispatch_passes_current_run_id_to_direct_actions(self) -> None:
+    def test_jobs_dispatch_passes_current_run_id_to_analysis_action(self) -> None:
         captured: dict[str, dict[str, object]] = {}
 
         def fake_recalculate(payload: dict[str, object]) -> dict[str, object]:
             captured["recalculate"] = payload
             return {"status": "ok"}
 
-        def fake_import(payload: dict[str, object]) -> dict[str, object]:
-            captured["import_file"] = payload
-            return {"status": "ok"}
-
-        with (
-            patch.object(pipeline, "recalculate", side_effect=fake_recalculate),
-            patch.object(pipeline, "import_local_file", side_effect=fake_import),
-        ):
+        with patch.object(pipeline, "recalculate", side_effect=fake_recalculate):
             jobs._dispatch("run_scope", "recalculate", {"dump_id": "dump_scope", "unknown_legacy": "drop-me"})
-            jobs._dispatch("run_scope_import", "import_file", {"source_path": "/tmp/works.jsonl.gz", "unknown_legacy": "drop-me"})
 
         self.assertEqual(captured["recalculate"]["run_id"], "run_scope")
         self.assertEqual(captured["recalculate"]["dump_id"], "dump_scope")
         self.assertNotIn("unknown_legacy", captured["recalculate"])
-        self.assertEqual(captured["import_file"]["run_id"], "run_scope_import")
-        self.assertEqual(captured["import_file"]["source_path"], "/tmp/works.jsonl.gz")
-        self.assertEqual(captured["import_file"]["active_context_source"], "dev_import_file")
-        self.assertNotIn("unknown_legacy", captured["import_file"])
 
     def test_archive_does_not_overwrite_existing_dump_manifest_on_recalculate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1580,7 +1562,6 @@ class PipelineIntegrityTests(unittest.TestCase):
                 current = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"}, filter_policy="current")
                 current_empty = cohorts.resolve_cohort_context("cohort_a", filters={}, filter_policy="current")
                 none = cohorts.resolve_cohort_context("cohort_a", filters={"country_code": "DE"}, filter_policy="none")
-                auto = cohorts.resolve_cohort_context("cohort_a", filters={}, filter_policy="auto")
                 current_empty_summary = cohorts.cohort_context_summary(current_empty)
                 none_summary = cohorts.cohort_context_summary(none)
                 with self.assertRaises(ValueError):
@@ -1606,8 +1587,6 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(none_summary["membership_filters"], {"country_code": "RU"})
         self.assertEqual(none_summary["filter_policy"], "none")
         self.assertEqual(none_summary["resolved_filter_mode"], "no_analysis_filters")
-        self.assertEqual(auto["filters"], {"country_code": "RU"})
-        self.assertEqual(auto["filter_policy"], "auto")
 
     def test_cohort_filters_keep_slice_analysis_contract_fields(self) -> None:
         filters = cohorts._filters(

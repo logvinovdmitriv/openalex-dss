@@ -8,9 +8,7 @@ from app.services.internal_payloads import normalize_internal_pipeline_payload
 
 
 MATERIALIZATION_ACTIONS = {"fetch_slice_dump", "build_from_openalex"}
-# Retained for deterministic fixture/dev imports; it is not part of the public API.
-DEV_MATERIALIZATION_ACTIONS = {"import_file"}
-SUPPORTED_MATERIALIZATION_ACTIONS = MATERIALIZATION_ACTIONS | DEV_MATERIALIZATION_ACTIONS
+SUPPORTED_MATERIALIZATION_ACTIONS = MATERIALIZATION_ACTIONS
 REQUIRES_ACCEPTED_SIGNATURE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
 MATERIALIZATION_LIFECYCLE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
 
@@ -41,16 +39,6 @@ def dispatch(
             download_progress_callback=download_progress_callback,
             update_progress_callback=update_progress_callback,
             allow_unchecked_download=allow_unchecked_download,
-        )
-    if action == "import_file":
-        return pipeline.import_local_file(
-            normalize_internal_pipeline_payload(
-                {
-                    **payload,
-                    "run_id": run_id,
-                    "active_context_source": "dev_import_file",
-                }
-            )
         )
     raise ValueError(f"Unsupported materialization job action: {action}")
 

@@ -1090,8 +1090,6 @@ def _analysis_warnings(
         warnings.append("The author set has fewer than 20 authors; normality diagnostics should be interpreted cautiously.")
     if rows and len(rows) > rank_top_n:
         warnings.append("rank_top_n limits only rank comparisons and overlap; descriptive statistics use all resolved authors.")
-    if cohort_filter_policy == "auto":
-        warnings.append("cohort_filter_policy=auto is not suitable for final analysis.")
     missing_metrics = [metric for metric in metrics if not _metric_values(rows, metric)]
     if missing_metrics and rows:
         warnings.append(f"No numeric values were available for metrics: {', '.join(missing_metrics)}.")

@@ -367,8 +367,7 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
 
 
 def _report_warnings(cohort_filter_policy: str) -> list[str]:
-    if str(cohort_filter_policy or "").strip().lower() == "auto":
-        return ["cohort_filter_policy=auto is not suitable for final analysis."]
+    del cohort_filter_policy
     return []
 
 

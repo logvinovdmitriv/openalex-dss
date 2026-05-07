@@ -17,7 +17,7 @@ from app.services import warehouse
 
 COHORTS_DIR = DATA / "cohorts"
 COHORT_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "islv", "iupv", "lrdi")
-COHORT_FILTER_POLICIES = {"auto", "membership", "current", "none"}
+COHORT_FILTER_POLICIES = {"membership", "current", "none"}
 
 
 class CohortNotFound(ValueError):
@@ -140,10 +140,8 @@ def resolve_cohort_context(
         analysis_filters = cohort_filters
     elif policy == "current":
         analysis_filters = request_filters
-    elif policy == "none":
-        analysis_filters = {}
     else:
-        analysis_filters = request_filters or cohort_filters
+        analysis_filters = {}
     if not analysis_filters:
         filter_mode_label = "no_analysis_filters"
     elif analysis_filters == cohort_filters:

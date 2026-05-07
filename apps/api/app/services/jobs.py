@@ -177,7 +177,6 @@ def _progress_before_dispatch(action: str) -> int:
     return {
         "fetch_slice_dump": 25,
         "build_from_openalex": 20,
-        "import_file": 35,
         "recalculate": 45,
     }.get(action, 20)
 
@@ -186,7 +185,6 @@ def _stage_for_action(action: str) -> str:
     return {
         "fetch_slice_dump": "fetching mini-dump",
         "build_from_openalex": "fetching and building local mart",
-        "import_file": "normalizing local file",
         "recalculate": "computing indices",
     }.get(action, "running")
 
@@ -220,7 +218,7 @@ def _artifact_links(action: str, run_id: str, result: dict[str, Any] | None = No
             return _run_artifact_links(run_id, build)
         fetch = result.get("fetch") if isinstance(result.get("fetch"), dict) else {}
         return _dump_artifact_links(fetch.get("dump") if isinstance(fetch.get("dump"), dict) else {})
-    if action in {"recalculate", "import_file"}:
+    if action == "recalculate":
         return _run_artifact_links(run_id, result)
     return {}
 

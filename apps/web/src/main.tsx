@@ -3164,7 +3164,6 @@ function activeContextEligibility(value: boolean | null | undefined) {
 function activeContextSourceLabel(source?: string) {
   if (source === "materialization") return "materialization";
   if (source === "recalculate") return "recalculate";
-  if (source === "dev_import_file") return "dev import";
   if (source === "import_local_file") return "file import";
   return source || "не задан";
 }

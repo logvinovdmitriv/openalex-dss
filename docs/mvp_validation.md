@@ -25,8 +25,8 @@ OpenAlex-like Works fixture
 Для реального диссертационного прогона нужно выполнить тот же сценарий через
 публичный workflow `slice -> estimate -> materialization plan -> materialization run`
 с подтвержденными planner signatures и `allowed_for_final_analysis=true`.
-Внутренние шаги `build_from_openalex` и `import_file` остаются сервисной
-реализацией, а не публичным способом запуска.
+Внутренний шаг `build_from_openalex` остается сервисной реализацией, а не
+публичным способом запуска.
 
 ## Команда
 

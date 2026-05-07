@@ -154,7 +154,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertIn("payload", RunRequest.model_json_schema()["required"])
         self.assertIn("dump_id", AnalysisRunRequest.model_json_schema()["required"])
 
-        for action in ("plan", "fetch_slice_dump", "build_from_openalex", "import_file"):
+        for action in ("plan", "fetch_slice_dump", "build_from_openalex", "download"):
             with self.assertRaises(ValidationError):
                 RunRequest(action=action, payload={"dump_id": "dump_a"})
 
@@ -164,7 +164,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
                 RunRequest(action="recalculate", payload=payload)
 
     def test_public_runs_route_defensively_rejects_legacy_actions(self) -> None:
-        for action in ("plan", "fetch_slice_dump", "build_from_openalex", "import_file"):
+        for action in ("plan", "fetch_slice_dump", "build_from_openalex", "download"):
             request = SimpleNamespace(action=action, payload=AnalysisRunRequest(dump_id="dump_a"))
 
             with self.assertRaises(runs_routes.HTTPException) as raised:

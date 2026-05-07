@@ -85,7 +85,7 @@ global fallback files.
 {
   "active_run_id": "run_...",
   "active_dump_id": "dump_...",
-  "source": "materialization|recalculate|import_local_file|dev_import_file",
+  "source": "materialization|recalculate|import_local_file",
   "analysis_eligibility_status": "final",
   "allowed_for_final_analysis": true,
   "updated_at_utc": "2026-05-07T00:00:00Z"
