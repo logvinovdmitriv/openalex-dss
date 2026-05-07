@@ -44,7 +44,7 @@ def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) 
         "error": None,
         "payload": _public_payload(payload),
         "result": None,
-        "artifacts": _artifact_links(run_id),
+        "artifacts": {},
     }
     _save(doc)
     with _LOCK:
@@ -111,7 +111,14 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
         _save(doc)
         result = _dispatch(run_id, action, payload)
         materialization_jobs.mark_completed(run_id, action, result, payload)
-        doc.update({"status": "completed", "progress_percent": 100, "progress_stage": "completed", "finished_at": _now(), "result": result, "artifacts": _artifact_links(run_id)})
+        doc.update({
+            "status": "completed",
+            "progress_percent": 100,
+            "progress_stage": "completed",
+            "finished_at": _now(),
+            "result": result,
+            "artifacts": _artifact_links(action, run_id, result),
+        })
     except Exception as exc:  # pragma: no cover - defensive job boundary
         materialization_jobs.mark_failed(run_id, action, str(exc), payload)
         doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
@@ -203,13 +210,60 @@ def _allow_unchecked_download() -> bool:
     return os.environ.get("OPENALEX_DSS_ALLOW_UNCHECKED_DOWNLOAD") == "1"
 
 
-def _artifact_links(run_id: str) -> dict[str, str]:
-    run_prefix = f"runs/{run_id}"
+def _artifact_links(action: str, run_id: str, result: dict[str, Any] | None = None) -> dict[str, str]:
+    result = result or {}
+    if action == "fetch_slice_dump":
+        return _dump_artifact_links(result.get("dump") if isinstance(result.get("dump"), dict) else {})
+    if action == "build_from_openalex":
+        build = result.get("build") if isinstance(result.get("build"), dict) else {}
+        if build:
+            return _run_artifact_links(run_id, build)
+        fetch = result.get("fetch") if isinstance(result.get("fetch"), dict) else {}
+        return _dump_artifact_links(fetch.get("dump") if isinstance(fetch.get("dump"), dict) else {})
+    if action in {"recalculate", "import_file"}:
+        return _run_artifact_links(run_id, result)
+    return {}
+
+
+def _run_artifact_links(run_id: str, result: dict[str, Any]) -> dict[str, str]:
+    archive = result.get("archive") if isinstance(result.get("archive"), dict) else {}
+    run_prefix = _relative_data_artifact(archive.get("run_dir")) or f"runs/{run_id}"
+    copied = archive.get("copied") if isinstance(archive.get("copied"), dict) else {}
+
+    def copied_or_default(rel: str) -> str:
+        return _relative_data_artifact(copied.get(rel)) or f"{run_prefix}/{rel}"
+
     return {
-        "slice_passport": f"{run_prefix}/passports/slice_passport.json",
-        "calculation_passport": f"{run_prefix}/passports/calculation_passport.json",
-        "quality_report": f"{run_prefix}/passports/quality_report.json",
-        "indices": f"{run_prefix}/tables/indices.csv",
-        "ratings": f"{run_prefix}/tables/ratings.csv",
+        "slice_passport": copied_or_default("passports/slice_passport.json"),
+        "calculation_passport": copied_or_default("passports/calculation_passport.json"),
+        "quality_report": copied_or_default("passports/quality_report.json"),
+        "indices": copied_or_default("tables/indices.csv"),
+        "ratings": copied_or_default("tables/ratings.csv"),
         "report_bundle": f"{run_prefix}/reports",
     }
+
+
+def _dump_artifact_links(dump: dict[str, Any]) -> dict[str, str]:
+    raw_jsonl = str(dump.get("raw_jsonl") or "").strip()
+    if not raw_jsonl:
+        return {}
+    manifest = str(dump.get("dump_manifest") or dump.get("manifest_path") or Path(raw_jsonl).with_name("dump_manifest.json"))
+    links = {
+        "raw_jsonl": _relative_data_artifact(raw_jsonl),
+        "dump_manifest": _relative_data_artifact(manifest),
+    }
+    files_manifest = str(dump.get("files_manifest") or "").strip()
+    if files_manifest:
+        links["files_manifest"] = _relative_data_artifact(files_manifest)
+    return {key: value for key, value in links.items() if value}
+
+
+def _relative_data_artifact(path: Any) -> str:
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    candidate = Path(raw)
+    try:
+        return str(candidate.resolve().relative_to(DATA.resolve()))
+    except (OSError, ValueError):
+        return raw

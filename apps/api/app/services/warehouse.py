@@ -54,13 +54,6 @@ RUN_JSON_DOCS = {
 }
 
 
-def connect() -> duckdb.DuckDBPyConnection:
-    WAREHOUSE.parent.mkdir(parents=True, exist_ok=True)
-    conn = duckdb.connect(":memory:")
-    register_views(conn)
-    return conn
-
-
 def connect_scope(*, run_id: str = "", dump_id: str = "") -> duckdb.DuckDBPyConnection:
     WAREHOUSE.parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(":memory:")
@@ -220,46 +213,6 @@ def query_table(
         source_path = resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id)
         if source_path:
             payload["source_path"] = str(source_path)
-        return payload
-
-
-def query_table_file(
-    table: str,
-    path: str | Path,
-    *,
-    q: str = "",
-    fraction_mode: str = "",
-    metric: str = "",
-    author_id: str = "",
-    work_id: str = "",
-    sort: str = "",
-    direction: str = "desc",
-    limit: int = 100,
-    offset: int = 0,
-) -> dict[str, Any]:
-    if table not in TABLE_KINDS:
-        raise ValueError(f"Unknown table: {table}")
-    table_path = Path(path)
-    if not table_path.exists():
-        return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset, "source_path": str(table_path)}
-    with duckdb.connect(":memory:") as conn:
-        _register_file_view(conn, table, table_path)
-        fields = [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
-        payload = _query_registered_table(
-            conn,
-            table,
-            fields,
-            q=q,
-            fraction_mode=fraction_mode,
-            metric=metric,
-            author_id=author_id,
-            work_id=work_id,
-            sort=sort,
-            direction=direction,
-            limit=limit,
-            offset=offset,
-        )
-        payload["source_path"] = str(table_path)
         return payload
 
 

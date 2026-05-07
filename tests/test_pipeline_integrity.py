@@ -122,6 +122,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(run["action"], "recalculate")
         self.assertEqual(run["payload"]["dump_id"], "dump_a")
         self.assertEqual(run["status"], "queued")
+        self.assertEqual(run["artifacts"], {})
 
     def test_import_file_job_action_is_dev_supported_without_signatures(self) -> None:
         self.assertNotIn("import_file", materialization_jobs.MATERIALIZATION_ACTIONS)
@@ -137,6 +138,48 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(run["action"], "import_file")
         self.assertEqual(run["payload"]["source_path"], "/tmp/works.jsonl.gz")
         self.assertEqual(run["status"], "queued")
+        self.assertEqual(run["artifacts"], {})
+
+    def test_job_artifact_links_are_fetch_result_scoped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "data"
+            raw = data / "raw/openalex_cli/slice_a/works.jsonl.gz"
+            manifest = raw.with_name("dump_manifest.json")
+            files_manifest = raw.with_name("files_manifest.json")
+            result = {
+                "dump": {
+                    "raw_jsonl": str(raw),
+                    "files_manifest": str(files_manifest),
+                }
+            }
+            with patch.object(jobs, "DATA", data):
+                links = jobs._artifact_links("fetch_slice_dump", "run_fetch", result)
+
+        self.assertEqual(links["raw_jsonl"], "raw/openalex_cli/slice_a/works.jsonl.gz")
+        self.assertEqual(links["dump_manifest"], "raw/openalex_cli/slice_a/dump_manifest.json")
+        self.assertEqual(links["files_manifest"], "raw/openalex_cli/slice_a/files_manifest.json")
+        self.assertNotIn("indices", links)
+        self.assertNotIn("report_bundle", links)
+
+    def test_job_artifact_links_use_completed_run_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "data"
+            result = {
+                "archive": {
+                    "run_dir": str(data / "runs/run_a"),
+                    "copied": {
+                        "passports/slice_passport.json": str(data / "runs/run_a/passports/slice_passport.json"),
+                        "tables/indices.csv": str(data / "runs/run_a/tables/indices.csv"),
+                    },
+                }
+            }
+            with patch.object(jobs, "DATA", data):
+                links = jobs._artifact_links("recalculate", "run_a", result)
+
+        self.assertEqual(links["slice_passport"], "runs/run_a/passports/slice_passport.json")
+        self.assertEqual(links["indices"], "runs/run_a/tables/indices.csv")
+        self.assertEqual(links["ratings"], "runs/run_a/tables/ratings.csv")
+        self.assertEqual(links["report_bundle"], "runs/run_a/reports")
 
     def test_cli_origin_fetch_meta_keeps_dump_manifest_context(self) -> None:
         captured: dict[str, object] = {}
