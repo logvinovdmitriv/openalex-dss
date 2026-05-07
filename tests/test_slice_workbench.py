@@ -32,7 +32,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                 slice_workbench.warehouse,
                 "list_tables",
                 return_value={"works": {"rows": 3}, "authorships": {"rows": 4}, "indices": {"rows": 2}},
-            ),
+            ) as list_tables,
             patch.object(slice_workbench.warehouse, "read_json_doc", return_value=quality),
             patch.object(slice_workbench.artifact_context, "read_active_context", return_value=active_context),
             patch.object(slice_workbench, "list_slices", return_value={"slices": [{"slice_id": "slice_a", "state": "ready"}], "total": 1}),
@@ -41,6 +41,7 @@ class SliceWorkbenchTests(unittest.TestCase):
         ):
             summary = slice_workbench.workbench_summary()
 
+        list_tables.assert_called_once_with(run_id="run_a", dump_id="dump_a")
         self.assertEqual(summary["quality"], quality)
         self.assertEqual(summary["active_context"], active_context)
         self.assertEqual(summary["workflow"]["active_stage"], "analyzed")
@@ -51,6 +52,26 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(summary["workflow"]["quality_summary"]["quality_flags"], 3)
         self.assertEqual(summary["workflow"]["quality_summary"]["analysis_eligibility_status"], "final")
         self.assertEqual(summary["workflow"]["quality_summary"]["allowed_for_final_analysis"], True)
+
+    def test_workbench_summary_without_active_context_does_not_expose_latest_table_counts(self) -> None:
+        with (
+            patch.object(
+                slice_workbench.warehouse,
+                "list_tables",
+                return_value={"indices": {"rows": 99}, "ratings": {"rows": 99}},
+            ) as list_tables,
+            patch.object(slice_workbench.warehouse, "read_json_doc", return_value={}),
+            patch.object(slice_workbench.artifact_context, "read_active_context", return_value={}),
+            patch.object(slice_workbench, "list_slices", return_value={"slices": [], "total": 0}),
+            patch.object(slice_workbench, "list_materialization_plans", return_value={"materializations": []}),
+            patch.object(slice_workbench, "list_dumps", return_value={"dumps": [], "total": 0}),
+        ):
+            summary = slice_workbench.workbench_summary()
+
+        list_tables.assert_not_called()
+        self.assertEqual(summary["tables"], {})
+        self.assertEqual(summary["workflow"]["active_stage"], "idle")
+        self.assertEqual(summary["workflow"]["quality_summary"]["authors_indexed"], 0)
 
     def test_workbench_summary_preserves_nullable_active_context_eligibility(self) -> None:
         for active_context, expected in (

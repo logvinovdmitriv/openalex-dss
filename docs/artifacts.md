@@ -45,6 +45,9 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 - Analytics CSV and Markdown exports require explicit `run_id`/`dump_id` or a
   cohort-resolved scope; compatibility latest exports require
   `allow_latest_preview=true`.
+- `/workbench` table summaries are resolved from `active_context` when it has
+  an active `run_id` or `dump_id`. Without active context, `/workbench` does not
+  expose latest-view table counts as current scoped data.
 - Final report and analytics paths must prefer explicit `run_id`/`dump_id` and
   avoid implicit latest fallback.
 
@@ -68,4 +71,6 @@ transition, latest-view files remain a compatibility layer while scoped
 artifacts remain the source of truth. `/workbench` exposes this pointer for UI
 state. The UI may use active context as the default preview scope for local
 data, rankings, cohorts, and scientometrics, but final reports should still use
-explicit scope parameters.
+explicit scope parameters. `/workbench` uses the pointer to read scoped table
+counts and returns an empty table summary when the pointer is absent, rather
+than deriving status from compatibility latest-view files.

@@ -283,12 +283,18 @@ def mark_materialization_run_failed(run_id: str, error: str, *, materialization_
 
 
 def workbench_summary() -> dict[str, Any]:
-    tables = warehouse.list_tables()
+    active_context = artifact_context.read_active_context()
+    active_run_id = str(active_context.get("active_run_id") or "").strip()
+    active_dump_id = str(active_context.get("active_dump_id") or "").strip()
+    tables = (
+        warehouse.list_tables(run_id=active_run_id, dump_id=active_dump_id)
+        if active_run_id or active_dump_id
+        else {}
+    )
     slices = list_slices(limit=20)
     materializations = list_materialization_plans(limit=20)
     dumps = list_dumps(limit=20)
     quality = warehouse.read_json_doc("quality") or {}
-    active_context = artifact_context.read_active_context()
     return {
         "states": SLICE_STATES,
         "slices": slices["slices"],
