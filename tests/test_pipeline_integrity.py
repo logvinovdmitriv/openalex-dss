@@ -488,13 +488,15 @@ class PipelineIntegrityTests(unittest.TestCase):
             return []
 
         def fake_build_passports(*args: object, **kwargs: object) -> dict[str, object]:
-            captured["passport_out_dir"] = args[2]
+            run_id = str(kwargs["run_id"])
+            out = pipeline.DATA / "runs" / run_id / "passports"
+            captured["passport_out_dir"] = out
             captured["passport_input_tables"] = kwargs.get("input_tables")
             captured["passport_primary_artifacts"] = kwargs.get("primary_artifacts")
-            Path(args[2]).mkdir(parents=True, exist_ok=True)
-            (Path(args[2]) / "slice_passport.json").write_text("{}", encoding="utf-8")
-            (Path(args[2]) / "calculation_passport.json").write_text("{}", encoding="utf-8")
-            (Path(args[2]) / "checksums.json").write_text("{}", encoding="utf-8")
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "slice_passport.json").write_text("{}", encoding="utf-8")
+            (out / "calculation_passport.json").write_text("{}", encoding="utf-8")
+            (out / "checksums.json").write_text("{}", encoding="utf-8")
             return {}
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -541,7 +543,7 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         def fake_build_passports(*args: object, **kwargs: object) -> dict[str, object]:
             captured["primary_artifacts"] = kwargs.get("primary_artifacts")
-            out = Path(args[2])
+            out = pipeline.DATA / "runs" / str(kwargs["run_id"]) / "passports"
             out.mkdir(parents=True, exist_ok=True)
             for filename in ("slice_passport.json", "calculation_passport.json", "checksums.json"):
                 (out / filename).write_text("{}", encoding="utf-8")
@@ -549,8 +551,6 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         cfg = SimpleNamespace(
             fraction_modes=("integer",),
-            iupv_n0=10,
-            iupv_lambda=0.2,
             lrdi_p0=5,
             lrdi_lambda=0.15,
             analysis_year=2026,
@@ -598,8 +598,6 @@ class PipelineIntegrityTests(unittest.TestCase):
     def test_run_compute_writes_scoped_outputs_without_global_fallback(self) -> None:
         cfg = SimpleNamespace(
             fraction_modes=("integer",),
-            iupv_n0=10,
-            iupv_lambda=0.2,
             lrdi_p0=5,
             lrdi_lambda=0.15,
             analysis_year=2026,
@@ -608,7 +606,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         )
 
         def fake_build_passports(*args: object, **_kwargs: object) -> dict[str, object]:
-            out = Path(args[2])
+            out = pipeline.DATA / "runs" / str(_kwargs["run_id"]) / "passports"
             out.mkdir(parents=True, exist_ok=True)
             for filename in ("slice_passport.json", "calculation_passport.json", "checksums.json"):
                 (out / filename).write_text("{}", encoding="utf-8")

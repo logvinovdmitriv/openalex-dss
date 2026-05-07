@@ -15,8 +15,6 @@ class AnalysisRunRequest(BaseModel):
     dump_id: str = Field(min_length=1)
     fraction_modes: list[str] | None = None
     fraction_mode_default: str | None = None
-    iupv_n0: float | None = None
-    iupv_lambda: float | None = None
     lrdi_p0: float | None = None
     lrdi_lambda: float | None = None
     analysis_year: int | None = Field(default=None, ge=1900, le=2100)

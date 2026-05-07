@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
-from _bootstrap import data_path
 from openalex_dss.config import load_config
 from openalex_dss.passports import build_passports
 
@@ -16,17 +15,14 @@ def main() -> None:
     parser.add_argument("--root", default=".")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--dump-id", default="")
-    parser.add_argument("--out-dir", default="")
     parser.add_argument("--primary-artifacts-json", required=True)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     primary_artifacts = json.loads(Path(args.primary_artifacts_json).read_text(encoding="utf-8"))
-    out_dir = data_path(args.out_dir) if args.out_dir else None
     doc = build_passports(
         cfg,
         root=args.root,
-        out_dir=out_dir,
         run_id=args.run_id,
         dump_id=args.dump_id,
         primary_artifacts=primary_artifacts,

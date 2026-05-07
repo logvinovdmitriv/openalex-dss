@@ -333,8 +333,6 @@ def _run_compute(
     compute_indices(
         author_work_csv,
         indices_csv,
-        cfg.iupv_n0,
-        cfg.iupv_lambda,
         cfg.lrdi_p0,
         cfg.lrdi_lambda,
         cfg.analysis_year,
@@ -358,7 +356,6 @@ def _run_compute(
     build_passports(
         cfg,
         ROOT,
-        run_passports,
         run_id=run_id,
         dump_id=dump_id,
         analysis_eligibility=analysis_eligibility,
@@ -646,8 +643,6 @@ def config_to_payload(cfg: Any) -> dict[str, Any]:
         "per_page": cfg.per_page,
         "fraction_modes": list(cfg.fraction_modes),
         "fraction_mode_default": cfg.fraction_mode_default,
-        "iupv_n0": cfg.iupv_n0,
-        "iupv_lambda": cfg.iupv_lambda,
         "lrdi_p0": cfg.lrdi_p0,
         "lrdi_lambda": cfg.lrdi_lambda,
         "analysis_year": cfg.analysis_year,

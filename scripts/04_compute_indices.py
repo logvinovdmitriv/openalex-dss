@@ -16,7 +16,13 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    rows = compute_indices(data_path(args.input_path), data_path(args.out), n0=cfg.iupv_n0, lam=cfg.iupv_lambda)
+    rows = compute_indices(
+        data_path(args.input_path),
+        data_path(args.out),
+        lrdi_p0=cfg.lrdi_p0,
+        lrdi_lambda=cfg.lrdi_lambda,
+        analysis_year=cfg.analysis_year,
+    )
     print(f"indices_rows={len(rows)}")
 
 

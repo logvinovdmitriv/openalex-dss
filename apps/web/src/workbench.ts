@@ -129,8 +129,6 @@ export type SliceDefinitionPayload = {
 export type AnalysisRunPayload = {
   fraction_modes: readonly string[];
   fraction_mode_default: string;
-  iupv_n0: number;
-  iupv_lambda: number;
   lrdi_p0: number;
   lrdi_lambda: number;
   analysis_year: number;
@@ -330,8 +328,6 @@ export function buildAnalysisRunPayload(fractionMode: string, fractionModes: rea
   return {
     fraction_modes: fractionModes,
     fraction_mode_default: fractionMode,
-    iupv_n0: 5,
-    iupv_lambda: 0.15,
     lrdi_p0: 5,
     lrdi_lambda: 0.15,
     analysis_year: 2026,

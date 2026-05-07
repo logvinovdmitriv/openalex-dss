@@ -45,8 +45,6 @@ class SliceConfig:
     fraction_modes: tuple[str, ...]
     fraction_mode_default: str
     select_fields: tuple[str, ...]
-    iupv_n0: float
-    iupv_lambda: float
     lrdi_p0: float
     lrdi_lambda: float
     analysis_year: int
@@ -160,8 +158,6 @@ def load_config(path: str | Path = "config/slice.yaml") -> SliceConfig:
         fraction_modes=_csv_tuple(raw.get("fraction_modes", raw["fraction_mode_default"])),
         fraction_mode_default=str(raw["fraction_mode_default"]),
         select_fields=_csv_tuple(raw["select_fields"]),
-        iupv_n0=float(raw.get("iupv_n0", 5.0)),
-        iupv_lambda=float(raw.get("iupv_lambda", 0.35)),
         lrdi_p0=float(raw.get("lrdi_p0", 5.0)),
         lrdi_lambda=float(raw.get("lrdi_lambda", 0.15)),
         analysis_year=int(raw.get("analysis_year", 2026)),
@@ -210,8 +206,6 @@ def config_to_dict(cfg: SliceConfig) -> dict[str, object]:
         "fraction_modes": list(cfg.fraction_modes),
         "fraction_mode_default": cfg.fraction_mode_default,
         "select_fields": list(cfg.select_fields),
-        "iupv_n0": cfg.iupv_n0,
-        "iupv_lambda": cfg.iupv_lambda,
         "lrdi_p0": cfg.lrdi_p0,
         "lrdi_lambda": cfg.lrdi_lambda,
         "analysis_year": cfg.analysis_year,
@@ -286,8 +280,6 @@ def replace_config(cfg: SliceConfig, **updates: object) -> SliceConfig:
         fraction_modes=fraction_modes,
         fraction_mode_default=str(data["fraction_mode_default"]),
         select_fields=select_fields,
-        iupv_n0=float(data["iupv_n0"]),
-        iupv_lambda=float(data["iupv_lambda"]),
         lrdi_p0=float(data.get("lrdi_p0", 5.0)),
         lrdi_lambda=float(data.get("lrdi_lambda", 0.15)),
         analysis_year=int(data.get("analysis_year", 2026)),

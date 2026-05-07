@@ -78,7 +78,7 @@ def g_index(citations: list[int]) -> int:
 
 
 def iupv_from_percentiles(p_pr: float, h_pr: float, c_frac_pr: float) -> float:
-    """IUPV v2: geometric mean of percentile ranks for P, h and C_frac."""
+    """IUPV: geometric mean of percentile ranks for P, h and C_frac."""
     if p_pr <= 0 or h_pr <= 0 or c_frac_pr <= 0:
         return 0.0
     return 100.0 * (max(1e-6, p_pr) * max(1e-6, h_pr) * max(1e-6, c_frac_pr)) ** (1.0 / 3.0)
@@ -111,18 +111,6 @@ def islv_from_percentiles(
     geometric = math.prod(value**weight for value, weight in weights) ** (1.0 / weight_sum)
     concentration_penalty = 1.0 - penalty_lambda * max(0.0, min(1.0, top1_share) - tau)
     return 100.0 * geometric * max(0.0, min(1.0, concentration_penalty))
-
-
-def iupv(p: int, h: float, c_frac: float, n0: float = 5.0, lam: float = 0.35) -> float:
-    """Backward-compatible alias for the v2 formula when percentile ranks are supplied.
-
-    The previous log/saturation formula is intentionally no longer used in the
-    pipeline. The argument names are kept stable for older imports; callers that
-    need current DSS values should call ``assign_iupv_percentiles`` on the full
-    author table.
-    """
-    del n0, lam
-    return iupv_from_percentiles(float(p), float(h), float(c_frac))
 
 
 def assign_iupv_percentiles(rows: list[dict[str, Any]], group_field: str = "fraction_mode") -> None:
@@ -249,8 +237,6 @@ def build_author_work_metrics(
 def compute_indices(
     author_work_path: str | Path = "data/runs/local/tables/author_work.csv",
     out_path: str | Path = "data/runs/local/tables/indices.csv",
-    n0: float = 5.0,
-    lam: float = 0.35,
     lrdi_p0: float = 5.0,
     lrdi_lambda: float = 0.15,
     analysis_year: int = 2026,

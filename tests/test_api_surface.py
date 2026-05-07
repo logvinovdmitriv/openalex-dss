@@ -76,8 +76,6 @@ class PublicApiSurfaceTests(unittest.TestCase):
             "accepted_download_signature",
             "fraction_modes",
             "fraction_mode_default",
-            "iupv_n0",
-            "iupv_lambda",
             "lrdi_p0",
             "lrdi_lambda",
             "analysis_year",

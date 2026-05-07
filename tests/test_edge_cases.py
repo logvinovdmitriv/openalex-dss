@@ -147,6 +147,28 @@ class EdgeCaseTests(unittest.TestCase):
 
             self.assertIn("primary_artifacts is required", str(raised.exception))
 
+    def test_build_passports_requires_run_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "data"
+            artifact = root / "scoped" / "indices.csv"
+            artifact.parent.mkdir(parents=True)
+            artifact.write_text("scoped indices", encoding="utf-8")
+            cfg = replace_config(
+                load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
+                slice_name="slice_run_scope",
+            )
+
+            with patch.dict(os.environ, {"OPENALEX_DSS_DATA_DIR": str(data)}):
+                with self.assertRaises(ValueError) as raised:
+                    build_passports(
+                        cfg,
+                        Path(__file__).resolve().parents[1],
+                        primary_artifacts={"run/tables/indices.csv": artifact},
+                    )
+
+            self.assertIn("run_id is required for run-scoped passport generation", str(raised.exception))
+
     def test_build_passports_can_checksum_scoped_primary_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

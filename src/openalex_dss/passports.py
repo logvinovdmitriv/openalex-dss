@@ -12,7 +12,6 @@ from .io_utils import sha256_file, write_json
 def build_passports(
     cfg: SliceConfig,
     root: str | Path = ".",
-    out_dir: str | Path | None = None,
     *,
     run_id: str = "",
     dump_id: str = "",
@@ -24,7 +23,7 @@ def build_passports(
         raise ValueError("primary_artifacts is required")
     root_path = Path(root)
     data_root = _data_root(root_path)
-    out = _passport_out_dir(root_path, data_root, out_dir, run_id)
+    out = _passport_out_dir(data_root, run_id)
     out.mkdir(parents=True, exist_ok=True)
 
     slice_passport = {
@@ -118,7 +117,6 @@ def build_passports(
             "formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
             "percentile_scope": "current slice within each fraction_mode",
             "status": "experimental",
-            "unused_previous_parameters": {"n0": cfg.iupv_n0, "lambda": cfg.iupv_lambda},
         },
         "islv": {
             "name_ru": "индекс сбалансированного локального вклада",
@@ -211,12 +209,10 @@ def _data_root(root_path: Path) -> Path:
     return (root_path.parent / "openalex-dss-data").resolve()
 
 
-def _passport_out_dir(root_path: Path, data_root: Path, out_dir: str | Path | None, run_id: str) -> Path:
-    if out_dir is not None:
-        return root_path / Path(out_dir)
+def _passport_out_dir(data_root: Path, run_id: str) -> Path:
     safe_run_id = _safe_path_component(run_id)
     if not safe_run_id:
-        raise ValueError("run_id is required when out_dir is not provided")
+        raise ValueError("run_id is required for run-scoped passport generation")
     return data_root / "runs" / safe_run_id / "passports"
 
 
