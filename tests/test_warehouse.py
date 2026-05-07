@@ -15,7 +15,7 @@ for path in (API, SRC):
         sys.path.insert(0, str(path))
 
 from app.services import warehouse  # noqa: E402
-from openalex_mvp.io_utils import write_parquet_dicts  # noqa: E402
+from openalex_dss.io_utils import write_parquet_dicts  # noqa: E402
 
 
 class WarehouseTests(unittest.TestCase):

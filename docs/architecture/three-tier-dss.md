@@ -44,7 +44,7 @@ backend-to-backend services, for example snapshot ingestion or metric
 calculation workers.
 
 The current implementation is intentionally a modular Python monolith. Go,
-external queues and microservices are not part of the MVP runtime. The
+external queues and microservices are not part of the DSS runtime. The
 replacement boundary is the run/job API, not a second backend stack.
 
 Supported run contract:
@@ -128,7 +128,7 @@ $OPENALEX_DSS_DATA_DIR/lake/gold/scientometrics/       indices, ratings and scie
 $OPENALEX_DSS_DATA_DIR/warehouse/openalex_dss.duckdb   query warehouse/catalog
 ```
 
-The current MVP keeps CSV/JSON as primary reproducibility artifacts and
+The current DSS keeps CSV/JSON as primary reproducibility artifacts and
 registers them as DuckDB views for interactive querying. The production
 upgrade path is Parquet for silver/gold tables with CSV as export only.
 
@@ -150,7 +150,7 @@ kept for field catalogs, entity resolving, estimates, rate-limit visibility and
 point enrichment. The CLI output is packed as
 `$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/works.jsonl.gz` with a
 passport and checksum. The calculation step imports this fixed file locally;
-the materialization endpoint does not calculate rankings. This is the MVP dump
+the materialization endpoint does not calculate rankings. This is the DSS dump
 mode and is intentionally separate from the full S3 snapshot.
 
 ## Primary Workflow
@@ -170,7 +170,7 @@ The primary DSS workflow is:
    quality diagnostics.
 
 Gender and age are not implemented because OpenAlex does not provide those
-fields. City is not a primary OpenAlex filter in this MVP; it should be added
+fields. City is not a primary OpenAlex filter in this DSS; it should be added
 later through an external institution dictionary that resolves a city to a list
 of institution IDs. The pipeline uses observed `authorships` and records
 quality flags for missing/deleted/truncated author information.
@@ -193,7 +193,7 @@ gzip-compressed JSON Lines and partitioned by `updated_date`. Incremental
 updates should download the manifest, identify new partitions, verify the
 manifest did not change during download, and upsert by OpenAlex entity ID.
 
-The full snapshot is a future bulk-ingestion mode. For the MVP, API calls are
+The full snapshot is a future bulk-ingestion mode. For the DSS, API calls are
 reserved for dropdown suggestions, field catalogs, estimates, usage limits and
 point enrichment of selected authors/publications. Materializing the actual
 works corpus uses the installed OpenAlex CLI, then local offline calculation

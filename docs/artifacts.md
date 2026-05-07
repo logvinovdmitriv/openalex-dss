@@ -1,6 +1,6 @@
 # Artifact Model
 
-The MVP uses scoped artifacts as the source of truth. Data access is addressed
+The DSS uses scoped artifacts as the source of truth. Data access is addressed
 by explicit `dump_id`, `run_id`, and `report_scope_hash`; endpoints do not read
 global fallback files.
 

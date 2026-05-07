@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from openalex_mvp.io_utils import read_csv_dicts, write_csv_dicts
-from openalex_mvp.ranking import build_ratings, sort_metric_rows
+from openalex_dss.io_utils import read_csv_dicts, write_csv_dicts
+from openalex_dss.ranking import build_ratings, sort_metric_rows
 
 
 class RankingConsistencyTests(unittest.TestCase):

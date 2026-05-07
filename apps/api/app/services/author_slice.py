@@ -9,8 +9,8 @@ from app.core.paths import ROOT, SRC
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from openalex_mvp.config import SliceConfig, load_config, replace_config  # noqa: E402
-from openalex_mvp.openalex import build_filter, default_sort  # noqa: E402
+from openalex_dss.config import SliceConfig, load_config, replace_config  # noqa: E402
+from openalex_dss.openalex import build_filter, default_sort  # noqa: E402
 
 
 SUBJECT_LEVELS = {"field", "subfield", "topic"}
@@ -82,7 +82,7 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
             },
             "islv": {
                 "formula": "weighted geometric mean of pr(h), pr(C_frac), pr(g), pr(i10), pr(P) with top-1 concentration penalty",
-                "status": "own_formula_mvp_v1",
+                "status": "own_formula",
             },
             "f5_fm5_status": "operational_definition_requires_primary_source_confirmation",
             "lrdi_p0": cfg.lrdi_p0,

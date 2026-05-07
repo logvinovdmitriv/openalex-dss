@@ -9,7 +9,7 @@ from app.services import author_slice, warehouse
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from openalex_mvp.config import config_to_dict, load_config  # noqa: E402
+from openalex_dss.config import config_to_dict, load_config  # noqa: E402
 
 
 STAGE_DEFINITIONS = [

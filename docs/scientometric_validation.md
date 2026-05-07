@@ -1,8 +1,8 @@
-# MVP Validation
+# DSS Validation
 
 Дата контрольного прогона: 2026-05-06.
 
-Этот документ фиксирует end-to-end проверку наукометрического MVP-контура:
+Этот документ фиксирует end-to-end проверку наукометрического DSS-контура:
 
 ```text
 OpenAlex-like Works fixture
@@ -14,7 +14,7 @@ OpenAlex-like Works fixture
 -> JSON/CSV/Markdown exports
 ```
 
-Документ обновляется по результатам запуска `scripts/validate_scientometric_mvp.py`.
+Документ обновляется по результатам запуска `scripts/validate_scientometric_dss.py`.
 
 ## Режим проверки
 
@@ -33,7 +33,7 @@ OpenAlex-like Works fixture
 Из корня репозитория:
 
 ```bash
-.venv/bin/python scripts/validate_scientometric_mvp.py --reset
+.venv/bin/python scripts/validate_scientometric_dss.py --reset
 ```
 
 По умолчанию данные пишутся вне репозитория:
@@ -46,7 +46,7 @@ OpenAlex-like Works fixture
 
 ```text
 validation_mode: deterministic_local_openalex_like_fixture
-run_id: validation_scientometric_mvp
+run_id: validation_scientometric
 dump_id: validation_fixture_dump
 cohort_id: cohort_validation
 cohort_checksum: 0d5ecb3a73559e74b6d8be304386f62cc0bd0e45222d0e04b5cbff88f945aeb8
@@ -76,7 +76,7 @@ Analysis eligibility:
 ```text
 status: validation_fixture_not_for_final_analysis
 allowed_for_final_analysis: false
-warning: Deterministic local fixture validates the MVP pipeline and exports; it is not a real OpenAlex scientific slice.
+warning: Deterministic local fixture validates the DSS pipeline and exports; it is not a real OpenAlex scientific slice.
 ```
 
 ## Артефакты
@@ -85,32 +85,32 @@ warning: Deterministic local fixture validates the MVP pipeline and exports; it 
 
 ```text
 validation/raw/fixture_works.jsonl
-validation/mvp_validation_manifest.json
-validation/exports/validation_scientometric_mvp/scientometrics.json
-validation/exports/validation_scientometric_mvp/descriptive.csv
-validation/exports/validation_scientometric_mvp/correlations.csv
-validation/exports/validation_scientometric_mvp/rank-shifts.csv
-validation/exports/validation_scientometric_mvp/largest-rank-shifts.csv
-validation/exports/validation_scientometric_mvp/outliers.csv
-validation/exports/validation_scientometric_mvp/top-outliers.csv
-validation/exports/validation_scientometric_mvp/findings.csv
-validation/exports/validation_scientometric_mvp/conclusion.md
-validation/exports/validation_scientometric_mvp/report_bundle.json
-runs/validation_scientometric_mvp/reports/report_0b41f7b1d24779ff.json
+validation/scientometric_validation_manifest.json
+validation/exports/validation_scientometric/scientometrics.json
+validation/exports/validation_scientometric/descriptive.csv
+validation/exports/validation_scientometric/correlations.csv
+validation/exports/validation_scientometric/rank-shifts.csv
+validation/exports/validation_scientometric/largest-rank-shifts.csv
+validation/exports/validation_scientometric/outliers.csv
+validation/exports/validation_scientometric/top-outliers.csv
+validation/exports/validation_scientometric/findings.csv
+validation/exports/validation_scientometric/conclusion.md
+validation/exports/validation_scientometric/report_bundle.json
+runs/validation_scientometric/reports/report_0b41f7b1d24779ff.json
 ```
 
 Run-scoped pipeline artifacts:
 
 ```text
-runs/validation_scientometric_mvp/tables/works.csv
-runs/validation_scientometric_mvp/tables/authorships.csv
-runs/validation_scientometric_mvp/tables/work_topics.csv
-runs/validation_scientometric_mvp/tables/author_work.csv
-runs/validation_scientometric_mvp/tables/indices.csv
-runs/validation_scientometric_mvp/tables/ratings.csv
-runs/validation_scientometric_mvp/passports/slice_passport.json
-runs/validation_scientometric_mvp/passports/calculation_passport.json
-runs/validation_scientometric_mvp/passports/checksums.json
+runs/validation_scientometric/tables/works.csv
+runs/validation_scientometric/tables/authorships.csv
+runs/validation_scientometric/tables/work_topics.csv
+runs/validation_scientometric/tables/author_work.csv
+runs/validation_scientometric/tables/indices.csv
+runs/validation_scientometric/tables/ratings.csv
+runs/validation_scientometric/passports/slice_passport.json
+runs/validation_scientometric/passports/calculation_passport.json
+runs/validation_scientometric/passports/checksums.json
 ```
 
 ## Проверка согласованности scope
@@ -118,7 +118,7 @@ runs/validation_scientometric_mvp/passports/checksums.json
 `scientometrics.json` и `report_bundle.json` содержат один и тот же основной scope:
 
 ```text
-run_id: validation_scientometric_mvp
+run_id: validation_scientometric
 dump_id: validation_fixture_dump
 cohort_id: cohort_validation
 fraction_mode: integer
@@ -159,11 +159,11 @@ report_bundle.json: 9338 lines
 
 ## Checksums
 
-`validation/mvp_validation_manifest.json` содержит `artifact_checksums` для каждого export и run report artifact. Это фиксирует byte-level содержимое текущего validation-прогона и позволяет сравнивать артефакты между повторными запусками. Некоторые runtime artifacts могут включать системные или форматные метаданные, поэтому главным стабильным инвариантом проверки остается совпадение scope, versions, cohort checksum и report scope hash.
+`validation/scientometric_validation_manifest.json` содержит `artifact_checksums` для каждого export и run report artifact. Это фиксирует byte-level содержимое текущего validation-прогона и позволяет сравнивать артефакты между повторными запусками. Некоторые runtime artifacts могут включать системные или форматные метаданные, поэтому главным стабильным инвариантом проверки остается совпадение scope, versions, cohort checksum и report scope hash.
 
 ## Вывод проверки
 
-Контрольный fixture-прогон подтвердил, что MVP-контур выполняется end-to-end:
+Контрольный fixture-прогон подтвердил, что DSS-контур выполняется end-to-end:
 
 1. OpenAlex-like Works JSONL импортируется как локальный dump.
 2. Run-scoped таблицы, индексы, рейтинги и паспорта создаются.

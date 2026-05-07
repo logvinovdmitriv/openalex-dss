@@ -217,7 +217,7 @@ def build_report_bundle(
             "scientometrics_findings_csv": "Contains structured interpretation findings with evidence JSON for the selected scientometric analysis scope.",
             "scientometrics_conclusion_md": "Contains the deterministic conclusion draft rendered as Markdown for the selected scientometric analysis scope.",
         },
-        "mvp_protocol": {
+        "methodology_protocol": {
             "source_mode": "openalex_cli_filtered_metadata",
             "storage_rule": "raw immutable dump -> dump tables -> run-scoped metric tables",
             "topic_mapping_rule": "ВАК-код не является OpenAlex-фильтром; mapping фиксируется отдельно как resolved entities / mapping file.",

@@ -4,8 +4,8 @@ import argparse
 
 import _bootstrap  # noqa: F401
 from _bootstrap import data_path
-from openalex_mvp.config import load_config
-from openalex_mvp.metrics import compute_indices
+from openalex_dss.config import load_config
+from openalex_dss.metrics import compute_indices
 
 
 def main() -> None:

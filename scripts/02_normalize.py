@@ -4,7 +4,7 @@ import argparse
 
 import _bootstrap  # noqa: F401
 from _bootstrap import data_path
-from openalex_mvp.normalize import normalize_raw
+from openalex_dss.normalize import normalize_raw
 
 
 def main() -> None:

@@ -8,12 +8,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import _path  # noqa: F401
-from openalex_mvp.config import load_config, replace_config
-from openalex_mvp.metrics import build_author_work_metrics, compute_indices
-from openalex_mvp.normalize import normalize_raw
-from openalex_mvp.openalex import build_filter, download_consistency, estimate_works
-from openalex_mvp.passports import build_passports
-from openalex_mvp.ranking import build_ratings
+from openalex_dss.config import load_config, replace_config
+from openalex_dss.metrics import build_author_work_metrics, compute_indices
+from openalex_dss.normalize import normalize_raw
+from openalex_dss.openalex import build_filter, download_consistency, estimate_works
+from openalex_dss.passports import build_passports
+from openalex_dss.ranking import build_ratings
 
 
 class EdgeCaseTests(unittest.TestCase):
@@ -91,7 +91,7 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertNotIn("from_publication_date", query)
         self.assertNotIn("type:article", query)
 
-    def test_openalex_filter_accepts_mvp_work_type_or(self) -> None:
+    def test_openalex_filter_accepts_pipe_separated_work_types(self) -> None:
         cfg = replace_config(
             load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
             work_type="article|review|conference-paper",
@@ -101,7 +101,7 @@ class EdgeCaseTests(unittest.TestCase):
 
     def test_estimate_works_uses_sample_and_facets_without_network(self) -> None:
         cfg = replace_config(load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"))
-        with patch("openalex_mvp.openalex._get_json") as get_json:
+        with patch("openalex_dss.openalex._get_json") as get_json:
             get_json.side_effect = [
                 {"meta": {"count": 2}, "results": [_work("W1", "A1", 12)]},
                 {"meta": {"count": 2}, "results": [_work("W2", "A2", 5), _work("W3", "A3", 3)]},

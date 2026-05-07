@@ -15,8 +15,8 @@ from app.core.paths import DATA, SRC, TABLE_KINDS, WAREHOUSE
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from openalex_mvp.metrics import assign_iupv_percentiles, g_index, h_index, i10_index, lrdi as lrdi_metric  # noqa: E402
-from openalex_mvp.ranking import sort_metric_rows  # noqa: E402
+from openalex_dss.metrics import assign_iupv_percentiles, g_index, h_index, i10_index, lrdi as lrdi_metric  # noqa: E402
+from openalex_dss.ranking import sort_metric_rows  # noqa: E402
 
 INDEX_NUMERIC_FIELDS = {
     "p",

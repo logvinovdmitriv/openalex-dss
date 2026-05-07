@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 import _path  # noqa: F401
-from openalex_mvp.metrics import g_index, h_index, i10_index, iupv_from_percentiles, islv_from_percentiles
+from openalex_dss.metrics import g_index, h_index, i10_index, iupv_from_percentiles, islv_from_percentiles
 
 
 class IndexTests(unittest.TestCase):

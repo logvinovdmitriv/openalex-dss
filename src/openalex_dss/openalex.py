@@ -283,7 +283,7 @@ def _get_json(url: str, params: dict[str, str]) -> dict[str, Any]:
     query = urllib.parse.urlencode(params)
     req = urllib.request.Request(
         f"{url}?{query}",
-        headers={"User-Agent": "openalex-mvp-indices/0.1.0"},
+        headers={"User-Agent": "openalex-dss-indices/0.1.0"},
     )
     try:
         with urllib.request.urlopen(req, timeout=90) as response:

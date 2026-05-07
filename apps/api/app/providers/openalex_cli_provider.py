@@ -15,8 +15,8 @@ import sys
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from openalex_mvp.io_utils import ensure_dir, sha256_file, write_json  # noqa: E402
-from openalex_mvp.openalex import build_filter, cli_download_signature, corpus_signature, download_consistency  # noqa: E402
+from openalex_dss.io_utils import ensure_dir, sha256_file, write_json  # noqa: E402
+from openalex_dss.openalex import build_filter, cli_download_signature, corpus_signature, download_consistency  # noqa: E402
 
 
 def cli_status() -> dict[str, Any]:

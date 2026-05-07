@@ -16,7 +16,7 @@ OpenAlex API не используется как рабочая база дан
 
 - `apps/api` - FastAPI backend.
 - `apps/web` - React/Vite frontend.
-- `src/openalex_mvp` - аналитическое ядро.
+- `src/openalex_dss` - аналитическое ядро.
 - `configs` и `config` - версионируемые профили, реестры и пример конфигурации.
 - `scripts` - воспроизводимые CLI-шаги.
 - `tests` - unit-тесты.

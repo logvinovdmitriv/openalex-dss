@@ -7,7 +7,7 @@ from pathlib import Path
 import _bootstrap  # noqa: F401
 from _bootstrap import data_path
 from app.providers.openalex_cli_provider import download_works_metadata
-from openalex_mvp.config import load_config
+from openalex_dss.config import load_config
 
 
 def main() -> None:

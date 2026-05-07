@@ -118,7 +118,7 @@ def iupv(p: int, h: float, c_frac: float, n0: float = 5.0, lam: float = 0.35) ->
 
     The previous log/saturation formula is intentionally no longer used in the
     pipeline. The argument names are kept stable for older imports; callers that
-    need MVP-correct values should call ``assign_iupv_percentiles`` on the full
+    need current DSS values should call ``assign_iupv_percentiles`` on the full
     author table.
     """
     del n0, lam

@@ -4,7 +4,7 @@ import argparse
 
 import _bootstrap  # noqa: F401
 from _bootstrap import data_path
-from openalex_mvp.io_utils import write_json
+from openalex_dss.io_utils import write_json
 
 
 def main() -> None:

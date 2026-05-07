@@ -18,9 +18,9 @@ for path in (API, SRC):
 
 from app.providers import openalex_cli_provider  # noqa: E402
 from app.providers.openalex_cli_provider import _pack_work_json_files  # noqa: E402
-from openalex_mvp.config import load_config, replace_config  # noqa: E402
-from openalex_mvp.io_utils import read_jsonl  # noqa: E402
-from openalex_mvp.openalex import cli_download_signature, corpus_signature  # noqa: E402
+from openalex_dss.config import load_config, replace_config  # noqa: E402
+from openalex_dss.io_utils import read_jsonl  # noqa: E402
+from openalex_dss.openalex import cli_download_signature, corpus_signature  # noqa: E402
 
 
 class OpenAlexCliProviderTests(unittest.TestCase):

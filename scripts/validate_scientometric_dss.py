@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA = (ROOT.parent / "openalex-dss-validation-data").resolve()
-RUN_ID = "validation_scientometric_mvp"
+RUN_ID = "validation_scientometric"
 DUMP_ID = "validation_fixture_dump"
 FRACTION_MODE = "integer"
 BASELINE_METRIC = "h"
@@ -24,7 +24,7 @@ METRICS = ["p", "c", "c_frac", "h", "i10", "g", "islv"]
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a deterministic end-to-end validation of the scientometric MVP pipeline.")
+    parser = argparse.ArgumentParser(description="Run a deterministic end-to-end validation of the scientometric DSS pipeline.")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA), help="External validation data root. Default: ../openalex-dss-validation-data")
     parser.add_argument("--reset", action="store_true", help="Delete the validation data root before running.")
     args = parser.parse_args()
@@ -49,7 +49,7 @@ def main() -> None:
             "source_path": str(raw_path),
             "run_id": RUN_ID,
             "dump_id": DUMP_ID,
-            "slice_name": "validation_scientometric_mvp_fixture",
+            "slice_name": "validation_scientometric_fixture",
             "workflow_mode": "strict_works",
             "entity_level": "topic",
             "entity_id_short": "T100",
@@ -67,7 +67,7 @@ def main() -> None:
             "analysis_eligibility": {
                 "status": "validation_fixture_not_for_final_analysis",
                 "allowed_for_final_analysis": False,
-                "warning": "Deterministic local fixture validates the MVP pipeline and exports; it is not a real OpenAlex scientific slice.",
+                "warning": "Deterministic local fixture validates the DSS pipeline and exports; it is not a real OpenAlex scientific slice.",
             },
         }
     )
@@ -186,7 +186,7 @@ def main() -> None:
         cohort=cohort,
         scientometrics_module=scientometrics,
     )
-    manifest_path = data_dir / "validation" / "mvp_validation_manifest.json"
+    manifest_path = data_dir / "validation" / "scientometric_validation_manifest.json"
     _write_json(manifest_path, manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
 

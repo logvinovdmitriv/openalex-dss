@@ -11,7 +11,7 @@ from typing import Any
 from app.core.paths import DATA
 from app.services.internal_payloads import normalize_internal_pipeline_payload
 from app.services import artifact_context, author_slice, jobs, metadata_store, query_planner, registry, warehouse
-from openalex_mvp.openalex import cli_download_signature, corpus_request
+from openalex_dss.openalex import cli_download_signature, corpus_request
 
 
 SLICES_DIR = DATA / "slices"

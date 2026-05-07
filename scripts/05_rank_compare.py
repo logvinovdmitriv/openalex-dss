@@ -4,7 +4,7 @@ import argparse
 
 import _bootstrap  # noqa: F401
 from _bootstrap import data_path
-from openalex_mvp.ranking import build_ratings
+from openalex_dss.ranking import build_ratings
 
 
 def main() -> None:

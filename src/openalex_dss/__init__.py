@@ -1,4 +1,4 @@
-"""Runnable OpenAlex scientometric MVP."""
+"""Runnable OpenAlex scientometric DSS."""
 
 __all__ = ["__version__"]
 

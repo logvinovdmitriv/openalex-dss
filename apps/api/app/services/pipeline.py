@@ -16,12 +16,12 @@ from app.services import metadata_store, query_planner, reports
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from openalex_mvp.config import replace_config, write_config  # noqa: E402
-from openalex_mvp.io_utils import sha256_file, write_json  # noqa: E402
-from openalex_mvp.metrics import build_author_work_metrics, compute_indices  # noqa: E402
-from openalex_mvp.normalize import normalize_raw  # noqa: E402
-from openalex_mvp.passports import build_passports  # noqa: E402
-from openalex_mvp.ranking import build_ratings  # noqa: E402
+from openalex_dss.config import replace_config, write_config  # noqa: E402
+from openalex_dss.io_utils import sha256_file, write_json  # noqa: E402
+from openalex_dss.metrics import build_author_work_metrics, compute_indices  # noqa: E402
+from openalex_dss.normalize import normalize_raw  # noqa: E402
+from openalex_dss.passports import build_passports  # noqa: E402
+from openalex_dss.ranking import build_ratings  # noqa: E402
 
 def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     cfg = _cfg(payload)

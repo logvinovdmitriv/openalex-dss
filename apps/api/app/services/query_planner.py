@@ -14,7 +14,7 @@ from app.services import author_slice
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from openalex_mvp.openalex import build_filter, estimate_works  # noqa: E402
+from openalex_dss.openalex import build_filter, estimate_works  # noqa: E402
 
 
 CONFIG_PATH = ROOT / "configs/execution_limits.yaml"
@@ -56,7 +56,7 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
         }
     return {
         "status": "ok",
-        "planner_version": "mvp_query_planner_v1",
+        "planner_schema": "query_planner",
         "slice_id": cfg.slice_name,
         "workflow_mode": "strict_works",
         "user_visible_request": {

@@ -70,7 +70,7 @@ def _parse_value(raw: str) -> object:
 
 
 def read_simple_yaml(path: str | Path) -> dict[str, object]:
-    """Read the flat YAML subset used by this MVP config.
+    """Read the flat YAML subset used by this DSS config.
 
     This intentionally avoids a PyYAML dependency for the core smoke pipeline.
     The parser supports comments, blank lines, and simple `key: value` pairs.
