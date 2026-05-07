@@ -57,6 +57,9 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   filters, cohort, baseline, rank Top-N, and scientometric version set.
 - Latest-view files are compatibility artifacts. They are not a stable source
   for dissertation-grade reports.
+- Latest-view publication is disabled by default for pipeline compute. Set
+  `OPENALEX_DSS_PUBLISH_LATEST_VIEW=1` only when an explicit compatibility
+  mirror is needed for older local workflows.
 - Local-data preview routes may still read latest-view files during the
   transition, but no-scope responses are marked as
   `scope_status=implicit_latest_preview` and `reproducible=false`.

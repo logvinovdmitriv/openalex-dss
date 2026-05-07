@@ -307,7 +307,8 @@ def _run_compute(
         "theory_top1_sensitivity": run_results / "theory_top1_sensitivity.csv",
         "theory_fraction_mode_sensitivity": run_results / "theory_fraction_mode_sensitivity.csv",
     }
-    _publish_latest_view(input_tables, run_table_outputs, run_result_outputs)
+    if _publish_latest_view_enabled():
+        _publish_latest_view(input_tables, run_table_outputs, run_result_outputs)
     input_table_manifest = _table_manifest(input_tables, input_table_checksums)
     primary_artifacts = {
         "dump/tables/works.parquet": input_table_manifest.get("works"),
@@ -395,6 +396,10 @@ def _publish_latest_view(input_tables: dict[str, Path], run_tables: dict[str, Pa
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+
+
+def _publish_latest_view_enabled() -> bool:
+    return os.environ.get("OPENALEX_DSS_PUBLISH_LATEST_VIEW") == "1"
 
 
 def _table_checksums(paths: dict[str, Path]) -> dict[str, str]:

@@ -345,6 +345,10 @@ class PipelineIntegrityTests(unittest.TestCase):
             captured["passport_out_dir"] = args[2]
             captured["passport_input_tables"] = kwargs.get("input_tables")
             captured["passport_primary_artifacts"] = kwargs.get("primary_artifacts")
+            Path(args[2]).mkdir(parents=True, exist_ok=True)
+            (Path(args[2]) / "slice_passport.json").write_text("{}", encoding="utf-8")
+            (Path(args[2]) / "calculation_passport.json").write_text("{}", encoding="utf-8")
+            (Path(args[2]) / "checksums.json").write_text("{}", encoding="utf-8")
             return {}
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -364,7 +368,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 patch.object(pipeline, "build_ratings", return_value=[]),
                 patch.object(pipeline, "analyze_stats", return_value={}),
                 patch.object(pipeline, "analyze_theory", return_value={}),
-                patch.object(pipeline, "_publish_latest_view", return_value=None),
+                patch.object(pipeline, "_publish_latest_view", return_value=None) as publish_latest_view,
                 patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
                 patch.object(pipeline.reports, "build_report_bundle", return_value={}),
                 patch.object(pipeline, "_archive_run_artifacts", return_value={}),
@@ -381,6 +385,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                     }
                 )
 
+        publish_latest_view.assert_not_called()
         self.assertEqual(Path(captured["works_path"]), dump_a / "works.parquet")
         self.assertEqual(Path(captured["authorships_path"]), dump_a / "authorships.parquet")
         self.assertEqual(Path(captured["passport_out_dir"]), root / "runs" / "run_A" / "passports")
@@ -388,6 +393,68 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(captured["passport_input_tables"]["works"]["path"], str(dump_a / "works.parquet"))
         self.assertEqual(captured["passport_primary_artifacts"]["dump/tables/works.parquet"]["path"], str(dump_a / "works.parquet"))
         self.assertEqual(Path(captured["passport_primary_artifacts"]["run/tables/indices.csv"]), root / "runs" / "run_A" / "tables" / "indices.csv")
+
+    def test_run_compute_publishes_latest_view_only_when_enabled(self) -> None:
+        cfg = SimpleNamespace(
+            fraction_modes=("integer",),
+            iupv_n0=10,
+            iupv_lambda=0.2,
+            lrdi_p0=5,
+            lrdi_lambda=0.15,
+            analysis_year=2026,
+            fraction_mode_default="integer",
+            slice_name="slice_latest_opt_in",
+        )
+
+        def fake_build_passports(*args: object, **_kwargs: object) -> dict[str, object]:
+            out = Path(args[2])
+            out.mkdir(parents=True, exist_ok=True)
+            for filename in ("slice_passport.json", "calculation_passport.json", "checksums.json"):
+                (out / filename).write_text("{}", encoding="utf-8")
+            return {}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "inputs"
+            input_dir.mkdir()
+            input_tables = {}
+            for name in ("works", "authorships", "work_topics"):
+                path = input_dir / f"{name}.parquet"
+                path.write_text(f"{name}", encoding="utf-8")
+                input_tables[name] = path
+
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "build_author_work_metrics", side_effect=lambda *_args, **_kwargs: Path(_args[2]).write_text("author_work\n", encoding="utf-8")),
+                patch.object(pipeline, "compute_indices", side_effect=lambda _source, target, *_args: Path(target).write_text("indices\n", encoding="utf-8")),
+                patch.object(pipeline, "build_ratings", side_effect=lambda _source, target: Path(target).write_text("ratings\n", encoding="utf-8")),
+                patch.object(pipeline, "analyze_stats", side_effect=lambda *_args: Path(_args[3]).write_text("{}", encoding="utf-8")),
+                patch.object(pipeline, "analyze_theory", side_effect=lambda *_args: Path(_args[2]).write_text("{}", encoding="utf-8")),
+                patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
+                patch.object(pipeline, "_publish_latest_view", return_value=None) as publish_latest_view,
+                patch.dict("os.environ", {}, clear=True),
+            ):
+                result = pipeline._run_compute(cfg, run_id="run_no_latest", dump_id="dump_no_latest", input_tables=input_tables)
+
+            publish_latest_view.assert_not_called()
+            self.assertTrue((root / "runs" / "run_no_latest" / "tables" / "indices.csv").is_file())
+            self.assertTrue((root / "runs" / "run_no_latest" / "passports" / "checksums.json").is_file())
+            self.assertEqual(result["passport_outputs"]["checksums"], str(root / "runs" / "run_no_latest" / "passports" / "checksums.json"))
+
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "build_author_work_metrics", side_effect=lambda *_args, **_kwargs: Path(_args[2]).write_text("author_work\n", encoding="utf-8")),
+                patch.object(pipeline, "compute_indices", side_effect=lambda _source, target, *_args: Path(target).write_text("indices\n", encoding="utf-8")),
+                patch.object(pipeline, "build_ratings", side_effect=lambda _source, target: Path(target).write_text("ratings\n", encoding="utf-8")),
+                patch.object(pipeline, "analyze_stats", side_effect=lambda *_args: Path(_args[3]).write_text("{}", encoding="utf-8")),
+                patch.object(pipeline, "analyze_theory", side_effect=lambda *_args: Path(_args[2]).write_text("{}", encoding="utf-8")),
+                patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
+                patch.object(pipeline, "_publish_latest_view", return_value=None) as publish_latest_view,
+                patch.dict("os.environ", {"OPENALEX_DSS_PUBLISH_LATEST_VIEW": "1"}, clear=True),
+            ):
+                pipeline._run_compute(cfg, run_id="run_with_latest", dump_id="dump_with_latest", input_tables=input_tables)
+
+            publish_latest_view.assert_called_once()
 
     def test_recalculate_writes_pipeline_summary_before_archive_and_report(self) -> None:
         events: list[str] = []
