@@ -294,7 +294,8 @@ def workbench_summary() -> dict[str, Any]:
     slices = list_slices(limit=20)
     materializations = list_materialization_plans(limit=20)
     dumps = list_dumps(limit=20)
-    quality = warehouse.read_json_doc("quality") or {}
+    quality = warehouse.read_json_doc("quality", run_id=active_run_id) if active_run_id else {}
+    quality = quality or {}
     return {
         "states": SLICE_STATES,
         "slices": slices["slices"],

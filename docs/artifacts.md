@@ -48,6 +48,9 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 - `/workbench` table summaries are resolved from `active_context` when it has
   an active `run_id` or `dump_id`. Without active context, `/workbench` does not
   expose latest-view table counts as current scoped data.
+- `/workbench` quality summary is resolved from the active `run_id`. Without an
+  active run, `/workbench` does not read compatibility latest-view quality
+  reports.
 - Final report and analytics paths must prefer explicit `run_id`/`dump_id` and
   avoid implicit latest fallback.
 
@@ -73,4 +76,6 @@ state. The UI may use active context as the default preview scope for local
 data, rankings, cohorts, and scientometrics, but final reports should still use
 explicit scope parameters. `/workbench` uses the pointer to read scoped table
 counts and returns an empty table summary when the pointer is absent, rather
-than deriving status from compatibility latest-view files.
+than deriving status from compatibility latest-view files. Run quality is read
+from the active run only; dump-only or missing active context returns an empty
+quality summary instead of using latest-view quality.

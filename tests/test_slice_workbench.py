@@ -33,7 +33,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                 "list_tables",
                 return_value={"works": {"rows": 3}, "authorships": {"rows": 4}, "indices": {"rows": 2}},
             ) as list_tables,
-            patch.object(slice_workbench.warehouse, "read_json_doc", return_value=quality),
+            patch.object(slice_workbench.warehouse, "read_json_doc", return_value=quality) as read_json_doc,
             patch.object(slice_workbench.artifact_context, "read_active_context", return_value=active_context),
             patch.object(slice_workbench, "list_slices", return_value={"slices": [{"slice_id": "slice_a", "state": "ready"}], "total": 1}),
             patch.object(slice_workbench, "list_materialization_plans", return_value={"materializations": []}),
@@ -42,6 +42,7 @@ class SliceWorkbenchTests(unittest.TestCase):
             summary = slice_workbench.workbench_summary()
 
         list_tables.assert_called_once_with(run_id="run_a", dump_id="dump_a")
+        read_json_doc.assert_called_once_with("quality", run_id="run_a")
         self.assertEqual(summary["quality"], quality)
         self.assertEqual(summary["active_context"], active_context)
         self.assertEqual(summary["workflow"]["active_stage"], "analyzed")
@@ -60,7 +61,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                 "list_tables",
                 return_value={"indices": {"rows": 99}, "ratings": {"rows": 99}},
             ) as list_tables,
-            patch.object(slice_workbench.warehouse, "read_json_doc", return_value={}),
+            patch.object(slice_workbench.warehouse, "read_json_doc", return_value={"quality_counts": {"legacy": 99}}) as read_json_doc,
             patch.object(slice_workbench.artifact_context, "read_active_context", return_value={}),
             patch.object(slice_workbench, "list_slices", return_value={"slices": [], "total": 0}),
             patch.object(slice_workbench, "list_materialization_plans", return_value={"materializations": []}),
@@ -69,9 +70,27 @@ class SliceWorkbenchTests(unittest.TestCase):
             summary = slice_workbench.workbench_summary()
 
         list_tables.assert_not_called()
+        read_json_doc.assert_not_called()
         self.assertEqual(summary["tables"], {})
+        self.assertEqual(summary["quality"], {})
         self.assertEqual(summary["workflow"]["active_stage"], "idle")
         self.assertEqual(summary["workflow"]["quality_summary"]["authors_indexed"], 0)
+
+    def test_workbench_summary_with_dump_only_active_context_does_not_read_latest_quality(self) -> None:
+        active_context = {"active_dump_id": "dump_a"}
+        with (
+            patch.object(slice_workbench.warehouse, "list_tables", return_value={"works": {"rows": 3}}) as list_tables,
+            patch.object(slice_workbench.warehouse, "read_json_doc", return_value={"quality_counts": {"legacy": 99}}) as read_json_doc,
+            patch.object(slice_workbench.artifact_context, "read_active_context", return_value=active_context),
+            patch.object(slice_workbench, "list_slices", return_value={"slices": [], "total": 0}),
+            patch.object(slice_workbench, "list_materialization_plans", return_value={"materializations": []}),
+            patch.object(slice_workbench, "list_dumps", return_value={"dumps": [{"dump_id": "dump_a"}], "total": 1}),
+        ):
+            summary = slice_workbench.workbench_summary()
+
+        list_tables.assert_called_once_with(run_id="", dump_id="dump_a")
+        read_json_doc.assert_not_called()
+        self.assertEqual(summary["quality"], {})
 
     def test_workbench_summary_preserves_nullable_active_context_eligibility(self) -> None:
         for active_context, expected in (
