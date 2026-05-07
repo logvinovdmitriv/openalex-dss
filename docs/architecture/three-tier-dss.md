@@ -34,8 +34,8 @@ mode and ranking metric.
 - local OpenAlex Works JSONL/JSONL.GZ import;
 - filesystem/lakehouse source catalog;
 - normalization into works/authorships/author-work tables;
-- author index calculation and statistics;
-- report bundle assembly with passports, quality funnel and stability sections;
+- author index calculation and scientometric analysis;
+- report bundle assembly with passports, quality funnel, findings and conclusion exports;
 - domain exports for rankings, cohorts, local data previews and scientometric reports.
 
 HTTP/REST is the primary UI-backend protocol. WebSocket or SSE should be added

@@ -11,7 +11,7 @@ from app.services import cohorts, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
-REPORT_BUNDLE_VERSION = "report_bundle_v11"
+REPORT_BUNDLE_VERSION = "report_bundle_v12"
 DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "islv")
 
 
@@ -90,8 +90,6 @@ def build_report_bundle(
         return report
     state = docs["pipeline"]
     quality = docs["quality"]
-    stats = docs["stats"]
-    theory = docs["theory"]
     checksums = docs["checksums"]
     slice_passport = docs["slice_passport"]
     calculation_passport = docs["calculation_passport"]
@@ -209,12 +207,6 @@ def build_report_bundle(
         "rank_table": top,
         "distribution": distribution,
         "scientometric_analysis": scientometric_analysis,
-        "statistics": stats,
-        "stability_report": {
-            "top1_sensitivity": theory.get("top1_sensitivity"),
-            "fraction_mode_sensitivity": theory.get("fraction_mode_sensitivity"),
-            "prefix_convergence": theory.get("prefix_convergence"),
-        },
         "checksums": checksums,
         "exports": exports,
         "export_notes": {
@@ -337,8 +329,6 @@ def _run_report_artifacts(run_id: str) -> dict[str, dict[str, Any]]:
     return {
         "pipeline": warehouse.read_json_doc("pipeline", run_id=run_id) or {},
         "quality": warehouse.read_json_doc("quality", run_id=run_id) or {},
-        "stats": warehouse.read_json_doc("stats", run_id=run_id) or {},
-        "theory": warehouse.read_json_doc("theory", run_id=run_id) or {},
         "checksums": warehouse.read_json_doc("checksums", run_id=run_id) or {},
         "slice_passport": _read_run_json(run_id, "slice_passport.json"),
         "calculation_passport": _read_run_json(run_id, "calculation_passport.json"),
@@ -386,7 +376,7 @@ def _report_scope(
     membership_filters = _clean_filters(cohort_membership_filters or {})
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     canonical = {
-        "version": "report_scope_v11",
+        "version": "report_scope_v12",
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),
@@ -417,7 +407,7 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
         "run_id": str(report_scope.get("run_id") or ""),
         "dump_id": str(report_scope.get("dump_id") or ""),
         "report_scope": report_scope,
-        "message": "Final report build requires explicit run_id. Dump-only and latest-view report modes are development previews because they do not have run-scoped passports, statistics and checksums.",
+        "message": "Final report build requires explicit run_id. Dump-only and latest-view report modes are development previews because they do not have run-scoped passports, checksums and local metric tables.",
         "no_latest_fallback": False,
     }
 

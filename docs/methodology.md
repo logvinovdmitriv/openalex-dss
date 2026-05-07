@@ -125,8 +125,8 @@ OpenAlex Works API возвращает вложенные `authorships`; MVP н
    `authorships_flat`; dependency-light реализация пишет CSV, production-слой
    зарезервирован под slice-based Parquet.
 7. Собирается mart `author_work_metrics.csv`.
-8. Считаются `author_indices.csv`, `rating_positions.csv`, статистика и
-   паспорта воспроизводимости.
+8. Считаются `author_indices.csv`, `rating_positions.csv` и паспорта
+   воспроизводимости.
 9. UI обновляет рейтинг, ящик с усами, линейное сравнение индексов, плоские
    таблицы и CSV/JSON export.
 
@@ -144,7 +144,7 @@ OpenAlex Works API возвращает вложенные `authorships`; MVP н
   авторы с локальными индексами.
 
 `report_bundle.json` объединяет паспорт среза, quality report, ranking table,
-statistics, stability report и ссылки на CSV exports.
+`scientometric_analysis`, findings/conclusion exports и ссылки на CSV exports.
 
 ## Воспроизводимые слои хранения
 

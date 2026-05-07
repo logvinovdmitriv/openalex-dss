@@ -14,14 +14,13 @@ from openalex_mvp.normalize import normalize_raw
 from openalex_mvp.openalex import build_filter, download_consistency, estimate_works
 from openalex_mvp.passports import build_passports
 from openalex_mvp.ranking import build_ratings
-from openalex_mvp.stats import top_n_overlap
 
 
 class EdgeCaseTests(unittest.TestCase):
     def test_top_n_overlap_uses_available_denominator(self) -> None:
         a = {"a1": 1, "a2": 2}
         b = {"a1": 1, "a2": 2}
-        self.assertEqual(top_n_overlap(a, b, 20), 1.0)
+        self.assertEqual(_top_n_overlap(a, b, 20), 1.0)
 
     def test_null_author_excluded_and_strict_fraction_not_renormalized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -231,6 +230,15 @@ def _work_with_null_author() -> dict:
         }
     )
     return work
+
+
+def _top_n_overlap(rank_a: dict[str, int], rank_b: dict[str, int], n: int) -> float:
+    available = min(n, len(rank_a), len(rank_b))
+    if available <= 0:
+        return 0.0
+    top_a = {author for author, _ in sorted(rank_a.items(), key=lambda item: item[1])[:available]}
+    top_b = {author for author, _ in sorted(rank_b.items(), key=lambda item: item[1])[:available]}
+    return len(top_a & top_b) / float(available)
 
 
 if __name__ == "__main__":

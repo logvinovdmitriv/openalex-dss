@@ -26,8 +26,6 @@ TABLE_FILES = {
     "authors_local_metrics": DATA / "results" / "author_indices.csv",
     "indices": DATA / "results" / "author_indices.csv",
     "ratings": DATA / "results" / "rating_positions.csv",
-    "top1_sensitivity": DATA / "results" / "theory_top1_sensitivity.csv",
-    "fraction_sensitivity": DATA / "results" / "theory_fraction_mode_sensitivity.csv",
 }
 
 PARQUET_TABLE_FILES = {
@@ -43,8 +41,6 @@ PARQUET_TABLE_FILES = {
 JSON_FILES = {
     "fetch_meta": DATA / "passports" / "fetch_meta.json",
     "quality": DATA / "passports" / "quality_report.json",
-    "stats": DATA / "results" / "stats_summary.json",
-    "theory": DATA / "results" / "theory_validation.json",
     "checksums": DATA / "passports" / "checksums.json",
     "pipeline": DATA / "passports" / "pipeline_summary.json",
     "report_bundle": DATA / "results" / "report_bundle.json",

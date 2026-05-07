@@ -26,8 +26,6 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 | `runs/{run_id}/passports/calculation_passport.json` | canonical | run | analysis/run passport and final-analysis eligibility |
 | `runs/{run_id}/passports/checksums.json` | canonical | run | scoped checksum manifest for report bundles |
 | `runs/{run_id}/passports/pipeline_summary.json` | canonical | run | pipeline summary for report bundles |
-| `runs/{run_id}/results/stats_summary.json` | legacy/internal | run | compatibility statistics, not the primary scientometric layer |
-| `runs/{run_id}/results/theory_validation.json` | legacy/internal | run | compatibility diagnostics, not the primary report layer |
 | `runs/{run_id}/reports/report_{report_scope_hash}.json` | canonical | report | reproducible report bundle for an analysis scope |
 | `results/author_indices.csv` | compatibility latest-view | latest | UI fallback only when no explicit scope is selected |
 | `results/rating_positions.csv` | compatibility latest-view | latest | UI fallback only when no explicit scope is selected |
@@ -53,7 +51,7 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 - Recalculation runs include existing dump provenance files from
   `dumps/{dump_id}` in scoped checksum passports when those files are present.
 - `run_id` owns derived calculations: author-work rows, author indices,
-  ratings, run passports, and run-local diagnostic outputs.
+  ratings, run passports, and scoped report bundles.
 - Slice, calculation, checksum, and pipeline summary passports are written
   directly under `runs/{run_id}/passports` when a `run_id` is available.
   Compatibility latest passport paths are not the source for these run-scoped

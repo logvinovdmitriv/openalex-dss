@@ -23,13 +23,13 @@ class LocalDataRouteTests(unittest.TestCase):
             return_value={
                 "works": {"rows": 2, "run_id": "run_a", "dump_id": "dump_a"},
                 "indices": {"rows": 3, "run_id": "run_a", "dump_id": "dump_a"},
-                "top1_sensitivity": {"rows": 99, "run_id": "run_a", "dump_id": "dump_a"},
+                "unknown_legacy_table": {"rows": 99, "run_id": "run_a", "dump_id": "dump_a"},
             },
         ):
             payload = local_data.local_data_summary(run_id="run_a")
 
         self.assertEqual(set(payload["tables"]), {"works", "authorships", "work_topics", "author_work", "indices", "ratings"})
-        self.assertNotIn("top1_sensitivity", payload["tables"])
+        self.assertNotIn("unknown_legacy_table", payload["tables"])
         self.assertEqual(payload["tables"]["works"]["label"], "Работы")
         self.assertEqual(payload["tables"]["authorships"]["rows"], 0)
         self.assertEqual(payload["tables"]["authorships"]["exists"], False)
@@ -90,7 +90,7 @@ class LocalDataRouteTests(unittest.TestCase):
 
     def test_local_data_preview_rejects_unknown_kind(self) -> None:
         with self.assertRaises(local_data.HTTPException) as raised:
-            local_data.local_data_preview(kind="top1_sensitivity")
+            local_data.local_data_preview(kind="unknown_legacy_table")
 
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("Unsupported local data kind", str(raised.exception.detail))

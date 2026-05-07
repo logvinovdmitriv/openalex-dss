@@ -57,7 +57,7 @@ metrics: p, c, c_frac, h, i10, g, islv
 raw_works: 12
 n_authors: 5
 findings: 29
-report_scope_hash: 66b4ae366925c1bd
+report_scope_hash: 1f47352cd31b36c6
 ```
 
 `n_authors: 5` - это число авторов в зафиксированной Top-5 cohort, а не полное число авторов raw fixture. В fixture есть шестой автор, который не входит в Top-5 когорту по `h`.
@@ -65,7 +65,7 @@ report_scope_hash: 66b4ae366925c1bd
 Версии аналитических артефактов:
 
 ```text
-report_bundle_version: report_bundle_v11
+report_bundle_version: report_bundle_v12
 analysis_version: scientometrics_v4
 findings_version: scientometric_findings_v2
 conclusion_version: scientometric_conclusion_v3
@@ -96,7 +96,7 @@ validation/exports/validation_scientometric_mvp/top-outliers.csv
 validation/exports/validation_scientometric_mvp/findings.csv
 validation/exports/validation_scientometric_mvp/conclusion.md
 validation/exports/validation_scientometric_mvp/report_bundle.json
-runs/validation_scientometric_mvp/reports/report_66b4ae366925c1bd.json
+runs/validation_scientometric_mvp/reports/report_1f47352cd31b36c6.json
 ```
 
 Run-scoped pipeline artifacts:
@@ -108,8 +108,6 @@ runs/validation_scientometric_mvp/tables/work_topics.csv
 runs/validation_scientometric_mvp/tables/author_work.csv
 runs/validation_scientometric_mvp/tables/indices.csv
 runs/validation_scientometric_mvp/tables/ratings.csv
-runs/validation_scientometric_mvp/results/stats_summary.json
-runs/validation_scientometric_mvp/results/theory_validation.json
 runs/validation_scientometric_mvp/passports/slice_passport.json
 runs/validation_scientometric_mvp/passports/calculation_passport.json
 runs/validation_scientometric_mvp/passports/checksums.json
@@ -168,7 +166,7 @@ report_bundle.json: 9338 lines
 Контрольный fixture-прогон подтвердил, что MVP-контур выполняется end-to-end:
 
 1. OpenAlex-like Works JSONL импортируется как локальный dump.
-2. Run-scoped таблицы, индексы, рейтинги, паспорта и theory/statistics artifacts создаются.
+2. Run-scoped таблицы, индексы, рейтинги и паспорта создаются.
 3. Top-N cohort фиксируется с checksum.
 4. Scientometric analysis строится по тому же `run_id/dump_id/cohort_id/fraction_mode`.
 5. Report bundle получает тот же scope hash и включает `scientometric_analysis`.

@@ -18,10 +18,6 @@ PRIMARY_ARTIFACTS = [
     "data/marts/author_work_metrics.csv",
     "data/results/author_indices.csv",
     "data/results/rating_positions.csv",
-    "data/results/stats_summary.json",
-    "data/results/theory_validation.json",
-    "data/results/theory_top1_sensitivity.csv",
-    "data/results/theory_fraction_mode_sensitivity.csv",
     "data/passports/resolved_entity.json",
     "data/passports/fetch_meta.json",
     "data/passports/quality_report.json",
@@ -133,13 +129,6 @@ def build_passports(
     }
     indices = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"]
     experimental_indices = ["f5", "fm5", "iupv", "islv", "lrdi"]
-    theory_validation = [
-        "iupv_boundedness_monotonicity",
-        "remove_top1_per_author",
-        "fraction_mode_sensitivity",
-        "metric_concentration",
-        "prefix_convergence",
-    ]
     extra_formula = {
         "f5_fm5": {
             "status": "operational_definition_requires_primary_source_confirmation",
@@ -188,7 +177,6 @@ def build_passports(
         },
         "indices": indices,
         "experimental_indices": experimental_indices,
-        "theory_validation": theory_validation,
         **extra_formula,
         "software": {
             "python": platform.python_version(),

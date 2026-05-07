@@ -51,13 +51,7 @@ RUN_TABLE_ALIASES = {
     "rating_positions": "ratings",
     "authors_local_metrics": "indices",
 }
-RUN_RESULT_TABLES = {
-    "top1_sensitivity": "theory_top1_sensitivity",
-    "fraction_sensitivity": "theory_fraction_mode_sensitivity",
-}
 RUN_JSON_FILES = {
-    "stats": ("results", "stats_summary.json"),
-    "theory": ("results", "theory_validation.json"),
     "report_bundle": ("results", "report_bundle.json"),
     "fetch_meta": ("passports", "fetch_meta.json"),
     "quality": ("passports", "quality_report.json"),
@@ -1251,11 +1245,6 @@ def _run_table_path(run_id: str, table: str) -> Path | None:
     if canonical == "ratings":
         for suffix in (".parquet", ".csv"):
             candidates.append(run_dir / "tables" / f"rating_positions{suffix}")
-    if canonical in RUN_RESULT_TABLES:
-        stem = RUN_RESULT_TABLES[canonical]
-        for suffix in (".parquet", ".csv"):
-            candidates.append(run_dir / "tables" / f"{canonical}{suffix}")
-            candidates.append(run_dir / "results" / f"{stem}{suffix}")
     for candidate in candidates:
         if candidate.is_file():
             return candidate

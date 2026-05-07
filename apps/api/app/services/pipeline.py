@@ -22,18 +22,12 @@ from openalex_mvp.metrics import build_author_work_metrics, compute_indices  # n
 from openalex_mvp.normalize import normalize_raw  # noqa: E402
 from openalex_mvp.passports import build_passports  # noqa: E402
 from openalex_mvp.ranking import build_ratings  # noqa: E402
-from openalex_mvp.stats import analyze_stats  # noqa: E402
-from openalex_mvp.theory import analyze_theory  # noqa: E402
 
 
 COMPATIBILITY_LATEST_FILES = [
     *TABLE_FILES.values(),
     *PARQUET_TABLE_FILES.values(),
     *JSON_FILES.values(),
-    DATA / "results/stats_summary.json",
-    DATA / "results/theory_validation.json",
-    DATA / "results/theory_top1_sensitivity.csv",
-    DATA / "results/theory_fraction_mode_sensitivity.csv",
 ]
 
 
@@ -360,17 +354,12 @@ def _run_compute(
     input_table_checksums = _table_checksums(input_tables)
     run_dir = DATA / "runs" / _safe_id(run_id)
     run_tables = run_dir / "tables"
-    run_results = run_dir / "results"
     run_passports = run_dir / "passports"
-    run_figures = run_results / "figures"
     run_tables.mkdir(parents=True, exist_ok=True)
-    run_results.mkdir(parents=True, exist_ok=True)
 
     author_work_csv = run_tables / "author_work.csv"
     indices_csv = run_tables / "indices.csv"
     ratings_csv = run_tables / "ratings.csv"
-    stats_json = run_results / "stats_summary.json"
-    theory_json = run_results / "theory_validation.json"
 
     build_author_work_metrics(input_tables["works"], input_tables["authorships"], author_work_csv, cfg.fraction_modes, run_id=run_id)
     compute_indices(
@@ -383,32 +372,13 @@ def _run_compute(
         cfg.analysis_year,
     )
     build_ratings(indices_csv, ratings_csv)
-    analyze_stats(indices_csv, ratings_csv, run_figures, stats_json)
-    analyze_theory(
-        author_work_csv,
-        indices_csv,
-        theory_json,
-        run_results,
-        cfg.iupv_n0,
-        cfg.iupv_lambda,
-        cfg.lrdi_p0,
-        cfg.lrdi_lambda,
-        cfg.analysis_year,
-        cfg.fraction_mode_default,
-    )
     run_table_outputs = {
         "author_work": author_work_csv,
         "indices": indices_csv,
         "ratings": ratings_csv,
     }
-    run_result_outputs = {
-        "stats_summary": stats_json,
-        "theory_validation": theory_json,
-        "theory_top1_sensitivity": run_results / "theory_top1_sensitivity.csv",
-        "theory_fraction_mode_sensitivity": run_results / "theory_fraction_mode_sensitivity.csv",
-    }
     if _publish_latest_view_enabled():
-        _publish_latest_view(input_tables, run_table_outputs, run_result_outputs)
+        _publish_latest_view(input_tables, run_table_outputs)
     input_table_manifest = _table_manifest(input_tables, input_table_checksums)
     primary_artifacts = {
         "dump/tables/works.parquet": input_table_manifest.get("works"),
@@ -417,10 +387,6 @@ def _run_compute(
         "run/tables/author_work.csv": author_work_csv,
         "run/tables/indices.csv": indices_csv,
         "run/tables/ratings.csv": ratings_csv,
-        "run/results/stats_summary.json": stats_json,
-        "run/results/theory_validation.json": theory_json,
-        "run/results/theory_top1_sensitivity.csv": run_results / "theory_top1_sensitivity.csv",
-        "run/results/theory_fraction_mode_sensitivity.csv": run_results / "theory_fraction_mode_sensitivity.csv",
     }
     primary_artifacts.update(extra_primary_artifacts or {})
     build_passports(
@@ -443,12 +409,11 @@ def _run_compute(
         "input_tables": input_table_manifest,
         "input_table_checksums": input_table_checksums,
         "run_table_outputs": {key: str(path) for key, path in run_table_outputs.items()},
-        "run_result_outputs": {key: str(path) for key, path in run_result_outputs.items()},
         "passport_outputs": passport_outputs,
     }
 
 
-def _publish_latest_view(input_tables: dict[str, Path], run_tables: dict[str, Path], run_results: dict[str, Path]) -> None:
+def _publish_latest_view(input_tables: dict[str, Path], run_tables: dict[str, Path]) -> None:
     for name in ("works", "authorships", "work_topics"):
         target = PARQUET_TABLE_FILES.get(name)
         source = input_tables.get(name)
@@ -481,22 +446,6 @@ def _publish_latest_view(input_tables: dict[str, Path], run_tables: dict[str, Pa
             if source_parquet.is_file() and local_metrics_parquet_target:
                 Path(local_metrics_parquet_target).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source_parquet, local_metrics_parquet_target)
-
-    for name, source in run_results.items():
-        if not source.is_file():
-            continue
-        if name == "stats_summary":
-            target = DATA / "results" / "stats_summary.json"
-        elif name == "theory_validation":
-            target = DATA / "results" / "theory_validation.json"
-        elif name == "theory_top1_sensitivity":
-            target = DATA / "results" / "theory_top1_sensitivity.csv"
-        elif name == "theory_fraction_mode_sensitivity":
-            target = DATA / "results" / "theory_fraction_mode_sensitivity.csv"
-        else:
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
 
 
 def _publish_latest_view_enabled() -> bool:
@@ -557,7 +506,6 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
     tables_dir = DATA / "tables" / dump_id
     input_tables = payload.get("input_tables") if isinstance(payload.get("input_tables"), dict) else {}
     run_table_outputs = payload.get("run_table_outputs") if isinstance(payload.get("run_table_outputs"), dict) else {}
-    run_result_outputs = payload.get("run_result_outputs") if isinstance(payload.get("run_result_outputs"), dict) else {}
     passport_outputs = payload.get("passport_outputs") if isinstance(payload.get("passport_outputs"), dict) else {}
     copied: dict[str, str] = {}
 
@@ -575,7 +523,6 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "input_tables": input_tables,
         "input_table_checksums": payload.get("input_table_checksums") or {},
         "run_table_outputs": run_table_outputs,
-        "run_result_outputs": run_result_outputs,
         "passport_outputs": passport_outputs,
         "latest_view_note": "Global normalized/results paths are only the UI latest-view; reproducible artifacts are archived under this run_id and dump_id.",
     }
@@ -592,18 +539,6 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
         suffix = source.suffix or ".csv"
         rel = f"tables/{name}{suffix}"
         _copy_or_record_artifact(source, run_dir / rel, copied, rel)
-
-    run_result_filenames = {
-        "stats_summary": "stats_summary.json",
-        "theory_validation": "theory_validation.json",
-        "theory_top1_sensitivity": "theory_top1_sensitivity.csv",
-        "theory_fraction_mode_sensitivity": "theory_fraction_mode_sensitivity.csv",
-    }
-    for name, filename in run_result_filenames.items():
-        source = _artifact_path(run_result_outputs.get(name))
-        if source:
-            rel = f"results/{filename}"
-            _copy_or_record_artifact(source, run_dir / rel, copied, rel)
 
     run_passport_filenames = {
         "slice_passport": "slice_passport.json",
