@@ -147,26 +147,24 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     quality, dump_table_sources, quality_report = _normalize_dump_to_scope(source, dump_id)
     input_tables = _materialize_dump_tables_from_sources(dump_id, dump_table_sources)
     source_type = "openalex_cli_dump_import" if dump_manifest else "local_file"
-    write_json(
-        DATA / "passports/fetch_meta.json",
-        {
-            "source_type": source_type,
-            "source_entity": "works",
-            "source_file": profile,
-            "dump_id": payload.get("dump_id") or dump_manifest.get("dump_id"),
-            "dump_manifest_path": str(Path(str(dump_manifest.get("raw_jsonl") or source)).with_name("dump_manifest.json")) if dump_manifest else "",
-            "raw_jsonl_sha256": dump_manifest.get("raw_jsonl_sha256") or profile.get("sha256"),
-            "openalex_filter": ((dump_manifest.get("openalex_request") or {}).get("filter") if dump_manifest else "") or "",
-            "accepted_estimate_signature": ((dump_manifest.get("signatures") or {}).get("accepted_estimate_signature") if dump_manifest else None),
-            "accepted_download_signature": ((dump_manifest.get("signatures") or {}).get("accepted_download_signature") if dump_manifest else None),
-            "analysis_eligibility": analysis_eligibility,
-            "import_mode": import_mode,
-            "fetched_works": quality.get("raw_works"),
-            "total_available": quality.get("raw_works"),
-            "filter": "импорт OpenAlex CLI mini-dump" if dump_manifest else "локальный импорт дампа OpenAlex Works",
-            "used_api_key": bool(dump_manifest.get("used_api_key")) if dump_manifest else False,
-        },
-    )
+    fetch_meta = {
+        "source_type": source_type,
+        "source_entity": "works",
+        "source_file": profile,
+        "dump_id": dump_id,
+        "dump_manifest_path": str(Path(str(dump_manifest.get("raw_jsonl") or source)).with_name("dump_manifest.json")) if dump_manifest else "",
+        "raw_jsonl_sha256": dump_manifest.get("raw_jsonl_sha256") or profile.get("sha256"),
+        "openalex_filter": ((dump_manifest.get("openalex_request") or {}).get("filter") if dump_manifest else "") or "",
+        "accepted_estimate_signature": ((dump_manifest.get("signatures") or {}).get("accepted_estimate_signature") if dump_manifest else None),
+        "accepted_download_signature": ((dump_manifest.get("signatures") or {}).get("accepted_download_signature") if dump_manifest else None),
+        "analysis_eligibility": analysis_eligibility,
+        "import_mode": import_mode,
+        "fetched_works": quality.get("raw_works"),
+        "total_available": quality.get("raw_works"),
+        "filter": "импорт OpenAlex CLI mini-dump" if dump_manifest else "локальный импорт дампа OpenAlex Works",
+        "used_api_key": bool(dump_manifest.get("used_api_key")) if dump_manifest else False,
+    }
+    fetch_meta_path = _write_dump_fetch_meta(dump_id, fetch_meta)
     run_id = str(payload.get("run_id") or "local_file")
     compute = _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
     _write_pipeline_summary("import_local_file", cfg, {**payload, "run_id": run_id, "source_file": profile, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
@@ -177,6 +175,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             "run_id": run_id,
             "source_file": profile,
             "dump_id": dump_id,
+            "fetch_meta": str(fetch_meta_path),
             "quality_report": str(quality_report),
             "analysis_eligibility": analysis_eligibility,
             "active_context_source": str(payload.get("active_context_source") or "import_local_file"),
@@ -191,6 +190,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         "archive": archive,
         "report": report,
         "analysis_eligibility": analysis_eligibility,
+        "fetch_meta": str(fetch_meta_path),
         "quality_report": str(quality_report),
         "input_tables": compute["input_tables"],
     }
@@ -275,6 +275,14 @@ def _dump_scoped_parquet_sources(dump_id: str) -> dict[str, Path]:
         "authorships": base / "authorships_flat.parquet",
         "work_topics": base / "work_topics_flat.parquet",
     }
+
+
+def _write_dump_fetch_meta(dump_id: str, fetch_meta: dict[str, Any]) -> Path:
+    dump_dir = DATA / "dumps" / _safe_id(str(dump_id or ""))
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    path = dump_dir / "fetch_meta.json"
+    write_json(path, fetch_meta)
+    return path
 
 
 def _materialize_dump_tables_from_sources(dump_id: str, sources: dict[str, Path]) -> dict[str, Path]:
@@ -564,13 +572,9 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
     if quality_report:
         _copy_or_record_artifact(quality_report, run_dir / "passports" / "quality_report.json", copied, "passports/quality_report.json")
 
-    passport_artifacts = {
-        "passports/fetch_meta.json": JSON_FILES.get("fetch_meta"),
-    }
-    for rel, path in passport_artifacts.items():
-        source = _artifact_path(path)
-        if source:
-            _copy_or_record_artifact(source, run_dir / rel, copied, rel)
+    fetch_meta = _artifact_path(payload.get("fetch_meta")) or _artifact_path(dump_dir / "fetch_meta.json")
+    if fetch_meta:
+        _copy_or_record_artifact(fetch_meta, run_dir / "passports" / "fetch_meta.json", copied, "passports/fetch_meta.json")
 
     for name in ("works", "authorships", "work_topics"):
         source = _artifact_path(input_tables.get(name))

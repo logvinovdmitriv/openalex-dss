@@ -15,6 +15,7 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 | `dumps/{dump_id}/normalized/*.csv` | canonical | dump | dump-scoped normalized CSV staging for import |
 | `dumps/{dump_id}/parquet/*_flat.parquet` | canonical | dump | dump-scoped normalized parquet staging for canonical tables |
 | `dumps/{dump_id}/quality_report.json` | canonical | dump | normalization quality report for the local corpus |
+| `dumps/{dump_id}/fetch_meta.json` | canonical | dump | import/fetch provenance for the local corpus |
 | `tables/{dump_id}/works.parquet` | canonical | dump | local-data preview, ranking/scientometrics input |
 | `tables/{dump_id}/authorships.parquet` | canonical | dump | local-data preview, author-work materialization |
 | `tables/{dump_id}/work_topics.parquet` | canonical | dump | topic diagnostics for the local corpus |
@@ -42,6 +43,9 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   `dumps/{dump_id}/parquet`, then materialize canonical parquet tables under
   `tables/{dump_id}`. The import path does not use global `data/normalized` or
   `data/parquet` as staging.
+- Import/fetch metadata is written under `dumps/{dump_id}/fetch_meta.json` and
+  copied into `runs/{run_id}/passports/fetch_meta.json` from that scoped source.
+  The global `data/passports/fetch_meta.json` path is legacy-only.
 - `run_id` owns derived calculations: author-work rows, author indices,
   ratings, run passports, and run-local diagnostic outputs.
 - Slice, calculation and checksum passports are written directly under

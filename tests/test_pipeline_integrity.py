@@ -176,12 +176,13 @@ class PipelineIntegrityTests(unittest.TestCase):
                     }
                 )
 
-            fetch_meta = json.loads((root / "data/passports/fetch_meta.json").read_text(encoding="utf-8"))
+            fetch_meta = json.loads((root / "data/dumps/dump_ctx/fetch_meta.json").read_text(encoding="utf-8"))
             self.assertEqual(fetch_meta["source_type"], "openalex_cli_dump_import")
             self.assertEqual(fetch_meta["dump_id"], "dump_ctx")
             self.assertEqual(fetch_meta["openalex_filter"], "primary_topic.subfield.id:1706")
             self.assertEqual(fetch_meta["accepted_download_signature"], "download-ok")
             self.assertEqual(fetch_meta["analysis_eligibility"]["status"], "blocked_not_for_final_analysis")
+            self.assertFalse((root / "data/passports/fetch_meta.json").exists())
 
     def test_import_local_file_normalizes_dump_tables_under_dump_scope(self) -> None:
         captured: dict[str, object] = {}
@@ -233,9 +234,13 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertTrue((tables_dir / "authorships.parquet").is_file())
             self.assertTrue((tables_dir / "work_topics.parquet").is_file())
             self.assertTrue((dump_dir / "quality_report.json").is_file())
+            self.assertTrue((dump_dir / "fetch_meta.json").is_file())
             self.assertFalse((data / "normalized" / "works_flat.csv").exists())
+            self.assertFalse((data / "passports" / "fetch_meta.json").exists())
             self.assertEqual(Path(captured["input_tables"]["works"]), tables_dir / "works.parquet")
+            self.assertEqual(captured["archive_payload"]["fetch_meta"], str(dump_dir / "fetch_meta.json"))
             self.assertEqual(captured["archive_payload"]["quality_report"], str(dump_dir / "quality_report.json"))
+            self.assertEqual(result["fetch_meta"], str(dump_dir / "fetch_meta.json"))
             self.assertEqual(result["quality_report"], str(dump_dir / "quality_report.json"))
 
     def test_build_blocks_ineligible_dump_without_dev_override(self) -> None:
@@ -782,6 +787,39 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual(archive["copied"]["passports/calculation_passport.json"], str(run_passports / "calculation_passport.json"))
             self.assertEqual(archive["copied"]["passports/checksums.json"], str(run_passports / "checksums.json"))
             self.assertEqual(manifest["passport_outputs"]["slice_passport"], passport_outputs["slice_passport"])
+
+    def test_archive_copies_fetch_meta_from_scoped_dump_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump_dir = root / "dumps" / "dump_fetch"
+            dump_dir.mkdir(parents=True)
+            legacy = root / "passports" / "fetch_meta.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text(json.dumps({"source": "legacy"}), encoding="utf-8")
+            scoped = dump_dir / "fetch_meta.json"
+            scoped.write_text(json.dumps({"source": "scoped"}), encoding="utf-8")
+
+            cfg = SimpleNamespace(slice_name="slice_fetch")
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "TABLE_FILES", {}),
+                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
+                patch.object(pipeline, "JSON_FILES", {"fetch_meta": legacy}),
+            ):
+                archive = pipeline._archive_run_artifacts(
+                    cfg,
+                    {
+                        "run_id": "run_fetch",
+                        "dump_id": "dump_fetch",
+                        "fetch_meta": str(scoped),
+                        "input_tables": {},
+                        "input_table_checksums": {},
+                    },
+                )
+
+            run_fetch_meta = root / "runs" / "run_fetch" / "passports" / "fetch_meta.json"
+            self.assertEqual(json.loads(run_fetch_meta.read_text(encoding="utf-8"))["source"], "scoped")
+            self.assertEqual(archive["copied"]["passports/fetch_meta.json"], str(run_fetch_meta))
 
     def test_archive_preserves_unknown_active_context_eligibility_as_null(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
