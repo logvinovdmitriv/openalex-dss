@@ -51,6 +51,7 @@ import {
   LOCAL_DATA_KIND_OPTIONS,
   localDataPreviewCsvUrl,
   localDataPreviewUrl,
+  localDataNoScopeWarnings,
   localDataSummaryUrl,
   mutationError,
   pageLead,
@@ -547,6 +548,7 @@ function Workbench() {
           <LocalDataPage
             workbench={workbench.data}
             dumps={dumps.data}
+            localDataSummary={localDataSummary.data}
             tables={tables}
             localDataKind={localDataKind}
             setLocalDataKind={setLocalDataKind}
@@ -902,6 +904,7 @@ function SlicesPage({
 function LocalDataPage({
   workbench,
   dumps,
+  localDataSummary,
   tables,
   localDataKind,
   setLocalDataKind,
@@ -921,6 +924,7 @@ function LocalDataPage({
 }: {
   workbench?: WorkbenchState;
   dumps: any;
+  localDataSummary?: LocalDataSummary;
   tables: any;
   localDataKind: LocalDataKind;
   setLocalDataKind: (value: LocalDataKind) => void;
@@ -940,6 +944,7 @@ function LocalDataPage({
 }) {
   const dumpRows = dumps?.dumps ?? workbench?.dumps ?? [];
   const totalRawMb = dumpRows.reduce((sum: number, dump: any) => sum + bytesToMb(Number(dump.bytes_written ?? dump.raw_size_bytes ?? 0)), 0);
+  const noScopeWarnings = localDataNoScopeWarnings(localDataSummary, table);
   return (
     <div className="stack">
       <section className="metric-grid">
@@ -954,6 +959,14 @@ function LocalDataPage({
         effectiveRunId={effectiveRunId}
         effectiveDumpId={effectiveDumpId}
       />
+      {noScopeWarnings.length > 0 && (
+        <section className="notice warn">
+          <b>Невоспроизводимый preview локальных данных</b>
+          <ul className="plain-list">
+            {noScopeWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </section>
+      )}
       <section className="panel">
         <div className="panel-head split">
           <div>
