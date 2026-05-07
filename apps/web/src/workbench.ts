@@ -196,13 +196,13 @@ export function effectiveUiScope(params: {
   const explicitDumpId = String(params.dumpId ?? "").trim();
   const activeRunId = String(params.activeContext?.active_run_id ?? "").trim();
   const activeDumpId = String(params.activeContext?.active_dump_id ?? "").trim();
-  const hasExplicit = Boolean(explicitRunId || explicitDumpId);
-  const hasActiveContext = Boolean(activeRunId || activeDumpId);
-  return {
-    runId: explicitRunId || activeRunId,
-    dumpId: explicitDumpId || activeDumpId,
-    source: hasExplicit ? "explicit" : hasActiveContext ? "active_context" : "none",
-  };
+  if (explicitRunId || explicitDumpId) {
+    return { runId: explicitRunId, dumpId: explicitDumpId, source: "explicit" };
+  }
+  if (activeRunId || activeDumpId) {
+    return { runId: activeRunId, dumpId: activeDumpId, source: "active_context" };
+  }
+  return { runId: "", dumpId: "", source: "none" };
 }
 
 export type LocalDataSummary = {

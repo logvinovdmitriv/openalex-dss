@@ -197,7 +197,7 @@ function Workbench() {
   const effectiveRunId = uiScope.runId;
   const effectiveDumpId = uiScope.dumpId;
   const usingActiveContextScope = uiScope.source === "active_context";
-  const scopeReady = Boolean(runId || activeDumpId || workbench.isSuccess);
+  const scopeReady = Boolean(effectiveRunId || effectiveDumpId);
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
   const scientometricMetricKey = useMemo(() => scientometricMetrics.join(","), [scientometricMetrics]);
   const localDataSummary = useQuery({
@@ -210,7 +210,7 @@ function Workbench() {
     queryFn: () => getJson<any>(cohortStatisticsUrl(selectedCohortId, filters, fractionMode, effectiveRunId, effectiveDumpId, cohortFilterPolicy)),
     enabled: Boolean(selectedCohortId) && scopeReady,
   });
-  const hasLocalAnalyticsData = Boolean(effectiveRunId || effectiveDumpId || workbench.data?.tables?.author_work?.rows || workbench.data?.tables?.indices?.rows);
+  const hasLocalAnalyticsData = scopeReady;
   const table = useQuery({
     queryKey: ["local-data-preview", localDataKind, tableQ, topN, effectiveRunId, effectiveDumpId],
     queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: tableQ, runId: effectiveRunId, dumpId: effectiveDumpId, limit: Math.max(1, topN || 1) })),
@@ -592,6 +592,8 @@ function Workbench() {
             onRecalculate={() => recalculate.mutate()}
             canRecalculate={Boolean(effectiveDumpId)}
             recalculating={recalculate.isPending || running}
+            usingActiveContextScope={usingActiveContextScope}
+            effectiveDumpId={effectiveDumpId}
           />
         )}
 
@@ -1161,6 +1163,8 @@ function RankingsPage({
   onRecalculate,
   canRecalculate,
   recalculating,
+  usingActiveContextScope,
+  effectiveDumpId,
 }: {
   metric: string;
   setMetric: (value: string) => void;
@@ -1177,6 +1181,8 @@ function RankingsPage({
   onRecalculate: () => void;
   canRecalculate: boolean;
   recalculating: boolean;
+  usingActiveContextScope: boolean;
+  effectiveDumpId: string;
 }) {
   return (
     <div className="stack">
@@ -1211,6 +1217,12 @@ function RankingsPage({
           <b>Текущая аналитическая выборка</b>
           <span>Этот рейтинг пересчитывается поверх выбранного dump/run с учетом активных фильтров. Физические таблицы без аналитической фильтрации находятся во вкладке “Данные”.</span>
         </div>
+        {usingActiveContextScope && effectiveDumpId && (
+          <div className="notice">
+            <b>Пересчет по активному контексту</b>
+            <span>Если запустить расчет сейчас, будет использован активный dump_id: {effectiveDumpId}.</span>
+          </div>
+        )}
       </section>
       <section className="chart-table-grid">
         <div className="panel">
