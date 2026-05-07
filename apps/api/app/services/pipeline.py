@@ -144,14 +144,8 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             "Локальный дамп пуст: OpenAlex вернул 0 работ для выбранных фильтров. "
             "Расширьте период, уберите организацию или выберите более широкую предметную область."
         )
-    quality = normalize_raw(
-        source,
-        DATA / "normalized/works_flat.csv",
-        DATA / "normalized/authorships_flat.csv",
-        DATA / "passports/quality_report.json",
-        DATA / "normalized/work_topics_flat.csv",
-    )
-    input_tables = _materialize_dump_tables(dump_id)
+    quality, dump_table_sources, quality_report = _normalize_dump_to_scope(source, dump_id)
+    input_tables = _materialize_dump_tables_from_sources(dump_id, dump_table_sources)
     source_type = "openalex_cli_dump_import" if dump_manifest else "local_file"
     write_json(
         DATA / "passports/fetch_meta.json",
@@ -183,13 +177,23 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             "run_id": run_id,
             "source_file": profile,
             "dump_id": dump_id,
+            "quality_report": str(quality_report),
             "analysis_eligibility": analysis_eligibility,
             "active_context_source": str(payload.get("active_context_source") or "import_local_file"),
             **compute,
         },
     )
     report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
-    return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
+    return {
+        "status": "ok",
+        "mode": "import_local_file",
+        "source": profile,
+        "archive": archive,
+        "report": report,
+        "analysis_eligibility": analysis_eligibility,
+        "quality_report": str(quality_report),
+        "input_tables": compute["input_tables"],
+    }
 
 
 def preview(payload: dict[str, Any]) -> dict[str, Any]:
@@ -244,6 +248,48 @@ def _materialize_dump_tables(dump_id: str) -> dict[str, Path]:
         source = PARQUET_TABLE_FILES.get(name)
         if not source or not Path(source).is_file():
             raise FileNotFoundError(f"Не удалось материализовать dump_id={dump_id}: отсутствует parquet-таблица {name}.")
+        shutil.copy2(Path(source), target_dir / filename)
+    return resolve_dump_tables(safe_dump_id, required=True)
+
+
+def _normalize_dump_to_scope(source: Path, dump_id: str) -> tuple[dict[str, Any], dict[str, Path], Path]:
+    safe_dump_id = _safe_id(str(dump_id or ""))
+    dump_dir = DATA / "dumps" / safe_dump_id
+    normalized_dir = dump_dir / "normalized"
+    normalized_dir.mkdir(parents=True, exist_ok=True)
+    quality_report = dump_dir / "quality_report.json"
+    quality = normalize_raw(
+        source,
+        normalized_dir / "works_flat.csv",
+        normalized_dir / "authorships_flat.csv",
+        quality_report,
+        normalized_dir / "work_topics_flat.csv",
+    )
+    return quality, _dump_scoped_parquet_sources(safe_dump_id), quality_report
+
+
+def _dump_scoped_parquet_sources(dump_id: str) -> dict[str, Path]:
+    base = DATA / "dumps" / _safe_id(str(dump_id or "")) / "parquet"
+    return {
+        "works": base / "works_flat.parquet",
+        "authorships": base / "authorships_flat.parquet",
+        "work_topics": base / "work_topics_flat.parquet",
+    }
+
+
+def _materialize_dump_tables_from_sources(dump_id: str, sources: dict[str, Path]) -> dict[str, Path]:
+    safe_dump_id = _safe_id(str(dump_id or ""))
+    target_dir = DATA / "tables" / safe_dump_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    mapping = {
+        "works": "works.parquet",
+        "authorships": "authorships.parquet",
+        "work_topics": "work_topics.parquet",
+    }
+    for name, filename in mapping.items():
+        source = sources.get(name)
+        if not source or not Path(source).is_file():
+            raise FileNotFoundError(f"Не удалось материализовать dump_id={dump_id}: отсутствует dump-scoped parquet-таблица {name}.")
         shutil.copy2(Path(source), target_dir / filename)
     return resolve_dump_tables(safe_dump_id, required=True)
 
@@ -514,9 +560,12 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
             rel = f"passports/{filename}"
             _copy_or_record_artifact(source, run_dir / rel, copied, rel)
 
+    quality_report = _artifact_path(payload.get("quality_report")) or _artifact_path(dump_dir / "quality_report.json")
+    if quality_report:
+        _copy_or_record_artifact(quality_report, run_dir / "passports" / "quality_report.json", copied, "passports/quality_report.json")
+
     passport_artifacts = {
         "passports/fetch_meta.json": JSON_FILES.get("fetch_meta"),
-        "passports/quality_report.json": JSON_FILES.get("quality"),
     }
     for rel, path in passport_artifacts.items():
         source = _artifact_path(path)

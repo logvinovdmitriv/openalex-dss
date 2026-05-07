@@ -183,6 +183,61 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual(fetch_meta["accepted_download_signature"], "download-ok")
             self.assertEqual(fetch_meta["analysis_eligibility"]["status"], "blocked_not_for_final_analysis")
 
+    def test_import_local_file_normalizes_dump_tables_under_dump_scope(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_compute(*args: object, **kwargs: object) -> dict[str, object]:
+            captured["input_tables"] = kwargs["input_tables"]
+            return {"input_tables": {}, "input_table_checksums": {}, "passport_outputs": {}}
+
+        def fake_archive(_cfg: object, payload: dict[str, object]) -> dict[str, object]:
+            captured["archive_payload"] = payload
+            return {"run_id": "run_dump_scope", "dump_id": "dump_scope"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "works.jsonl"
+            raw.write_text(json.dumps(_work("W1")) + "\n", encoding="utf-8")
+            profile = {"path": str(raw), "bytes": raw.stat().st_size, "sha256": "raw-sha"}
+
+            with (
+                patch.object(pipeline, "DATA", root / "data"),
+                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
+                patch.object(pipeline, "resolve_safe_path", return_value=raw),
+                patch.object(pipeline, "file_profile", return_value=profile),
+                patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
+                patch.object(pipeline, "_archive_run_artifacts", side_effect=fake_archive),
+                patch.object(pipeline, "_write_pipeline_summary", return_value=None),
+                patch.object(pipeline.reports, "build_report_bundle", return_value={}),
+            ):
+                result = pipeline.import_local_file(
+                    {
+                        "source_path": str(raw),
+                        "run_id": "run_dump_scope",
+                        "dump_id": "dump_scope",
+                        "entity_level": "subfield",
+                        "entity_id_short": "1706",
+                        "entity_display_name": "Computer Science Applications",
+                    }
+                )
+
+            data = root / "data"
+            dump_dir = data / "dumps" / "dump_scope"
+            tables_dir = data / "tables" / "dump_scope"
+
+            self.assertTrue((dump_dir / "normalized" / "works_flat.csv").is_file())
+            self.assertTrue((dump_dir / "normalized" / "authorships_flat.csv").is_file())
+            self.assertTrue((dump_dir / "normalized" / "work_topics_flat.csv").is_file())
+            self.assertTrue((dump_dir / "parquet" / "works_flat.parquet").is_file())
+            self.assertTrue((tables_dir / "works.parquet").is_file())
+            self.assertTrue((tables_dir / "authorships.parquet").is_file())
+            self.assertTrue((tables_dir / "work_topics.parquet").is_file())
+            self.assertTrue((dump_dir / "quality_report.json").is_file())
+            self.assertFalse((data / "normalized" / "works_flat.csv").exists())
+            self.assertEqual(Path(captured["input_tables"]["works"]), tables_dir / "works.parquet")
+            self.assertEqual(captured["archive_payload"]["quality_report"], str(dump_dir / "quality_report.json"))
+            self.assertEqual(result["quality_report"], str(dump_dir / "quality_report.json"))
+
     def test_build_blocks_ineligible_dump_without_dev_override(self) -> None:
         dump = {
             "dump_id": "dump_bad",

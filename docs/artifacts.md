@@ -12,6 +12,9 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 | `raw/openalex_cli/{slice_id}/works.jsonl.gz` | canonical | dump | OpenAlex CLI materialization, immutable raw mini-dump |
 | `raw/openalex_cli/{slice_id}/dump_manifest.json` | canonical | dump | download provenance, signatures, final-analysis eligibility |
 | `dumps/{dump_id}/dump_manifest.json` | canonical | dump | reproducibility checks and analysis eligibility recovery |
+| `dumps/{dump_id}/normalized/*.csv` | canonical | dump | dump-scoped normalized CSV staging for import |
+| `dumps/{dump_id}/parquet/*_flat.parquet` | canonical | dump | dump-scoped normalized parquet staging for canonical tables |
+| `dumps/{dump_id}/quality_report.json` | canonical | dump | normalization quality report for the local corpus |
 | `tables/{dump_id}/works.parquet` | canonical | dump | local-data preview, ranking/scientometrics input |
 | `tables/{dump_id}/authorships.parquet` | canonical | dump | local-data preview, author-work materialization |
 | `tables/{dump_id}/work_topics.parquet` | canonical | dump | topic diagnostics for the local corpus |
@@ -35,6 +38,10 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 
 - `dump_id` owns the local corpus: raw manifest plus `works`,
   `authorships`, and `work_topics`.
+- Raw imports normalize directly into `dumps/{dump_id}/normalized` and
+  `dumps/{dump_id}/parquet`, then materialize canonical parquet tables under
+  `tables/{dump_id}`. The import path does not use global `data/normalized` or
+  `data/parquet` as staging.
 - `run_id` owns derived calculations: author-work rows, author indices,
   ratings, run passports, and run-local diagnostic outputs.
 - Slice, calculation and checksum passports are written directly under
