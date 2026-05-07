@@ -1739,6 +1739,35 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertEqual(captured["mode"], "fetch_slice_dump")
 
+    def test_compatibility_latest_cleanup_preserves_scoped_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            latest_table = root / "normalized" / "works_flat.csv"
+            latest_summary = root / "passports" / "pipeline_summary.json"
+            legacy_checksum = root / "checksums" / "slice_a" / "sha256_manifest.txt"
+            legacy_report = root / "reports" / "old_report.json"
+            legacy_figure = root / "results" / "figures" / "plot.png"
+            scoped_run = root / "runs" / "run_a" / "passports" / "pipeline_summary.json"
+            scoped_dump = root / "dumps" / "dump_a" / "fetch_meta.json"
+            scoped_table = root / "tables" / "dump_a" / "works.parquet"
+            for path in (latest_table, latest_summary, legacy_checksum, legacy_report, legacy_figure, scoped_run, scoped_dump, scoped_table):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("artifact", encoding="utf-8")
+
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "COMPATIBILITY_LATEST_FILES", [latest_table, latest_summary]),
+            ):
+                result = pipeline.clear_compatibility_latest_view()
+                alias_result = pipeline.clear_generated_data()
+
+            self.assertEqual(result["mode"], "clear_compatibility_latest_view")
+            self.assertEqual(alias_result["mode"], "clear_compatibility_latest_view")
+            for removed in (latest_table, latest_summary, legacy_checksum, legacy_report, legacy_figure):
+                self.assertFalse(removed.exists(), str(removed))
+            for kept in (scoped_run, scoped_dump, scoped_table):
+                self.assertTrue(kept.exists(), str(kept))
+
     def test_final_local_import_requires_final_eligible_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

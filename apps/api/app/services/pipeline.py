@@ -26,7 +26,7 @@ from openalex_mvp.stats import analyze_stats  # noqa: E402
 from openalex_mvp.theory import analyze_theory  # noqa: E402
 
 
-GENERATED_FILES = [
+COMPATIBILITY_LATEST_FILES = [
     *TABLE_FILES.values(),
     *PARQUET_TABLE_FILES.values(),
     *JSON_FILES.values(),
@@ -226,9 +226,9 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
     return author_slice.preview(payload)
 
 
-def clear_generated_data() -> dict[str, Any]:
+def clear_compatibility_latest_view() -> dict[str, Any]:
     removed: list[str] = []
-    for path in GENERATED_FILES:
+    for path in COMPATIBILITY_LATEST_FILES:
         if path.exists() and path.is_file():
             path.unlink()
             removed.append(_display_path(path))
@@ -243,7 +243,11 @@ def clear_generated_data() -> dict[str, Any]:
         if fig.is_file():
             fig.unlink()
             removed.append(_display_path(fig))
-    return {"status": "ok", "mode": "clear_generated_data", "removed": removed}
+    return {"status": "ok", "mode": "clear_compatibility_latest_view", "removed": removed}
+
+
+def clear_generated_data() -> dict[str, Any]:
+    return clear_compatibility_latest_view()
 
 
 def resolve_dump_tables(dump_id: str, *, required: bool = True) -> dict[str, Path]:
