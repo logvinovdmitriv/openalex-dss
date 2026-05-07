@@ -423,6 +423,9 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
     run_dir = DATA / "runs" / run_id
     dump_dir = DATA / "dumps" / dump_id
     tables_dir = DATA / "tables" / dump_id
+    input_tables = payload.get("input_tables") if isinstance(payload.get("input_tables"), dict) else {}
+    run_table_outputs = payload.get("run_table_outputs") if isinstance(payload.get("run_table_outputs"), dict) else {}
+    run_result_outputs = payload.get("run_result_outputs") if isinstance(payload.get("run_result_outputs"), dict) else {}
     copied: dict[str, str] = {}
 
     for base in (run_dir, dump_dir, tables_dir):
@@ -436,8 +439,10 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "dump_manifest": payload.get("dump_manifest"),
         "analysis_eligibility": payload.get("analysis_eligibility"),
         "input_dump_id": payload.get("input_dump_id") or dump_id,
-        "input_tables": payload.get("input_tables") or {},
+        "input_tables": input_tables,
         "input_table_checksums": payload.get("input_table_checksums") or {},
+        "run_table_outputs": run_table_outputs,
+        "run_result_outputs": run_result_outputs,
         "latest_view_note": "Global normalized/results paths are only the UI latest-view; reproducible artifacts are archived under this run_id and dump_id.",
     }
     write_json(run_dir / "metric_run.json", manifest)
@@ -446,34 +451,44 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
     elif not (dump_dir / "dump_manifest.json").exists():
         write_json(dump_dir / "dump_manifest_recovered.json", manifest)
 
-    run_artifacts = {
-        **{f"tables/{name}{Path(path).suffix}": path for name, path in TABLE_FILES.items()},
-        **{f"tables/{name}{Path(path).suffix}": path for name, path in PARQUET_TABLE_FILES.items()},
-        **{f"passports/{name}.json": path for name, path in JSON_FILES.items() if name != "report_bundle"},
+    for name in ("author_work", "indices", "ratings"):
+        source = _artifact_path(run_table_outputs.get(name))
+        if not source:
+            continue
+        suffix = source.suffix or ".csv"
+        rel = f"tables/{name}{suffix}"
+        _copy_or_record_artifact(source, run_dir / rel, copied, rel)
+
+    run_result_filenames = {
+        "stats_summary": "stats_summary.json",
+        "theory_validation": "theory_validation.json",
+        "theory_top1_sensitivity": "theory_top1_sensitivity.csv",
+        "theory_fraction_mode_sensitivity": "theory_fraction_mode_sensitivity.csv",
+    }
+    for name, filename in run_result_filenames.items():
+        source = _artifact_path(run_result_outputs.get(name))
+        if source:
+            rel = f"results/{filename}"
+            _copy_or_record_artifact(source, run_dir / rel, copied, rel)
+
+    passport_artifacts = {
+        "passports/fetch_meta.json": JSON_FILES.get("fetch_meta"),
+        "passports/quality_report.json": JSON_FILES.get("quality"),
+        "passports/checksums.json": JSON_FILES.get("checksums"),
+        "passports/pipeline_summary.json": JSON_FILES.get("pipeline"),
         "passports/slice_passport.json": DATA / "passports/slice_passport.json",
         "passports/calculation_passport.json": DATA / "passports/calculation_passport.json",
-        "passports/quality_report.json": DATA / "passports/quality_report.json",
     }
-    for rel, path in run_artifacts.items():
-        source = Path(path)
-        if source.is_file():
-            target = run_dir / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-            copied[rel] = str(target)
+    for rel, path in passport_artifacts.items():
+        source = _artifact_path(path)
+        if source:
+            _copy_or_record_artifact(source, run_dir / rel, copied, rel)
 
-    dump_tables = {
-        "works.parquet": PARQUET_TABLE_FILES.get("works"),
-        "authorships.parquet": PARQUET_TABLE_FILES.get("authorships"),
-        "work_topics.parquet": PARQUET_TABLE_FILES.get("work_topics"),
-        "author_work.parquet": PARQUET_TABLE_FILES.get("author_work"),
-    }
-    for rel, path in dump_tables.items():
-        source = Path(path) if path else None
-        if source and source.is_file():
-            target = tables_dir / rel
-            shutil.copy2(source, target)
-            copied[f"tables_by_dump/{rel}"] = str(target)
+    for name in ("works", "authorships", "work_topics"):
+        source = _artifact_path(input_tables.get(name))
+        if source:
+            rel = f"{name}.parquet"
+            _copy_or_record_artifact(source, tables_dir / rel, copied, f"tables_by_dump/{rel}")
 
     eligibility = payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else {}
     allowed_for_final_analysis = eligibility.get("allowed_for_final_analysis")
@@ -502,6 +517,21 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "active_context": active_context,
         "copied": copied,
     }
+
+
+def _artifact_path(value: Any) -> Path | None:
+    raw = value.get("path") if isinstance(value, dict) else value
+    if not raw:
+        return None
+    path = Path(str(raw))
+    return path if path.is_file() else None
+
+
+def _copy_or_record_artifact(source: Path, target: Path, copied: dict[str, str], rel: str) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() != target.resolve():
+        shutil.copy2(source, target)
+    copied[rel] = str(target)
 
 
 def _dump_id_from_payload(payload: dict[str, Any]) -> str:

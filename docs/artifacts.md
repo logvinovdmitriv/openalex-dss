@@ -33,6 +33,11 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   `authorships`, and `work_topics`.
 - `run_id` owns derived calculations: author-work rows, author indices,
   ratings, run passports, and run-local diagnostic outputs.
+- Run archiving records/copies `run_id` artifacts from scoped compute outputs
+  and dump tables from the scoped input table manifest. It does not use
+  compatibility latest-view table paths as the archive source.
+- `author_work` belongs to `run_id`; it must not be archived as a dump-owned
+  table under `tables/{dump_id}`.
 - `report_scope_hash` owns report reproducibility for a selected metric,
   filters, cohort, baseline, rank Top-N, and scientometric version set.
 - Latest-view files are compatibility artifacts. They are not a stable source

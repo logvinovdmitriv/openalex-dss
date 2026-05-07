@@ -535,6 +535,80 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(active["analysis_eligibility_status"], "dev_only_not_for_final_analysis")
         self.assertEqual(active["allowed_for_final_analysis"], False)
 
+    def test_archive_uses_scoped_outputs_without_latest_table_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            latest = root / "latest"
+            latest.mkdir()
+            latest_author_work = latest / "author_work.parquet"
+            latest_author_work.write_text("legacy author_work", encoding="utf-8")
+            latest_stats = latest / "stats_summary.json"
+            latest_stats.write_text(json.dumps({"source": "latest"}), encoding="utf-8")
+
+            scoped_inputs = root / "scoped_inputs"
+            scoped_outputs = root / "scoped_outputs"
+            scoped_inputs.mkdir()
+            (scoped_outputs / "tables").mkdir(parents=True)
+            (scoped_outputs / "results").mkdir(parents=True)
+            input_tables: dict[str, dict[str, object]] = {}
+            for name in ("works", "authorships", "work_topics"):
+                path = scoped_inputs / f"{name}.parquet"
+                path.write_text(f"scoped {name}", encoding="utf-8")
+                input_tables[name] = {"path": str(path), "sha256": f"{name}-sha", "bytes": path.stat().st_size}
+
+            run_table_outputs: dict[str, str] = {}
+            for name in ("author_work", "indices", "ratings"):
+                path = scoped_outputs / "tables" / f"{name}.csv"
+                path.write_text(f"{name}\nscoped\n", encoding="utf-8")
+                run_table_outputs[name] = str(path)
+
+            run_result_outputs: dict[str, str] = {}
+            for name, filename in {
+                "stats_summary": "stats_summary.json",
+                "theory_validation": "theory_validation.json",
+                "theory_top1_sensitivity": "theory_top1_sensitivity.csv",
+                "theory_fraction_mode_sensitivity": "theory_fraction_mode_sensitivity.csv",
+            }.items():
+                path = scoped_outputs / "results" / filename
+                path.write_text(f"{name}: scoped", encoding="utf-8")
+                run_result_outputs[name] = str(path)
+
+            cfg = SimpleNamespace(slice_name="slice_scoped")
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "TABLE_FILES", {"author_work": latest / "author_work.csv"}),
+                patch.object(pipeline, "PARQUET_TABLE_FILES", {"author_work": latest_author_work}),
+                patch.object(pipeline, "JSON_FILES", {"stats": latest_stats}),
+            ):
+                archive = pipeline._archive_run_artifacts(
+                    cfg,
+                    {
+                        "run_id": "run_scoped",
+                        "dump_id": "dump_scoped",
+                        "input_tables": input_tables,
+                        "input_table_checksums": {"works": "works-sha"},
+                        "run_table_outputs": run_table_outputs,
+                        "run_result_outputs": run_result_outputs,
+                    },
+                )
+
+            run_dir = root / "runs" / "run_scoped"
+            dump_tables = root / "tables" / "dump_scoped"
+            manifest = json.loads((run_dir / "metric_run.json").read_text(encoding="utf-8"))
+
+            self.assertEqual((run_dir / "tables" / "author_work.csv").read_text(encoding="utf-8"), "author_work\nscoped\n")
+            self.assertEqual((run_dir / "tables" / "indices.csv").read_text(encoding="utf-8"), "indices\nscoped\n")
+            self.assertEqual((run_dir / "results" / "stats_summary.json").read_text(encoding="utf-8"), "stats_summary: scoped")
+            self.assertEqual((dump_tables / "works.parquet").read_text(encoding="utf-8"), "scoped works")
+            self.assertFalse((dump_tables / "author_work.parquet").exists())
+            self.assertIn("tables/author_work.csv", archive["copied"])
+            self.assertIn("results/stats_summary.json", archive["copied"])
+            self.assertIn("tables_by_dump/works.parquet", archive["copied"])
+            self.assertNotIn("tables_by_dump/author_work.parquet", archive["copied"])
+            self.assertEqual(manifest["run_table_outputs"]["indices"], run_table_outputs["indices"])
+            self.assertEqual(manifest["run_result_outputs"]["stats_summary"], run_result_outputs["stats_summary"])
+            self.assertEqual(archive["active_context"]["active_run_id"], "run_scoped")
+
     def test_archive_preserves_unknown_active_context_eligibility_as_null(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
