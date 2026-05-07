@@ -138,6 +138,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(payload["scope_status"], "implicit_latest_preview")
         self.assertEqual(payload["reproducible"], False)
         self.assertIn("No run_id or dump_id was provided", payload["scope_warnings"][0])
+        self.assertIn("No run_id or dump_id was provided", payload["warnings"][0])
 
     def test_ranking_json_does_not_treat_unrequested_resolved_scope_as_reproducible(self) -> None:
         with (
@@ -167,6 +168,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(payload["scope_status"], "explicit_scope")
         self.assertEqual(payload["reproducible"], True)
         self.assertEqual(payload["scope_warnings"], [])
+        self.assertEqual(payload["warnings"], [])
 
     def test_distribution_marks_no_scope_as_implicit_latest_preview(self) -> None:
         with (
@@ -182,6 +184,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(payload["scope_status"], "implicit_latest_preview")
         self.assertEqual(payload["reproducible"], False)
         self.assertIn("No run_id or dump_id was provided", payload["scope_warnings"][0])
+        self.assertIn("No run_id or dump_id was provided", payload["warnings"][0])
 
     def test_ranking_csv_with_empty_cohort_has_header_only(self) -> None:
         cohort = {
@@ -262,6 +265,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(result["scope_status"], "implicit_latest_preview")
         self.assertEqual(result["scope"]["scope_status"], "implicit_latest_preview")
         self.assertEqual(result["scope"]["reproducible"], False)
+        self.assertIn("No run_id or dump_id was provided", result["scope"]["scope_warnings"][0])
         self.assertEqual(result["reproducible"], False)
         self.assertIn("No run_id or dump_id was provided", result["warnings"][0])
 

@@ -884,12 +884,13 @@ def _annotate_scope_payload(
     if isinstance(scope, dict):
         scope["scope_status"] = metadata["scope_status"]
         scope["reproducible"] = metadata["reproducible"]
-    if metadata["scope_warnings"]:
-        existing = payload.get("warnings")
-        if isinstance(existing, list):
-            for warning in metadata["scope_warnings"]:
-                if warning not in existing:
-                    existing.append(warning)
+        scope["scope_warnings"] = list(metadata["scope_warnings"])
+    existing = payload.get("warnings")
+    warnings = existing if isinstance(existing, list) else ([] if existing is None else [existing])
+    for warning in metadata["scope_warnings"]:
+        if warning not in warnings:
+            warnings.append(warning)
+    payload["warnings"] = warnings
     return payload
 
 
