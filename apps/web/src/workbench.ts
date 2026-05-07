@@ -18,7 +18,7 @@ export type ScientometricFinding = {
 };
 
 export type ScientometricFindingSummary = {
-  findings_version?: string;
+  schema?: string;
   n_findings?: number;
   high_count?: number;
   medium_count?: number;
@@ -30,7 +30,7 @@ export type ScientometricFindingSummary = {
 };
 
 export type ScientometricConclusionDraft = {
-  version?: string;
+  schema?: string;
   title?: string;
   paragraphs?: Array<{
     role?: string;
@@ -43,7 +43,7 @@ export type ScientometricConclusionDraft = {
 };
 
 export type ScientometricAnalysisPayload = {
-  analysis_version: string;
+  schema: string;
   scope: Record<string, unknown>;
   cohort_context?: Record<string, unknown> | null;
   metrics: string[];

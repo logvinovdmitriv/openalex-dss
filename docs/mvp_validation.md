@@ -57,18 +57,18 @@ metrics: p, c, c_frac, h, i10, g, islv
 raw_works: 12
 n_authors: 5
 findings: 29
-report_scope_hash: 1f47352cd31b36c6
+report_scope_hash: 0b41f7b1d24779ff
 ```
 
 `n_authors: 5` - это число авторов в зафиксированной Top-5 cohort, а не полное число авторов raw fixture. В fixture есть шестой автор, который не входит в Top-5 когорту по `h`.
 
-Версии аналитических артефактов:
+Схемы аналитических артефактов:
 
 ```text
-report_bundle_version: report_bundle_v12
-analysis_version: scientometrics_v4
-findings_version: scientometric_findings_v2
-conclusion_version: scientometric_conclusion_v3
+report_bundle_schema: report_bundle
+analysis_schema: scientometric_analysis
+findings_schema: scientometric_findings
+conclusion_schema: scientometric_conclusion
 ```
 
 Analysis eligibility:
@@ -96,7 +96,7 @@ validation/exports/validation_scientometric_mvp/top-outliers.csv
 validation/exports/validation_scientometric_mvp/findings.csv
 validation/exports/validation_scientometric_mvp/conclusion.md
 validation/exports/validation_scientometric_mvp/report_bundle.json
-runs/validation_scientometric_mvp/reports/report_1f47352cd31b36c6.json
+runs/validation_scientometric_mvp/reports/report_0b41f7b1d24779ff.json
 ```
 
 Run-scoped pipeline artifacts:

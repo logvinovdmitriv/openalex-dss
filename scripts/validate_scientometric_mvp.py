@@ -170,10 +170,10 @@ def main() -> None:
         "n_authors": payload["n_authors"],
         "findings": len(payload.get("findings") or []),
         "report_scope_hash": report["report_scope"]["report_scope_hash"],
-        "report_bundle_version": report["bundle_version"],
-        "analysis_version": payload["analysis_version"],
-        "findings_version": payload["finding_summary"]["findings_version"],
-        "conclusion_version": payload["conclusion_draft"]["version"],
+        "report_bundle_schema": report["schema"],
+        "analysis_schema": payload["schema"],
+        "findings_schema": payload["finding_summary"]["schema"],
+        "conclusion_schema": payload["conclusion_draft"]["schema"],
         "analysis_eligibility": build["analysis_eligibility"],
         "artifacts": artifacts,
         "artifact_checksums": _artifact_checksums(artifacts),
@@ -430,10 +430,10 @@ def _assert_validation_invariants(
     _require(manifest["cohort_checksum"] == cohort["checksum"], "manifest cohort checksum does not match cohort checksum")
     _require(manifest["n_authors"] == payload["n_authors"] == RANK_TOP_N, "validated author count does not match the fixed Top-N cohort")
     _require(manifest["raw_works"] == len(_fixture_works()), "validated raw work count does not match fixture")
-    _require(manifest["analysis_version"] == scientometrics_module.SCIENTOMETRIC_ANALYSIS_VERSION, "analysis version mismatch")
-    _require(manifest["findings_version"] == scientometrics_module.SCIENTOMETRIC_FINDINGS_VERSION, "findings version mismatch")
-    _require(manifest["conclusion_version"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_VERSION, "conclusion version mismatch")
-    _require(payload["conclusion_draft"]["version"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_VERSION, "payload conclusion version mismatch")
+    _require(manifest["analysis_schema"] == scientometrics_module.SCIENTOMETRIC_ANALYSIS_SCHEMA, "analysis schema mismatch")
+    _require(manifest["findings_schema"] == scientometrics_module.SCIENTOMETRIC_FINDINGS_SCHEMA, "findings schema mismatch")
+    _require(manifest["conclusion_schema"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_SCHEMA, "conclusion schema mismatch")
+    _require(payload["conclusion_draft"]["schema"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_SCHEMA, "payload conclusion schema mismatch")
     _require(build["analysis_eligibility"]["allowed_for_final_analysis"] is False, "validation fixture must not be eligible for final analysis")
     _require(bool(report["exports"]["scientometrics_conclusion_md"]), "report bundle is missing conclusion Markdown export")
     for key in (

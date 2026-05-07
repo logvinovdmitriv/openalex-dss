@@ -261,7 +261,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         def fake_analysis(**kwargs: object) -> dict[str, object]:
             captured.update(kwargs)
-            return {"analysis_version": "scientometrics_v4", "n_authors": 2}
+            return {"schema": "scientometric_analysis", "n_authors": 2}
 
         with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", side_effect=fake_analysis):
             payload = analytics_routes.scientometric_analysis(
@@ -279,7 +279,7 @@ class AnalyticsRouteTests(unittest.TestCase):
                 work_type="article",
             )
 
-        self.assertEqual(payload["analysis_version"], "scientometrics_v4")
+        self.assertEqual(payload["schema"], "scientometric_analysis")
         self.assertEqual(captured["run_id"], "run_a")
         self.assertEqual(captured["dump_id"], "dump_a")
         self.assertEqual(captured["cohort_id"], "cohort_a")
@@ -292,7 +292,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
     def test_scientometric_analysis_marks_no_scope_as_preview_warning(self) -> None:
         payload = {
-            "analysis_version": "scientometrics_v4",
+            "schema": "scientometric_analysis",
             "scope": {"run_id": "", "dump_id": ""},
             "warnings": [],
             "n_authors": 0,
@@ -309,7 +309,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
     def test_scientometric_export_routes_return_csv_artifacts(self) -> None:
         payload = {
-            "analysis_version": "scientometrics_v4",
+            "schema": "scientometric_analysis",
             "descriptive": {
                 "h": {
                     "n": 2,
@@ -451,7 +451,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
     def test_scientometric_export_without_scope_requires_explicit_opt_in(self) -> None:
         payload = {
-            "analysis_version": "scientometrics_v4",
+            "schema": "scientometric_analysis",
             "scope": {"run_id": "", "dump_id": ""},
             "descriptive": {},
             "warnings": [],
@@ -465,7 +465,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
     def test_scientometric_export_without_scope_opt_in_has_scope_headers(self) -> None:
         payload = {
-            "analysis_version": "scientometrics_v4",
+            "schema": "scientometric_analysis",
             "scope": {"run_id": "", "dump_id": ""},
             "descriptive": {},
             "warnings": [],

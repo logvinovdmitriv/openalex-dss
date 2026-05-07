@@ -318,7 +318,7 @@ class ScientometricServiceTests(unittest.TestCase):
         distribution = next(paragraph for paragraph in draft["paragraphs"] if paragraph["role"] == "distribution_limits")
         candidate = next(paragraph for paragraph in draft["paragraphs"] if paragraph["role"] == "candidate_metric")
 
-        self.assertEqual(draft["version"], "scientometric_conclusion_v3")
+        self.assertEqual(draft["schema"], "scientometric_conclusion")
         self.assertIn("distribution_limits", roles)
         self.assertIn("index_limitations", roles)
         self.assertIn("candidate_metric", roles)
@@ -481,10 +481,10 @@ class ScientometricServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["n_authors"], 0)
-        self.assertEqual(payload["analysis_version"], "scientometrics_v4")
+        self.assertEqual(payload["schema"], "scientometric_analysis")
         self.assertEqual(payload["descriptive"]["h"]["n"], 0)
-        self.assertEqual(payload["finding_summary"]["findings_version"], "scientometric_findings_v2")
-        self.assertEqual(payload["conclusion_draft"]["version"], "scientometric_conclusion_v3")
+        self.assertEqual(payload["finding_summary"]["schema"], "scientometric_findings")
+        self.assertEqual(payload["conclusion_draft"]["schema"], "scientometric_conclusion")
         self.assertEqual(payload["finding_thresholds"]["tie_rate"], 0.30)
         self.assertTrue(payload["warnings"])
         self.assertIsNone(payload["interpretation"]["candidate_balanced_metric"])

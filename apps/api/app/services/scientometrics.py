@@ -21,9 +21,9 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
     "islv",
     "lrdi",
 )
-SCIENTOMETRIC_ANALYSIS_VERSION = "scientometrics_v4"
-SCIENTOMETRIC_FINDINGS_VERSION = "scientometric_findings_v2"
-SCIENTOMETRIC_CONCLUSION_VERSION = "scientometric_conclusion_v3"
+SCIENTOMETRIC_ANALYSIS_SCHEMA = "scientometric_analysis"
+SCIENTOMETRIC_FINDINGS_SCHEMA = "scientometric_findings"
+SCIENTOMETRIC_CONCLUSION_SCHEMA = "scientometric_conclusion"
 FINDING_THRESHOLDS = {
     "heavy_tail_skewness_medium": 1.0,
     "heavy_tail_skewness_high": 2.0,
@@ -131,7 +131,7 @@ def build_scientometric_analysis(
     )
 
     return {
-        "analysis_version": SCIENTOMETRIC_ANALYSIS_VERSION,
+        "schema": SCIENTOMETRIC_ANALYSIS_SCHEMA,
         "scope": analysis_scope,
         "cohort_context": cohort_context,
         "metrics": selected_metrics,
@@ -407,7 +407,7 @@ def finding_summary(findings: list[dict[str, Any]], *, metrics: list[str], basel
     if has_candidate:
         discussion_points.append("Описывать ISLV как кандидатную сбалансированную модификацию, а не как автоматически лучший индекс.")
     return {
-        "findings_version": SCIENTOMETRIC_FINDINGS_VERSION,
+        "schema": SCIENTOMETRIC_FINDINGS_SCHEMA,
         "n_findings": len(findings),
         "high_count": sum(1 for finding in findings if finding.get("severity") == "high"),
         "medium_count": sum(1 for finding in findings if finding.get("severity") == "medium"),
@@ -584,7 +584,7 @@ def conclusion_draft(
     )
 
     return {
-        "version": SCIENTOMETRIC_CONCLUSION_VERSION,
+        "schema": SCIENTOMETRIC_CONCLUSION_SCHEMA,
         "title": "Вывод по сравнению наукометрических индексов",
         "paragraphs": paragraphs,
         "limitations": [
@@ -593,9 +593,9 @@ def conclusion_draft(
             "OpenAlex-метаданные могут содержать ошибки авторской дизамбигуации и неполноту.",
         ],
         "source": {
-            "analysis_version": SCIENTOMETRIC_ANALYSIS_VERSION,
-            "findings_version": finding_summary.get("findings_version"),
-            "conclusion_version": SCIENTOMETRIC_CONCLUSION_VERSION,
+            "analysis_schema": SCIENTOMETRIC_ANALYSIS_SCHEMA,
+            "findings_schema": finding_summary.get("schema"),
+            "conclusion_schema": SCIENTOMETRIC_CONCLUSION_SCHEMA,
             "n_findings": finding_summary.get("n_findings", len(findings)),
             "baseline_metric": baseline_metric,
             "metrics": metrics,

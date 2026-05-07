@@ -11,7 +11,8 @@ from app.services import cohorts, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
-REPORT_BUNDLE_VERSION = "report_bundle_v12"
+REPORT_BUNDLE_SCHEMA = "report_bundle"
+REPORT_SCOPE_SCHEMA = "report_scope"
 DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "islv")
 
 
@@ -181,7 +182,7 @@ def build_report_bundle(
     exports.update(_local_data_csv_exports(run_id=run_id, dump_id=resolved_dump_id))
 
     report = {
-        "bundle_version": REPORT_BUNDLE_VERSION,
+        "schema": REPORT_BUNDLE_SCHEMA,
         "status": "ok",
         "no_latest_fallback": bool(run_id),
         "run_id": run_id,
@@ -341,7 +342,7 @@ def _read_run_json(run_id: str, filename: str) -> dict[str, Any]:
 
 def _incomplete_run_report(*, run_id: str, dump_id: str, missing: list[str], report_scope: dict[str, Any]) -> dict[str, Any]:
     return {
-        "bundle_version": REPORT_BUNDLE_VERSION,
+        "schema": REPORT_BUNDLE_SCHEMA,
         "status": "incomplete_run_artifacts",
         "run_id": run_id,
         "dump_id": dump_id,
@@ -376,7 +377,7 @@ def _report_scope(
     membership_filters = _clean_filters(cohort_membership_filters or {})
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
     canonical = {
-        "version": "report_scope_v12",
+        "schema": REPORT_SCOPE_SCHEMA,
         "run_id": run_id,
         "dump_id": dump_id,
         "filters": _clean_filters(filters),
@@ -390,9 +391,9 @@ def _report_scope(
         "fraction_mode": str(fraction_mode or "").strip(),
         "limit": int(limit or 0),
         "scientometric_metrics": scientometric_metric_list,
-        "scientometric_analysis_version": scientometrics.SCIENTOMETRIC_ANALYSIS_VERSION,
-        "scientometric_findings_version": scientometrics.SCIENTOMETRIC_FINDINGS_VERSION,
-        "scientometric_conclusion_version": scientometrics.SCIENTOMETRIC_CONCLUSION_VERSION,
+        "scientometric_analysis_schema": scientometrics.SCIENTOMETRIC_ANALYSIS_SCHEMA,
+        "scientometric_findings_schema": scientometrics.SCIENTOMETRIC_FINDINGS_SCHEMA,
+        "scientometric_conclusion_schema": scientometrics.SCIENTOMETRIC_CONCLUSION_SCHEMA,
         "baseline_metric": str(baseline_metric or "h").strip() or "h",
         "rank_top_n": max(1, min(int(rank_top_n or 100), 1000)),
     }
@@ -402,7 +403,7 @@ def _report_scope(
 
 def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
     return {
-        "bundle_version": REPORT_BUNDLE_VERSION,
+        "schema": REPORT_BUNDLE_SCHEMA,
         "status": "preview_not_reproducible",
         "run_id": str(report_scope.get("run_id") or ""),
         "dump_id": str(report_scope.get("dump_id") or ""),
@@ -413,7 +414,7 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
 
 
 def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = "") -> bool:
-    if cached.get("bundle_version") != REPORT_BUNDLE_VERSION:
+    if cached.get("schema") != REPORT_BUNDLE_SCHEMA:
         return False
     for key in ("report_scope", "cohort_context", "warnings", "exports", "export_notes", "scientometric_analysis"):
         if key not in cached:
