@@ -42,6 +42,9 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   `scope_status=implicit_latest_preview` and `reproducible=false`.
 - Local-data CSV exports require explicit `run_id`/`dump_id`; compatibility
   latest CSV export is available only with `allow_latest_preview=true`.
+- Analytics CSV and Markdown exports require explicit `run_id`/`dump_id` or a
+  cohort-resolved scope; compatibility latest exports require
+  `allow_latest_preview=true`.
 - Final report and analytics paths must prefer explicit `run_id`/`dump_id` and
   avoid implicit latest fallback.
 

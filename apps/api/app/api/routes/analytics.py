@@ -341,6 +341,10 @@ def ranking_csv(
     to_publication_date: str = "",
     work_type: str = "",
     limit: int = Query(100_000, ge=1, le=500_000),
+    allow_latest_preview: bool = Query(
+        False,
+        description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id.",
+    ),
 ) -> Response:
     try:
         payload = ranking_json(
@@ -380,6 +384,7 @@ def ranking_csv(
         )
     except HTTPException:
         raise
+    _require_export_scope(payload, allow_latest_preview=_bool_query(allow_latest_preview))
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=payload["fields"], extrasaction="ignore")
     writer.writeheader()
@@ -387,7 +392,10 @@ def ranking_csv(
     return Response(
         content=output.getvalue(),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="openalex_dss_filtered_rating.csv"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="openalex_dss_filtered_rating.csv"',
+            **_scope_response_headers(payload),
+        },
     )
 
 
@@ -496,9 +504,12 @@ def scientometric_analysis_json(request: Request) -> Response:
 
 
 @router.get("/analytics/scientometrics/descriptive.csv")
-def scientometric_descriptive_csv(request: Request) -> Response:
+def scientometric_descriptive_csv(
+    request: Request,
+    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
+) -> Response:
     try:
-        payload = _scientometric_payload_from_request(request)
+        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -528,85 +539,108 @@ def scientometric_descriptive_csv(request: Request) -> Response:
         "outlier_count_iqr",
         "outlier_share_iqr",
     ]
-    return _csv_response(fields, _scientometric_descriptive_rows(payload), filename="openalex_dss_scientometrics_descriptive.csv")
+    return _csv_response(fields, _scientometric_descriptive_rows(payload), filename="openalex_dss_scientometrics_descriptive.csv", headers=_scope_response_headers(payload))
 
 
 @router.get("/analytics/scientometrics/correlations.csv")
-def scientometric_correlations_csv(request: Request) -> Response:
+def scientometric_correlations_csv(
+    request: Request,
+    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
+) -> Response:
     try:
-        payload = _scientometric_payload_from_request(request)
+        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["method", "left_metric", "right_metric", "value"]
-    return _csv_response(fields, _scientometric_correlation_rows(payload), filename="openalex_dss_scientometrics_correlations.csv")
+    return _csv_response(fields, _scientometric_correlation_rows(payload), filename="openalex_dss_scientometrics_correlations.csv", headers=_scope_response_headers(payload))
 
 
 @router.get("/analytics/scientometrics/rank-shifts.csv")
-def scientometric_rank_shifts_csv(request: Request) -> Response:
+def scientometric_rank_shifts_csv(
+    request: Request,
+    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
+) -> Response:
     try:
+        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
         rows = scientometrics.build_rank_shift_export_rows(**_scientometric_kwargs_from_request(request))
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"]
-    return _csv_response(fields, rows, filename="openalex_dss_scientometrics_rank_shifts.csv")
+    return _csv_response(fields, rows, filename="openalex_dss_scientometrics_rank_shifts.csv", headers=_scope_response_headers(payload))
 
 
 @router.get("/analytics/scientometrics/largest-rank-shifts.csv")
-def scientometric_largest_rank_shifts_csv(request: Request) -> Response:
+def scientometric_largest_rank_shifts_csv(
+    request: Request,
+    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
+) -> Response:
     try:
-        payload = _scientometric_payload_from_request(request)
+        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"]
-    return _csv_response(fields, _scientometric_largest_rank_shift_rows(payload), filename="openalex_dss_scientometrics_largest_rank_shifts.csv")
+    return _csv_response(fields, _scientometric_largest_rank_shift_rows(payload), filename="openalex_dss_scientometrics_largest_rank_shifts.csv", headers=_scope_response_headers(payload))
 
 
 @router.get("/analytics/scientometrics/outliers.csv")
-def scientometric_outliers_csv(request: Request) -> Response:
+def scientometric_outliers_csv(
+    request: Request,
+    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
+) -> Response:
     try:
+        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
         rows = scientometrics.build_outlier_export_rows(**_scientometric_kwargs_from_request(request))
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["metric", "author_id", "author_display_name", "value", "rule", "lower_fence", "upper_fence"]
-    return _csv_response(fields, rows, filename="openalex_dss_scientometrics_outliers.csv")
+    return _csv_response(fields, rows, filename="openalex_dss_scientometrics_outliers.csv", headers=_scope_response_headers(payload))
 
 
 @router.get("/analytics/scientometrics/top-outliers.csv")
-def scientometric_top_outliers_csv(request: Request) -> Response:
+def scientometric_top_outliers_csv(
+    request: Request,
+    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
+) -> Response:
     try:
-        payload = _scientometric_payload_from_request(request)
+        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["metric", "author_id", "author_display_name", "value", "rule", "lower_fence", "upper_fence"]
-    return _csv_response(fields, _scientometric_top_outlier_rows(payload), filename="openalex_dss_scientometrics_top_outliers.csv")
+    return _csv_response(fields, _scientometric_top_outlier_rows(payload), filename="openalex_dss_scientometrics_top_outliers.csv", headers=_scope_response_headers(payload))
 
 
 @router.get("/analytics/scientometrics/findings.csv")
-def scientometric_findings_csv(request: Request) -> Response:
+def scientometric_findings_csv(
+    request: Request,
+    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
+) -> Response:
     try:
-        payload = _scientometric_payload_from_request(request)
+        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     fields = ["id", "type", "metric", "baseline_metric", "severity", "text", "recommendation", "evidence_json"]
-    return _csv_response(fields, _scientometric_finding_rows(payload), filename="openalex_dss_scientometrics_findings.csv")
+    return _csv_response(fields, _scientometric_finding_rows(payload), filename="openalex_dss_scientometrics_findings.csv", headers=_scope_response_headers(payload))
 
 
 @router.get("/analytics/scientometrics/conclusion.md")
-def scientometric_conclusion_markdown(request: Request) -> Response:
+def scientometric_conclusion_markdown(
+    request: Request,
+    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view Markdown export without run_id/dump_id."),
+) -> Response:
     try:
-        payload = _scientometric_payload_from_request(request)
+        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -615,7 +649,10 @@ def scientometric_conclusion_markdown(request: Request) -> Response:
     return Response(
         content=markdown,
         media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="openalex_dss_scientometrics_conclusion.md"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="openalex_dss_scientometrics_conclusion.md"',
+            **_scope_response_headers(payload),
+        },
     )
 
 
@@ -693,6 +730,12 @@ def _scientometric_payload_from_request(request: Request) -> dict[str, Any]:
     return payload
 
 
+def _scientometric_export_payload_from_request(request: Request, *, allow_latest_preview: bool = False) -> dict[str, Any]:
+    payload = _scientometric_payload_from_request(request)
+    _require_export_scope(payload, allow_latest_preview=_bool_query(allow_latest_preview))
+    return payload
+
+
 def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
     query = request.query_params
     filters = _slice_filters(
@@ -733,15 +776,17 @@ def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
     }
 
 
-def _csv_response(fields: list[str], rows: list[dict[str, Any]], *, filename: str) -> Response:
+def _csv_response(fields: list[str], rows: list[dict[str, Any]], *, filename: str, headers: dict[str, str] | None = None) -> Response:
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
     writer.writerows(rows)
+    response_headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    response_headers.update(headers or {})
     return Response(
         content=output.getvalue(),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=response_headers,
     )
 
 
@@ -834,6 +879,15 @@ def _int_query(value: Any, default: int) -> int:
         return default
 
 
+def _bool_query(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    default = getattr(value, "default", None)
+    if isinstance(default, bool):
+        return default
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _scope_metadata(
     *,
     requested_run_id: str = "",
@@ -892,6 +946,29 @@ def _annotate_scope_payload(
             warnings.append(warning)
     payload["warnings"] = warnings
     return payload
+
+
+def _require_export_scope(payload: dict[str, Any], *, allow_latest_preview: bool = False) -> None:
+    if payload.get("scope_status") != "implicit_latest_preview" or allow_latest_preview:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "run_id or dump_id is required for reproducible analytics export; "
+            "pass allow_latest_preview=true for compatibility preview."
+        ),
+    )
+
+
+def _scope_response_headers(payload: dict[str, Any]) -> dict[str, str]:
+    headers = {
+        "X-OpenAlex-DSS-Scope-Status": str(payload.get("scope_status") or ""),
+        "X-OpenAlex-DSS-Reproducible": "true" if payload.get("reproducible") is True else "false",
+    }
+    warnings = payload.get("scope_warnings") if isinstance(payload.get("scope_warnings"), list) else []
+    if warnings:
+        headers["X-OpenAlex-DSS-Scope-Warning"] = "; ".join(str(warning) for warning in warnings)
+    return headers
 
 
 def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode: str, filters: dict[str, Any], filter_policy: str = "membership") -> dict[str, Any]:

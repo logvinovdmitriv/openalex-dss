@@ -210,6 +210,38 @@ class AnalyticsRouteTests(unittest.TestCase):
             response = analytics_routes.ranking_csv(cohort_id="cohort_empty", fraction_mode="integer", metric="h", limit=100)
 
         self.assertEqual(response.body.decode("utf-8").strip(), "author_id,score")
+        self.assertEqual(response.headers["X-OpenAlex-DSS-Scope-Status"], "cohort_resolved_scope")
+        self.assertEqual(response.headers["X-OpenAlex-DSS-Reproducible"], "true")
+
+    def test_ranking_csv_without_scope_requires_explicit_opt_in(self) -> None:
+        with (
+            patch.object(
+                analytics_routes.warehouse,
+                "metric_ranking",
+                return_value={"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "", "dump_id": ""},
+            ),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            with self.assertRaises(analytics_routes.HTTPException) as raised:
+                analytics_routes.ranking_csv(fraction_mode="integer", metric="h", limit=100)
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
+
+    def test_ranking_csv_without_scope_opt_in_has_scope_headers(self) -> None:
+        with (
+            patch.object(
+                analytics_routes.warehouse,
+                "metric_ranking",
+                return_value={"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "", "dump_id": ""},
+            ),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            response = analytics_routes.ranking_csv(fraction_mode="integer", metric="h", allow_latest_preview=True, limit=100)
+
+        self.assertEqual(response.headers["X-OpenAlex-DSS-Scope-Status"], "implicit_latest_preview")
+        self.assertEqual(response.headers["X-OpenAlex-DSS-Reproducible"], "false")
+        self.assertIn("No run_id or dump_id was provided", response.headers["X-OpenAlex-DSS-Scope-Warning"])
 
     def test_unknown_cohort_returns_controlled_error(self) -> None:
         with patch.object(analytics_routes.cohorts, "resolve_cohort_context", side_effect=analytics_routes.cohorts.CohortNotFound("Unknown cohort_id: nope")):
@@ -378,16 +410,17 @@ class AnalyticsRouteTests(unittest.TestCase):
             patch.object(analytics_routes.scientometrics, "build_rank_shift_export_rows", return_value=full_rank_shift_rows),
             patch.object(analytics_routes.scientometrics, "build_outlier_export_rows", return_value=full_outlier_rows),
         ):
-            descriptive = analytics_routes.scientometric_descriptive_csv(_request(metrics="h,g", baseline_metric="h", top_n=20))
-            correlations = analytics_routes.scientometric_correlations_csv(_request(metrics="h,g"))
-            rank_shifts = analytics_routes.scientometric_rank_shifts_csv(_request(metrics="h,g"))
-            largest_rank_shifts = analytics_routes.scientometric_largest_rank_shifts_csv(_request(metrics="h,g"))
-            outliers = analytics_routes.scientometric_outliers_csv(_request(metrics="h,c"))
-            top_outliers = analytics_routes.scientometric_top_outliers_csv(_request(metrics="h,c"))
-            findings = analytics_routes.scientometric_findings_csv(_request(metrics="h,c"))
-            conclusion = analytics_routes.scientometric_conclusion_markdown(_request(metrics="h,c"))
+            descriptive = analytics_routes.scientometric_descriptive_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g", baseline_metric="h", top_n=20))
+            correlations = analytics_routes.scientometric_correlations_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g"))
+            rank_shifts = analytics_routes.scientometric_rank_shifts_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g"))
+            largest_rank_shifts = analytics_routes.scientometric_largest_rank_shifts_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g"))
+            outliers = analytics_routes.scientometric_outliers_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,c"))
+            top_outliers = analytics_routes.scientometric_top_outliers_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,c"))
+            findings = analytics_routes.scientometric_findings_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,c"))
+            conclusion = analytics_routes.scientometric_conclusion_markdown(_request(run_id="run_a", dump_id="dump_a", metrics="h,c"))
 
         self.assertIn("metric,n,missing_count", descriptive.body.decode("utf-8"))
+        self.assertEqual(descriptive.headers["X-OpenAlex-DSS-Scope-Status"], "explicit_scope")
         self.assertIn("h,2,0", descriptive.body.decode("utf-8"))
         self.assertIn("method,left_metric,right_metric,value", correlations.body.decode("utf-8"))
         self.assertIn("kendall_tau_b,h,g,0.4", correlations.body.decode("utf-8"))
@@ -408,6 +441,35 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertIn("Основания: heavy_tail:c", conclusion_text)
         self.assertIn("Метрики: C", conclusion_text)
         self.assertIn("- Метрики не заменяют экспертную оценку.", conclusion_text)
+        self.assertEqual(conclusion.headers["X-OpenAlex-DSS-Scope-Status"], "explicit_scope")
+
+    def test_scientometric_export_without_scope_requires_explicit_opt_in(self) -> None:
+        payload = {
+            "analysis_version": "scientometrics_v4",
+            "scope": {"run_id": "", "dump_id": ""},
+            "descriptive": {},
+            "warnings": [],
+        }
+        with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload):
+            with self.assertRaises(analytics_routes.HTTPException) as raised:
+                analytics_routes.scientometric_descriptive_csv(_request(metrics="h"))
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
+
+    def test_scientometric_export_without_scope_opt_in_has_scope_headers(self) -> None:
+        payload = {
+            "analysis_version": "scientometrics_v4",
+            "scope": {"run_id": "", "dump_id": ""},
+            "descriptive": {},
+            "warnings": [],
+        }
+        with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload):
+            response = analytics_routes.scientometric_descriptive_csv(_request(metrics="h"), allow_latest_preview=True)
+
+        self.assertEqual(response.headers["X-OpenAlex-DSS-Scope-Status"], "implicit_latest_preview")
+        self.assertEqual(response.headers["X-OpenAlex-DSS-Reproducible"], "false")
+        self.assertIn("No run_id or dump_id was provided", response.headers["X-OpenAlex-DSS-Scope-Warning"])
 
     def test_cohort_statistics_route_forwards_analysis_scope(self) -> None:
         captured: dict[str, object] = {}

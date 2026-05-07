@@ -2092,6 +2092,7 @@ function ReportsPage({
   const scientometricsFindingsUrl = `${API_BASE}/analytics/scientometrics/findings.csv?${scientometricParams.toString()}`;
   const scientometricsConclusionUrl = `${API_BASE}/analytics/scientometrics/conclusion.md?${scientometricParams.toString()}`;
   const hasReportDataScope = Boolean(runId || dumpId);
+  const hasAnalyticsExportScope = Boolean(runId || dumpId || cohortId);
   const localIndicesUrl = `${API_BASE}${localDataPreviewCsvUrl("indices", { runId, dumpId, limit: 100_000 })}`;
   const localWorksUrl = `${API_BASE}${localDataPreviewCsvUrl("works", { runId, dumpId, limit: 100_000 })}`;
   const localAuthorshipsUrl = `${API_BASE}${localDataPreviewCsvUrl("authorships", { runId, dumpId, limit: 100_000 })}`;
@@ -2111,7 +2112,7 @@ function ReportsPage({
           <button onClick={onBuild} disabled={building}>{building ? <Loader2 size={16} className="spin" /> : <Download size={16} />} Собрать HTML</button>
         </div>
         <div className="download-grid">
-          <a href={rankingUrl}>CSV рейтинга</a>
+          {hasAnalyticsExportScope && <a href={rankingUrl}>CSV рейтинга</a>}
           {cohortMetricsCsvUrl && <a href={cohortMetricsCsvUrl}>CSV метрик когорты</a>}
           {cohortMetricsJsonUrl && <a href={cohortMetricsJsonUrl}>JSON метрик когорты</a>}
           {cohortStatsUrl && <a href={cohortStatsUrl}>JSON статистики когорты</a>}
@@ -2133,6 +2134,12 @@ function ReportsPage({
             <span>Выберите run_id или dump_id: ссылки на локальные витрины не показываются для неявного latest/local context.</span>
           </div>
         )}
+        {!hasAnalyticsExportScope && (
+          <div className="notice warn">
+            <b>Аналитические CSV требуют scope</b>
+            <span>Выберите run_id, dump_id или когорту. JSON-preview остается доступным, но CSV/Markdown-выгрузки без scope backend отклонит.</span>
+          </div>
+        )}
         {cohortMetricsCsvUrl && (
           <div className="notice">
             <b>CSV когорты требует контекст</b>
@@ -2148,15 +2155,25 @@ function ReportsPage({
         </div>
         <div className="download-grid">
           <a href={scientometricsJsonUrl}>JSON полного анализа</a>
-          <a href={scientometricsDescriptiveUrl}>CSV описательной статистики</a>
-          <a href={scientometricsCorrelationsUrl}>CSV корреляций</a>
-          <a href={scientometricsRankShiftsUrl}>CSV всех сдвигов рангов</a>
-          <a href={scientometricsLargestRankShiftsUrl}>CSV крупнейших сдвигов рангов</a>
-          <a href={scientometricsOutliersUrl}>CSV всех выбросов</a>
-          <a href={scientometricsTopOutliersUrl}>CSV top-выбросов</a>
-          <a href={scientometricsFindingsUrl}>CSV автоматизированных выводов</a>
-          <a href={scientometricsConclusionUrl}>Markdown черновика вывода</a>
+          {hasAnalyticsExportScope && (
+            <>
+              <a href={scientometricsDescriptiveUrl}>CSV описательной статистики</a>
+              <a href={scientometricsCorrelationsUrl}>CSV корреляций</a>
+              <a href={scientometricsRankShiftsUrl}>CSV всех сдвигов рангов</a>
+              <a href={scientometricsLargestRankShiftsUrl}>CSV крупнейших сдвигов рангов</a>
+              <a href={scientometricsOutliersUrl}>CSV всех выбросов</a>
+              <a href={scientometricsTopOutliersUrl}>CSV top-выбросов</a>
+              <a href={scientometricsFindingsUrl}>CSV автоматизированных выводов</a>
+              <a href={scientometricsConclusionUrl}>Markdown черновика вывода</a>
+            </>
+          )}
         </div>
+        {!hasAnalyticsExportScope && (
+          <div className="notice warn">
+            <b>CSV/Markdown недоступны без scope</b>
+            <span>JSON можно открыть как preview; для выгружаемых аналитических артефактов нужен run_id, dump_id или сохраненная когорта.</span>
+          </div>
+        )}
         <div className="notice">
           <b>Параметры пакета</b>
           <span>Метрики: {scientometricMetrics.map(metricLabel).join(", ")}. Baseline: {metricLabel(baselineMetric)}. Top-N рангов: {rankTopN}.</span>
