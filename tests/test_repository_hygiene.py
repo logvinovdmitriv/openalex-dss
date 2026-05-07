@@ -40,12 +40,20 @@ class RepositoryHygieneTests(unittest.TestCase):
             OLD_PROTO_LOWER + "_protocol",
             OLD_PROTO_UPPER,
             OLD_PROTO_LOWER,
+            "Backward-" + "comp" + "atible",
+            "older " + "imports",
+            "unused_" + "previous",
+            "iupv_" + "n0",
+            "iupv_" + "lambda",
         )
         files = subprocess.check_output(["git", "ls-files"], cwd=ROOT, text=True).splitlines()
         violations: list[str] = []
         for rel in files:
             if rel.startswith("apps/web/dist/"):
                 continue
+            for marker in markers:
+                if marker in rel:
+                    violations.append(f"{rel}: path contains {marker}")
             path = ROOT / rel
             try:
                 text = path.read_text(encoding="utf-8")
