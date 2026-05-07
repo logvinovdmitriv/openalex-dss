@@ -50,6 +50,8 @@ def analytics(
     work_type: str = "",
     limit: int = Query(20, ge=1, le=200),
 ) -> dict[str, Any]:
+    requested_run_id = run_id
+    requested_dump_id = dump_id
     filters = _slice_filters(
         country_code=country_code,
         filter_mode=filter_mode,
@@ -98,7 +100,7 @@ def analytics(
         "scope": "full_run_precomputed",
         "note": "These statistics come from the full selected run; filtered_distribution and filtered_top are recomputed after current filters.",
     }
-    return {
+    payload = {
         "fraction_mode": fraction_mode,
         "metric": metric,
         "run_id": run_id,
@@ -122,6 +124,15 @@ def analytics(
         "top_table": top,
         "metric_lines": metric_lines,
     }
+    _annotate_scope_payload(
+        payload,
+        requested_run_id=requested_run_id,
+        requested_dump_id=requested_dump_id,
+        resolved_run_id=run_id,
+        resolved_dump_id=payload["dump_id"],
+        cohort_id=cohort_id,
+    )
+    return payload
 
 
 @router.get("/analytics/distribution")
@@ -159,6 +170,8 @@ def distribution(
     to_publication_date: str = "",
     work_type: str = "",
 ) -> dict[str, Any]:
+    requested_run_id = run_id
+    requested_dump_id = dump_id
     filters = _slice_filters(
         country_code=country_code,
         filter_mode=filter_mode,
@@ -192,6 +205,14 @@ def distribution(
         payload = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
         payload["cohort"] = cohort_ctx["cohort"]
         payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
+        _annotate_scope_payload(
+            payload,
+            requested_run_id=requested_run_id,
+            requested_dump_id=requested_dump_id,
+            resolved_run_id=str(payload.get("run_id") or run_id),
+            resolved_dump_id=str(payload.get("dump_id") or dump_id),
+            cohort_id=cohort_id,
+        )
         return payload
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
@@ -235,6 +256,8 @@ def ranking_json(
     work_type: str = "",
     limit: int = Query(100, ge=1, le=500_000),
 ) -> dict[str, Any]:
+    requested_run_id = run_id
+    requested_dump_id = dump_id
     filters = _slice_filters(
         country_code=country_code,
         filter_mode=filter_mode,
@@ -268,6 +291,14 @@ def ranking_json(
         payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
         payload["cohort"] = cohort_ctx["cohort"]
         payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
+        _annotate_scope_payload(
+            payload,
+            requested_run_id=requested_run_id,
+            requested_dump_id=requested_dump_id,
+            resolved_run_id=str(payload.get("run_id") or run_id),
+            resolved_dump_id=str(payload.get("dump_id") or dump_id),
+            cohort_id=cohort_id,
+        )
         return payload
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
@@ -423,7 +454,7 @@ def scientometric_analysis(
         work_type=work_type,
     )
     try:
-        return scientometrics.build_scientometric_analysis(
+        payload = scientometrics.build_scientometric_analysis(
             fraction_mode=fraction_mode,
             metrics=_metric_list(metrics),
             baseline_metric=baseline_metric,
@@ -434,6 +465,15 @@ def scientometric_analysis(
             cohort_filter_policy=cohort_filter_policy,
             top_n=top_n,
         )
+        _annotate_scope_payload(
+            payload,
+            requested_run_id=run_id,
+            requested_dump_id=dump_id,
+            resolved_run_id=str((payload.get("scope") or {}).get("run_id") or payload.get("run_id") or ""),
+            resolved_dump_id=str((payload.get("scope") or {}).get("dump_id") or payload.get("dump_id") or ""),
+            cohort_id=cohort_id,
+        )
+        return payload
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -640,7 +680,17 @@ def _metric_list(metrics: str) -> list[str] | None:
 
 
 def _scientometric_payload_from_request(request: Request) -> dict[str, Any]:
-    return scientometrics.build_scientometric_analysis(**_scientometric_kwargs_from_request(request))
+    kwargs = _scientometric_kwargs_from_request(request)
+    payload = scientometrics.build_scientometric_analysis(**kwargs)
+    _annotate_scope_payload(
+        payload,
+        requested_run_id=str(kwargs.get("run_id") or ""),
+        requested_dump_id=str(kwargs.get("dump_id") or ""),
+        resolved_run_id=str((payload.get("scope") or {}).get("run_id") or payload.get("run_id") or ""),
+        resolved_dump_id=str((payload.get("scope") or {}).get("dump_id") or payload.get("dump_id") or ""),
+        cohort_id=str(kwargs.get("cohort_id") or ""),
+    )
+    return payload
 
 
 def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
@@ -782,6 +832,65 @@ def _int_query(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _scope_metadata(
+    *,
+    requested_run_id: str = "",
+    requested_dump_id: str = "",
+    resolved_run_id: str = "",
+    resolved_dump_id: str = "",
+    cohort_id: str = "",
+) -> dict[str, Any]:
+    requested_run_id = str(requested_run_id or "").strip()
+    requested_dump_id = str(requested_dump_id or "").strip()
+    resolved_run_id = str(resolved_run_id or "").strip()
+    resolved_dump_id = str(resolved_dump_id or "").strip()
+    cohort_id = str(cohort_id or "").strip()
+    if requested_run_id or requested_dump_id:
+        return {"scope_status": "explicit_scope", "reproducible": True, "scope_warnings": []}
+    if cohort_id and (resolved_run_id or resolved_dump_id):
+        return {"scope_status": "cohort_resolved_scope", "reproducible": True, "scope_warnings": []}
+    return {
+        "scope_status": "implicit_latest_preview",
+        "reproducible": False,
+        "scope_warnings": [
+            (
+                "No run_id or dump_id was provided; this payload uses compatibility latest-view "
+                "data and is not suitable for final analysis."
+            )
+        ],
+    }
+
+
+def _annotate_scope_payload(
+    payload: dict[str, Any],
+    *,
+    requested_run_id: str = "",
+    requested_dump_id: str = "",
+    resolved_run_id: str = "",
+    resolved_dump_id: str = "",
+    cohort_id: str = "",
+) -> dict[str, Any]:
+    metadata = _scope_metadata(
+        requested_run_id=requested_run_id,
+        requested_dump_id=requested_dump_id,
+        resolved_run_id=resolved_run_id,
+        resolved_dump_id=resolved_dump_id,
+        cohort_id=cohort_id,
+    )
+    payload.update(metadata)
+    scope = payload.get("scope")
+    if isinstance(scope, dict):
+        scope["scope_status"] = metadata["scope_status"]
+        scope["reproducible"] = metadata["reproducible"]
+    if metadata["scope_warnings"]:
+        existing = payload.get("warnings")
+        if isinstance(existing, list):
+            for warning in metadata["scope_warnings"]:
+                if warning not in existing:
+                    existing.append(warning)
+    return payload
 
 
 def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode: str, filters: dict[str, Any], filter_policy: str = "membership") -> dict[str, Any]:

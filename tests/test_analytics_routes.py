@@ -124,6 +124,65 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["run_id"], "run_a")
         self.assertEqual(payload["cohort"]["cohort_id"], "cohort_a")
 
+    def test_ranking_json_marks_no_scope_as_implicit_latest_preview(self) -> None:
+        with (
+            patch.object(
+                analytics_routes.warehouse,
+                "metric_ranking",
+                return_value={"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "", "dump_id": ""},
+            ),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            payload = analytics_routes.ranking_json(fraction_mode="integer", metric="h", limit=100)
+
+        self.assertEqual(payload["scope_status"], "implicit_latest_preview")
+        self.assertEqual(payload["reproducible"], False)
+        self.assertIn("No run_id or dump_id was provided", payload["scope_warnings"][0])
+
+    def test_ranking_json_does_not_treat_unrequested_resolved_scope_as_reproducible(self) -> None:
+        with (
+            patch.object(
+                analytics_routes.warehouse,
+                "metric_ranking",
+                return_value={"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "run_latest", "dump_id": "dump_latest"},
+            ),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            payload = analytics_routes.ranking_json(fraction_mode="integer", metric="h", limit=100)
+
+        self.assertEqual(payload["scope_status"], "implicit_latest_preview")
+        self.assertEqual(payload["reproducible"], False)
+
+    def test_ranking_json_marks_explicit_scope_as_reproducible(self) -> None:
+        with (
+            patch.object(
+                analytics_routes.warehouse,
+                "metric_ranking",
+                return_value={"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "run_a", "dump_id": "dump_a"},
+            ),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            payload = analytics_routes.ranking_json(run_id="run_a", dump_id="dump_a", fraction_mode="integer", metric="h", limit=100)
+
+        self.assertEqual(payload["scope_status"], "explicit_scope")
+        self.assertEqual(payload["reproducible"], True)
+        self.assertEqual(payload["scope_warnings"], [])
+
+    def test_distribution_marks_no_scope_as_implicit_latest_preview(self) -> None:
+        with (
+            patch.object(
+                analytics_routes.warehouse,
+                "metric_distribution",
+                return_value={"histogram": [], "run_id": "", "dump_id": ""},
+            ),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            payload = analytics_routes.distribution(fraction_mode="integer", metric="h")
+
+        self.assertEqual(payload["scope_status"], "implicit_latest_preview")
+        self.assertEqual(payload["reproducible"], False)
+        self.assertIn("No run_id or dump_id was provided", payload["scope_warnings"][0])
+
     def test_ranking_csv_with_empty_cohort_has_header_only(self) -> None:
         cohort = {
             "cohort": {
@@ -189,6 +248,22 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["baseline_metric"], "h")
         self.assertEqual(captured["top_n"], 50)
         self.assertEqual(captured["filters"], {"country_code": "RU", "filter_mode": "search", "text_search_query": "ergodesign", "work_type": "article"})
+
+    def test_scientometric_analysis_marks_no_scope_as_preview_warning(self) -> None:
+        payload = {
+            "analysis_version": "scientometrics_v4",
+            "scope": {"run_id": "", "dump_id": ""},
+            "warnings": [],
+            "n_authors": 0,
+        }
+        with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload):
+            result = analytics_routes.scientometric_analysis(fraction_mode="integer", metrics="h", baseline_metric="h", top_n=100)
+
+        self.assertEqual(result["scope_status"], "implicit_latest_preview")
+        self.assertEqual(result["scope"]["scope_status"], "implicit_latest_preview")
+        self.assertEqual(result["scope"]["reproducible"], False)
+        self.assertEqual(result["reproducible"], False)
+        self.assertIn("No run_id or dump_id was provided", result["warnings"][0])
 
     def test_scientometric_export_routes_return_csv_artifacts(self) -> None:
         payload = {
