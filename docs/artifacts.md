@@ -46,6 +46,9 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 - Import/fetch metadata is written under `dumps/{dump_id}/fetch_meta.json` and
   copied into `runs/{run_id}/passports/fetch_meta.json` from that scoped source.
   The global `data/passports/fetch_meta.json` path is legacy-only.
+- Import runs include `dumps/{dump_id}/fetch_meta.json` and
+  `dumps/{dump_id}/quality_report.json` in scoped checksum passports alongside
+  dump tables and run outputs.
 - `run_id` owns derived calculations: author-work rows, author indices,
   ratings, run passports, and run-local diagnostic outputs.
 - Slice, calculation and checksum passports are written directly under

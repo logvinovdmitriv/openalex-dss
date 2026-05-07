@@ -44,7 +44,13 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     dump_id = str(payload.get("dump_id") or _dump_id_from_payload(payload) or cfg.slice_name)
     input_tables = resolve_dump_tables(dump_id, required=True)
     analysis_eligibility = _recover_analysis_eligibility(payload, dump_id=dump_id, run_id=run_id)
-    compute = _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
+    compute = _run_compute(
+        cfg,
+        run_id=run_id,
+        dump_id=dump_id,
+        analysis_eligibility=analysis_eligibility,
+        input_tables=input_tables,
+    )
     _write_pipeline_summary("recalculate", cfg, {**payload, "run_id": run_id, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, "active_context_source": "recalculate", **compute})
     report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
@@ -166,7 +172,17 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     }
     fetch_meta_path = _write_dump_fetch_meta(dump_id, fetch_meta)
     run_id = str(payload.get("run_id") or "local_file")
-    compute = _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
+    compute = _run_compute(
+        cfg,
+        run_id=run_id,
+        dump_id=dump_id,
+        analysis_eligibility=analysis_eligibility,
+        input_tables=input_tables,
+        extra_primary_artifacts={
+            "dump/fetch_meta.json": fetch_meta_path,
+            "dump/quality_report.json": quality_report,
+        },
+    )
     _write_pipeline_summary("import_local_file", cfg, {**payload, "run_id": run_id, "source_file": profile, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(
         cfg,
@@ -309,6 +325,7 @@ def _run_compute(
     dump_id: str = "",
     analysis_eligibility: dict[str, Any] | None = None,
     input_tables: dict[str, Path] | None = None,
+    extra_primary_artifacts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     input_tables = input_tables or resolve_dump_tables(dump_id, required=True)
     input_table_checksums = _table_checksums(input_tables)
@@ -376,6 +393,7 @@ def _run_compute(
         "run/results/theory_top1_sensitivity.csv": run_results / "theory_top1_sensitivity.csv",
         "run/results/theory_fraction_mode_sensitivity.csv": run_results / "theory_fraction_mode_sensitivity.csv",
     }
+    primary_artifacts.update(extra_primary_artifacts or {})
     build_passports(
         cfg,
         ROOT,

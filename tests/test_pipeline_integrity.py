@@ -189,6 +189,7 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         def fake_run_compute(*args: object, **kwargs: object) -> dict[str, object]:
             captured["input_tables"] = kwargs["input_tables"]
+            captured["extra_primary_artifacts"] = kwargs["extra_primary_artifacts"]
             return {"input_tables": {}, "input_table_checksums": {}, "passport_outputs": {}}
 
         def fake_archive(_cfg: object, payload: dict[str, object]) -> dict[str, object]:
@@ -240,6 +241,8 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual(Path(captured["input_tables"]["works"]), tables_dir / "works.parquet")
             self.assertEqual(captured["archive_payload"]["fetch_meta"], str(dump_dir / "fetch_meta.json"))
             self.assertEqual(captured["archive_payload"]["quality_report"], str(dump_dir / "quality_report.json"))
+            self.assertEqual(captured["extra_primary_artifacts"]["dump/fetch_meta.json"], dump_dir / "fetch_meta.json")
+            self.assertEqual(captured["extra_primary_artifacts"]["dump/quality_report.json"], dump_dir / "quality_report.json")
             self.assertEqual(result["fetch_meta"], str(dump_dir / "fetch_meta.json"))
             self.assertEqual(result["quality_report"], str(dump_dir / "quality_report.json"))
 
@@ -453,6 +456,67 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(captured["passport_input_tables"]["works"]["path"], str(dump_a / "works.parquet"))
         self.assertEqual(captured["passport_primary_artifacts"]["dump/tables/works.parquet"]["path"], str(dump_a / "works.parquet"))
         self.assertEqual(Path(captured["passport_primary_artifacts"]["run/tables/indices.csv"]), root / "runs" / "run_A" / "tables" / "indices.csv")
+
+    def test_run_compute_includes_extra_primary_artifacts_in_scoped_checksums(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_build_passports(*args: object, **kwargs: object) -> dict[str, object]:
+            captured["primary_artifacts"] = kwargs.get("primary_artifacts")
+            out = Path(args[2])
+            out.mkdir(parents=True, exist_ok=True)
+            for filename in ("slice_passport.json", "calculation_passport.json", "checksums.json"):
+                (out / filename).write_text("{}", encoding="utf-8")
+            return {}
+
+        cfg = SimpleNamespace(
+            fraction_modes=("integer",),
+            iupv_n0=10,
+            iupv_lambda=0.2,
+            lrdi_p0=5,
+            lrdi_lambda=0.15,
+            analysis_year=2026,
+            fraction_mode_default="integer",
+            slice_name="slice_extra_primary",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "inputs"
+            input_dir.mkdir()
+            input_tables = {}
+            for name in ("works", "authorships", "work_topics"):
+                path = input_dir / f"{name}.parquet"
+                path.write_text(f"{name}", encoding="utf-8")
+                input_tables[name] = path
+            fetch_meta = root / "dumps" / "dump_extra" / "fetch_meta.json"
+            quality = root / "dumps" / "dump_extra" / "quality_report.json"
+            fetch_meta.parent.mkdir(parents=True)
+            fetch_meta.write_text("{}", encoding="utf-8")
+            quality.write_text("{}", encoding="utf-8")
+
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "build_author_work_metrics", side_effect=lambda *_args, **_kwargs: Path(_args[2]).write_text("author_work\n", encoding="utf-8")),
+                patch.object(pipeline, "compute_indices", side_effect=lambda _source, target, *_args: Path(target).write_text("indices\n", encoding="utf-8")),
+                patch.object(pipeline, "build_ratings", side_effect=lambda _source, target: Path(target).write_text("ratings\n", encoding="utf-8")),
+                patch.object(pipeline, "analyze_stats", side_effect=lambda *_args: Path(_args[3]).write_text("{}", encoding="utf-8")),
+                patch.object(pipeline, "analyze_theory", side_effect=lambda *_args: Path(_args[2]).write_text("{}", encoding="utf-8")),
+                patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
+                patch.dict("os.environ", {}, clear=True),
+            ):
+                pipeline._run_compute(
+                    cfg,
+                    run_id="run_extra",
+                    dump_id="dump_extra",
+                    input_tables=input_tables,
+                    extra_primary_artifacts={
+                        "dump/fetch_meta.json": fetch_meta,
+                        "dump/quality_report.json": quality,
+                    },
+                )
+
+        self.assertEqual(captured["primary_artifacts"]["dump/fetch_meta.json"], fetch_meta)
+        self.assertEqual(captured["primary_artifacts"]["dump/quality_report.json"], quality)
+        self.assertIn("run/tables/indices.csv", captured["primary_artifacts"])
 
     def test_run_compute_publishes_latest_view_only_when_enabled(self) -> None:
         cfg = SimpleNamespace(
