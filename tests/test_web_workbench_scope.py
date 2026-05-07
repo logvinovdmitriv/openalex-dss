@@ -171,3 +171,70 @@ class WebWorkbenchScopeTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_local_data_missing_scope_state_distinguishes_empty_active_context(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("node is not available")
+        esbuild_check = subprocess.run(
+            ["node", "-e", "import('esbuild').catch(() => process.exit(1))"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if esbuild_check.returncode != 0:
+            self.skipTest("esbuild is not available")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            entry = tmp_path / "local_data_missing_scope_entry.ts"
+            out = tmp_path / "local_data_missing_scope_entry.mjs"
+            entry.write_text(
+                textwrap.dedent(
+                    f"""
+                    import {{ localDataMissingScopeState }} from {json.dumps(str(ROOT / "apps/web/src/workbench.ts"))};
+
+                    const scoped = localDataMissingScopeState({{ runId: "run_a" }});
+                    if (scoped.missing !== false || scoped.detail !== "") {{
+                      throw new Error(`expected explicit run to be ready, got ${{JSON.stringify(scoped)}}`);
+                    }}
+
+                    const noContext = localDataMissingScopeState({{}});
+                    if (noContext.missing !== true || !noContext.detail.includes("нужен активный run_id")) {{
+                      throw new Error(`expected missing active context detail, got ${{JSON.stringify(noContext)}}`);
+                    }}
+
+                    const emptyActive = localDataMissingScopeState({{ activeContext: {{ source: "legacy" }} }});
+                    if (emptyActive.missing !== true || !emptyActive.detail.includes("не содержит run_id")) {{
+                      throw new Error(`expected empty active context detail, got ${{JSON.stringify(emptyActive)}}`);
+                    }}
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            build = subprocess.run(
+                [
+                    "node",
+                    "-e",
+                    (
+                        "import('esbuild').then(({build}) => "
+                        f"build({{entryPoints:[{json.dumps(str(entry))}], bundle:true, platform:'node', "
+                        f"format:'esm', outfile:{json.dumps(str(out))}}}))"
+                    ),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+
+            result = subprocess.run(
+                ["node", str(out)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)

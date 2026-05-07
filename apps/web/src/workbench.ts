@@ -223,6 +223,38 @@ export function localDataNoScopeWarnings(...payloads: Array<LocalDataScopePayloa
   return warnings;
 }
 
+export type LocalDataMissingScopeState = {
+  missing: boolean;
+  detail: string;
+};
+
+export function localDataMissingScopeState(params: {
+  runId?: string;
+  dumpId?: string;
+  activeContext?: WorkbenchActiveContext | null;
+}): LocalDataMissingScopeState {
+  const runId = String(params.runId ?? "").trim();
+  const dumpId = String(params.dumpId ?? "").trim();
+  if (runId || dumpId) {
+    return { missing: false, detail: "" };
+  }
+  const hasActiveContext = Boolean(params.activeContext);
+  const activeHasScope = Boolean(
+    String(params.activeContext?.active_run_id ?? "").trim() ||
+      String(params.activeContext?.active_dump_id ?? "").trim(),
+  );
+  if (hasActiveContext && !activeHasScope) {
+    return {
+      missing: true,
+      detail: "Active context существует, но не содержит run_id или dump_id. Материализуйте срез заново либо выберите существующий dump/run.",
+    };
+  }
+  return {
+    missing: true,
+    detail: "Для просмотра локальных данных нужен активный run_id или dump_id. Материализуйте срез либо выберите существующий dump/run.",
+  };
+}
+
 export type LocalDataSummary = {
   kinds?: Array<{ kind: LocalDataKind; label: string }>;
   tables?: Record<LocalDataKind, Record<string, unknown>>;

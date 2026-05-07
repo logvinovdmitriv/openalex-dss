@@ -51,6 +51,7 @@ import {
   LOCAL_DATA_KIND_OPTIONS,
   localDataPreviewCsvUrl,
   localDataPreviewUrl,
+  localDataMissingScopeState,
   localDataNoScopeWarnings,
   localDataSummaryUrl,
   mutationError,
@@ -945,6 +946,7 @@ function LocalDataPage({
   const dumpRows = dumps?.dumps ?? workbench?.dumps ?? [];
   const totalRawMb = dumpRows.reduce((sum: number, dump: any) => sum + bytesToMb(Number(dump.bytes_written ?? dump.raw_size_bytes ?? 0)), 0);
   const noScopeWarnings = localDataNoScopeWarnings(localDataSummary, table);
+  const missingScope = localDataMissingScopeState({ runId: effectiveRunId, dumpId: effectiveDumpId, activeContext });
   return (
     <div className="stack">
       <section className="metric-grid">
@@ -965,6 +967,12 @@ function LocalDataPage({
           <ul className="plain-list">
             {noScopeWarnings.map((warning) => <li key={warning}>{warning}</li>)}
           </ul>
+        </section>
+      )}
+      {missingScope.missing && (
+        <section className="notice warn">
+          <b>Локальный scope не выбран</b>
+          <span>{missingScope.detail}</span>
         </section>
       )}
       <section className="panel">
@@ -1015,9 +1023,13 @@ function LocalDataPage({
             {ensureCurrentOption(localDataKindOptions, localDataKind).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <input value={tableQ} onChange={(event) => setTableQ(event.target.value)} placeholder="Поиск по локальной витрине" />
-          <a className="button-link" href={csvUrl}>CSV текущей витрины</a>
+          {!missingScope.missing && <a className="button-link" href={csvUrl}>CSV текущей витрины</a>}
         </div>
-        <DataGrid data={table} onSelect={onSelect} hiddenFields={["slice_id"]} />
+        {missingScope.missing ? (
+          <EmptyState title="Нет активного локального контекста" detail="Preview появится после выбора run/dump или после материализации среза." />
+        ) : (
+          <DataGrid data={table} onSelect={onSelect} hiddenFields={["slice_id"]} />
+        )}
       </section>
     </div>
   );
