@@ -39,6 +39,7 @@ def build_passports(
     dump_id: str = "",
     analysis_eligibility: dict[str, Any] | None = None,
     input_tables: dict[str, Any] | None = None,
+    primary_artifacts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root_path = Path(root)
     data_root = _data_root(root_path)
@@ -199,23 +200,31 @@ def build_passports(
     write_json(out / "slice_passport.json", slice_passport)
     write_json(out / "calculation_passport.json", calculation_passport)
 
-    checksums = {
-        rel: sha256_file(_artifact_path(root_path, data_root, rel))
-        for rel in PRIMARY_ARTIFACTS
-        if _artifact_path(root_path, data_root, rel).is_file()
-    }
-    checksums.update(_dynamic_primary_artifacts(root_path, data_root, cfg))
+    if primary_artifacts is None:
+        checksums = {
+            rel: sha256_file(_artifact_path(root_path, data_root, rel))
+            for rel in PRIMARY_ARTIFACTS
+            if _artifact_path(root_path, data_root, rel).is_file()
+        }
+        checksums.update(_dynamic_primary_artifacts(root_path, data_root, cfg))
+        checksum_notes = [
+            "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
+            "CLI raw dumps live under data/raw/openalex_cli/{slice_id}/ outside the repository.",
+            "CSV files are latest-view exports; Parquet files are written alongside them for local analytical reads.",
+        ]
+    else:
+        checksums = _primary_artifact_checksums(primary_artifacts)
+        checksum_notes = [
+            "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
+            "Primary checksums were built from scoped dump/run artifacts, not compatibility latest-view files.",
+        ]
     manifest_path = _write_sha256_manifest(root_path, data_root, cfg.slice_name, checksums)
     checksums_doc = {
         "algorithm": "SHA-256",
         "slice_id": cfg.slice_name,
         "primary_artifacts": checksums,
         "sha256_manifest": _display_path(root_path, data_root, manifest_path),
-        "notes": [
-            "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
-            "CLI raw dumps live under data/raw/openalex_cli/{slice_id}/ outside the repository.",
-            "CSV files are latest-view exports; Parquet files are written alongside them for local analytical reads.",
-        ],
+        "notes": checksum_notes,
     }
     write_json(out / "checksums.json", checksums_doc)
     return checksums_doc
@@ -243,6 +252,22 @@ def _dynamic_primary_artifacts(root_path: Path, data_root: Path, cfg: SliceConfi
         rel = str(Path("data") / dump_manifest.relative_to(data_root))
         artifacts[rel] = sha256_file(dump_manifest)
     return artifacts
+
+
+def _primary_artifact_checksums(primary_artifacts: dict[str, Any]) -> dict[str, str]:
+    checksums: dict[str, str] = {}
+    for label, value in primary_artifacts.items():
+        path = _primary_artifact_path(value)
+        if path and path.is_file():
+            checksums[str(label)] = sha256_file(path)
+    return checksums
+
+
+def _primary_artifact_path(value: Any) -> Path | None:
+    raw = value.get("path") if isinstance(value, dict) else value
+    if not raw:
+        return None
+    return Path(str(raw))
 
 
 def _data_root(root_path: Path) -> Path:

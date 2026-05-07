@@ -309,6 +309,18 @@ def _run_compute(
     }
     _publish_latest_view(input_tables, run_table_outputs, run_result_outputs)
     input_table_manifest = _table_manifest(input_tables, input_table_checksums)
+    primary_artifacts = {
+        "dump/tables/works.parquet": input_table_manifest.get("works"),
+        "dump/tables/authorships.parquet": input_table_manifest.get("authorships"),
+        "dump/tables/work_topics.parquet": input_table_manifest.get("work_topics"),
+        "run/tables/author_work.csv": author_work_csv,
+        "run/tables/indices.csv": indices_csv,
+        "run/tables/ratings.csv": ratings_csv,
+        "run/results/stats_summary.json": stats_json,
+        "run/results/theory_validation.json": theory_json,
+        "run/results/theory_top1_sensitivity.csv": run_results / "theory_top1_sensitivity.csv",
+        "run/results/theory_fraction_mode_sensitivity.csv": run_results / "theory_fraction_mode_sensitivity.csv",
+    }
     build_passports(
         cfg,
         ROOT,
@@ -317,6 +329,7 @@ def _run_compute(
         dump_id=dump_id,
         analysis_eligibility=analysis_eligibility,
         input_tables=input_table_manifest,
+        primary_artifacts=primary_artifacts,
     )
     passport_outputs = {
         "slice_passport": str(run_passports / "slice_passport.json"),

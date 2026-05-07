@@ -344,6 +344,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         def fake_build_passports(*args: object, **kwargs: object) -> dict[str, object]:
             captured["passport_out_dir"] = args[2]
             captured["passport_input_tables"] = kwargs.get("input_tables")
+            captured["passport_primary_artifacts"] = kwargs.get("primary_artifacts")
             return {}
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -385,6 +386,8 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(Path(captured["passport_out_dir"]), root / "runs" / "run_A" / "passports")
         self.assertIn("works", captured["passport_input_tables"])
         self.assertEqual(captured["passport_input_tables"]["works"]["path"], str(dump_a / "works.parquet"))
+        self.assertEqual(captured["passport_primary_artifacts"]["dump/tables/works.parquet"]["path"], str(dump_a / "works.parquet"))
+        self.assertEqual(Path(captured["passport_primary_artifacts"]["run/tables/indices.csv"]), root / "runs" / "run_A" / "tables" / "indices.csv")
 
     def test_recalculate_writes_pipeline_summary_before_archive_and_report(self) -> None:
         events: list[str] = []

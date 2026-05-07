@@ -147,6 +147,41 @@ class EdgeCaseTests(unittest.TestCase):
 
             self.assertIn("data/raw/openalex_cli/slice_checksum/works.jsonl.gz", checksums["primary_artifacts"])
 
+    def test_build_passports_can_checksum_scoped_primary_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "data"
+            scoped = root / "scoped"
+            scoped.mkdir()
+            works = scoped / "works.parquet"
+            indices = scoped / "indices.csv"
+            latest_indices = data / "results" / "author_indices.csv"
+            latest_indices.parent.mkdir(parents=True)
+            works.write_text("scoped works", encoding="utf-8")
+            indices.write_text("scoped indices", encoding="utf-8")
+            latest_indices.write_text("latest indices", encoding="utf-8")
+            cfg = replace_config(
+                load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
+                slice_name="slice_scoped_checksums",
+            )
+
+            with patch.dict(os.environ, {"OPENALEX_DSS_DATA_DIR": str(data)}):
+                checksums = build_passports(
+                    cfg,
+                    Path(__file__).resolve().parents[1],
+                    data / "runs/run_a/passports",
+                    primary_artifacts={
+                        "dump/tables/works.parquet": {"path": str(works)},
+                        "run/tables/indices.csv": str(indices),
+                    },
+                )
+
+            primary = checksums["primary_artifacts"]
+            self.assertIn("dump/tables/works.parquet", primary)
+            self.assertIn("run/tables/indices.csv", primary)
+            self.assertNotIn("data/results/author_indices.csv", primary)
+            self.assertTrue(any("scoped dump/run artifacts" in note for note in checksums["notes"]))
+
 
 def _work(work_id: str, author_id: str, citations: int) -> dict:
     return {
