@@ -10,7 +10,7 @@ from typing import Any
 
 import duckdb
 
-from app.core.paths import DATA, JSON_FILES, PARQUET_TABLE_FILES, SRC, TABLE_FILES, WAREHOUSE
+from app.core.paths import DATA, SRC, TABLE_FILES, WAREHOUSE
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -75,10 +75,8 @@ def connect_scope(*, run_id: str = "", dump_id: str = "") -> duckdb.DuckDBPyConn
 
 
 def register_views(conn: duckdb.DuckDBPyConnection, *, run_id: str = "", dump_id: str = "") -> None:
-    for name, path in TABLE_FILES.items():
+    for name in TABLE_FILES:
         table_path = resolve_scoped_table_path(name, run_id=run_id, dump_id=dump_id)
-        if table_path is None and not (run_id or dump_id):
-            table_path = _preferred_table_path(name, path)
         if table_path and table_path.exists():
             _register_file_view(conn, name, table_path)
 
@@ -100,7 +98,6 @@ def resolve_scoped_table_path(
     *,
     run_id: str | None = None,
     dump_id: str | None = None,
-    latest: bool = False,
 ) -> Path | None:
     if table not in TABLE_FILES:
         raise ValueError(f"Unknown table: {table}")
@@ -117,13 +114,11 @@ def resolve_scoped_table_path(
         run_path = _run_table_path(run_id, canonical)
         if run_path:
             return run_path
-        return None if not latest else _preferred_table_path(table, TABLE_FILES[table])
+        return None
 
     if dump_id and _canonical_table_name(table) in DUMP_TABLES:
         return _dump_table_path(dump_id, _canonical_table_name(table))
 
-    if latest or not (run_id or dump_id):
-        return _preferred_table_path(table, TABLE_FILES[table])
     return None
 
 
@@ -146,24 +141,20 @@ def table_exists(name: str, *, run_id: str = "", dump_id: str = "") -> bool:
 
 def list_tables(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
-    scoped = bool(scope["run_id"] or scope["dump_id"])
+    if not (scope["run_id"] or scope["dump_id"]):
+        return {}
     tables: dict[str, Any] = {}
-    for name, path in TABLE_FILES.items():
+    for name in TABLE_FILES:
         resolved_path = resolve_scoped_table_path(name, run_id=scope["run_id"], dump_id=scope["dump_id"])
-        latest_path = _preferred_table_path(name, path)
         exists = bool(resolved_path and resolved_path.exists())
         tables[name] = {
-            "path": str(resolved_path or (latest_path if not scoped else "")),
+            "path": str(resolved_path or ""),
             "resolved_path": str(resolved_path or ""),
-            "latest_path": str(latest_path),
-            "csv_path": str(path),
-            "parquet_path": str(PARQUET_TABLE_FILES.get(name, "")),
-            "uses_latest_fallback": bool(not scoped and resolved_path is None and latest_path.exists()),
-            "scope": "run" if scope["run_id"] else ("dump" if scope["dump_id"] else "latest"),
+            "scope": "run" if scope["run_id"] else "dump",
             "run_id": scope["run_id"],
             "dump_id": scope["dump_id"],
-            "exists": exists if scoped else table_exists(name),
-            "rows": count_rows(name, run_id=scope["run_id"], dump_id=scope["dump_id"]) if scoped else count_rows(name),
+            "exists": exists,
+            "rows": count_rows(name, run_id=scope["run_id"], dump_id=scope["dump_id"]),
         }
     return tables
 
@@ -918,11 +909,7 @@ def read_json_doc(name: str, *, run_id: str = "") -> dict[str, Any] | None:
         path = _run_json_path(run_id, name)
         if path and path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
-        return None
-    path = JSON_FILES.get(name)
-    if not path or not path.exists():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    return None
 
 
 def author_detail(author_id: str, *, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
@@ -1210,13 +1197,6 @@ def _first_nonempty(values: Any) -> str | None:
     return None
 
 
-def _preferred_table_path(name: str, csv_path: Path) -> Path:
-    parquet_path = PARQUET_TABLE_FILES.get(name)
-    if parquet_path and parquet_path.exists():
-        return parquet_path
-    return csv_path
-
-
 def _canonical_table_name(table: str) -> str:
     return RUN_TABLE_ALIASES.get(table, table)
 
@@ -1269,8 +1249,6 @@ def _run_metric_params(run_id: str) -> dict[str, Any]:
     candidates: list[tuple[Path, str]] = []
     if run_id:
         candidates.append((_run_dir(run_id) / "passports" / "calculation_passport.json", "run_calculation_passport"))
-    else:
-        candidates.append((DATA / "passports" / "calculation_passport.json", "latest_calculation_passport"))
     for path, source in candidates:
         if not path.is_file():
             continue

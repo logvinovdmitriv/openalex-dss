@@ -154,16 +154,14 @@ OpenAlex Works API возвращает вложенные `authorships`; MVP н
 - `$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/` - неизменяемый локальный микродамп;
 - `data/ref/` и `config/mappings/vak_topic_mapping.yaml` - mapping ВАК ->
   OpenAlex topics/subfields/keywords;
-- `$OPENALEX_DSS_DATA_DIR/curated/{slice_id}/` - тонкие `works_flat` и `authorships_flat`;
-- `$OPENALEX_DSS_DATA_DIR/marts/{slice_id}/` - `author_work_metrics` и `author_indices`;
-- `$OPENALEX_DSS_DATA_DIR/reports/{slice_id}/` - CSV/JSON/графики отчета;
-- `$OPENALEX_DSS_DATA_DIR/passports/` - паспорта текущего запуска;
-- `$OPENALEX_DSS_DATA_DIR/checksums/{slice_id}/sha256_manifest.txt` - контрольные суммы.
+- `$OPENALEX_DSS_DATA_DIR/dumps/{dump_id}/normalized/` - dump-scoped плоские CSV;
+- `$OPENALEX_DSS_DATA_DIR/tables/{dump_id}/` - canonical parquet-таблицы локального корпуса;
+- `$OPENALEX_DSS_DATA_DIR/runs/{run_id}/tables/` - производные run-таблицы `author_work`, `indices`, `ratings`;
+- `$OPENALEX_DSS_DATA_DIR/runs/{run_id}/passports/` - паспорта и checksum manifest текущего запуска;
+- `$OPENALEX_DSS_DATA_DIR/runs/{run_id}/reports/` - воспроизводимый report bundle.
 
-Текущая реализация сохраняет latest-view CSV и Parquet-файлы в
-`data/normalized`, `data/parquet`, `data/marts`, `data/results`; в приложении
-эти пути являются виртуальным алиасом на внешний `OPENALEX_DSS_DATA_DIR`, а не
-папкой внутри репозитория.
+Приложение читает эти артефакты только через явный `dump_id`/`run_id`; глобальные
+fallback-пути не используются как источник аналитики.
 
 ## Компактный дамп MVP
 

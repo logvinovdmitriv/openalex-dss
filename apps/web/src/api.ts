@@ -9,7 +9,6 @@ export type TableResponse = {
   offset: number;
   scope_status?: string;
   reproducible?: boolean;
-  scope_warnings?: string[];
   warnings?: string[];
 };
 

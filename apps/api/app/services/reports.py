@@ -408,8 +408,8 @@ def _preview_report(report_scope: dict[str, Any]) -> dict[str, Any]:
         "run_id": str(report_scope.get("run_id") or ""),
         "dump_id": str(report_scope.get("dump_id") or ""),
         "report_scope": report_scope,
-        "message": "Final report build requires explicit run_id. Dump-only and latest-view report modes are development previews because they do not have run-scoped passports, checksums and local metric tables.",
-        "no_latest_fallback": False,
+        "message": "Final report build requires explicit run_id with run-scoped passports, checksums and local metric tables.",
+        "no_latest_fallback": True,
     }
 
 
@@ -448,7 +448,7 @@ def _cached_report_bundle_current(cached: dict[str, Any], *, cohort_id: str = ""
 
 def _report_warnings(cohort_filter_policy: str) -> list[str]:
     if str(cohort_filter_policy or "").strip().lower() == "auto":
-        return ["cohort_filter_policy=auto is a legacy compatibility mode and should not be used for final analysis."]
+        return ["cohort_filter_policy=auto is not suitable for final analysis."]
     return []
 
 

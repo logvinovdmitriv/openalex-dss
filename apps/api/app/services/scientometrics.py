@@ -1037,6 +1037,9 @@ def _analysis_context(
         fraction_mode = str(fraction_mode or "strict_authors_count")
         resolved_filters = request_filters
 
+    if not (str(run_id or "").strip() or str(dump_id or "").strip()):
+        raise ValueError("run_id or dump_id is required for scientometric analysis.")
+
     rank_top_n = max(1, min(int(top_n or 100), 1000))
     rows = warehouse.filtered_author_indices(fraction_mode, resolved_filters, run_id=run_id, dump_id=dump_id)
     rows = warehouse.filter_rows_by_author_ids(rows, author_ids)
@@ -1088,7 +1091,7 @@ def _analysis_warnings(
     if rows and len(rows) > rank_top_n:
         warnings.append("rank_top_n limits only rank comparisons and overlap; descriptive statistics use all resolved authors.")
     if cohort_filter_policy == "auto":
-        warnings.append("cohort_filter_policy=auto is a legacy compatibility mode and should not be used for final analysis.")
+        warnings.append("cohort_filter_policy=auto is not suitable for final analysis.")
     missing_metrics = [metric for metric in metrics if not _metric_values(rows, metric)]
     if missing_metrics and rows:
         warnings.append(f"No numeric values were available for metrics: {', '.join(missing_metrics)}.")

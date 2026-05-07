@@ -205,24 +205,6 @@ export function effectiveUiScope(params: {
   return { runId: "", dumpId: "", source: "none" };
 }
 
-export type LocalDataScopePayload = {
-  scope_status?: string;
-  scope_warnings?: string[];
-  warnings?: string[];
-};
-
-export function localDataNoScopeWarnings(...payloads: Array<LocalDataScopePayload | null | undefined>): string[] {
-  const warnings: string[] = [];
-  for (const payload of payloads) {
-    if (payload?.scope_status !== "implicit_latest_preview") continue;
-    const candidates = [...(payload.warnings ?? []), ...(payload.scope_warnings ?? [])];
-    for (const warning of candidates) {
-      if (warning && !warnings.includes(warning)) warnings.push(warning);
-    }
-  }
-  return warnings;
-}
-
 export type LocalDataMissingScopeState = {
   missing: boolean;
   detail: string;
@@ -262,7 +244,6 @@ export type LocalDataSummary = {
   dump_id?: string;
   scope_status?: string;
   reproducible?: boolean;
-  scope_warnings?: string[];
   warnings?: string[];
 };
 

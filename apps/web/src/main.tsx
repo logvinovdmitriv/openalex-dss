@@ -52,7 +52,6 @@ import {
   localDataPreviewCsvUrl,
   localDataPreviewUrl,
   localDataMissingScopeState,
-  localDataNoScopeWarnings,
   localDataSummaryUrl,
   mutationError,
   pageLead,
@@ -945,7 +944,6 @@ function LocalDataPage({
 }) {
   const dumpRows = dumps?.dumps ?? workbench?.dumps ?? [];
   const totalRawMb = dumpRows.reduce((sum: number, dump: any) => sum + bytesToMb(Number(dump.bytes_written ?? dump.raw_size_bytes ?? 0)), 0);
-  const noScopeWarnings = localDataNoScopeWarnings(localDataSummary, table);
   const missingScope = localDataMissingScopeState({ runId: effectiveRunId, dumpId: effectiveDumpId, activeContext });
   return (
     <div className="stack">
@@ -961,14 +959,6 @@ function LocalDataPage({
         effectiveRunId={effectiveRunId}
         effectiveDumpId={effectiveDumpId}
       />
-      {noScopeWarnings.length > 0 && (
-        <section className="notice warn">
-          <b>Невоспроизводимый preview локальных данных</b>
-          <ul className="plain-list">
-            {noScopeWarnings.map((warning) => <li key={warning}>{warning}</li>)}
-          </ul>
-        </section>
-      )}
       {missingScope.missing && (
         <section className="notice warn">
           <b>Локальный scope не выбран</b>
@@ -2131,7 +2121,7 @@ function ReportsPage({
         {!hasReportDataScope && (
           <div className="notice warn">
             <b>Локальные CSV требуют явный scope</b>
-            <span>Выберите run_id или dump_id: ссылки на локальные витрины не показываются для неявного latest/local context.</span>
+            <span>Выберите run_id или dump_id: ссылки на локальные витрины не показываются без явного scope.</span>
           </div>
         )}
         {!hasAnalyticsExportScope && (

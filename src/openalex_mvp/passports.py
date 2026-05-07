@@ -103,19 +103,13 @@ def build_passports(
         "per_page": cfg.per_page,
         "select_fields": list(cfg.select_fields),
         "storage_strategy": {
-            "principle": "raw immutable dump -> thin curated slice -> transient marts -> reports/passports",
+            "principle": "raw immutable dump -> scoped dump tables -> scoped run tables -> report bundle",
             "raw_layer": f"data/raw/openalex_cli/{cfg.slice_name}/",
-            "curated_layer": f"data/curated/{cfg.slice_name}/",
-            "mart_layer": f"data/marts/{cfg.slice_name}/",
-            "reports_layer": f"data/reports/{cfg.slice_name}/",
-            "checksums_layer": f"data/checksums/{cfg.slice_name}/",
-            "latest_view_paths": {
-                "raw": f"data/raw/openalex_cli/{cfg.slice_name}/works.jsonl.gz",
-                "works_flat": "data/normalized/works_flat.csv",
-                "authorships_flat": "data/normalized/authorships_flat.csv",
-                "author_work_metrics": "data/marts/author_work_metrics.csv",
-                "author_indices": "data/results/author_indices.csv",
-            },
+            "dump_layer": f"data/dumps/{dump_id or '<dump_id>'}/",
+            "canonical_tables_layer": f"data/tables/{dump_id or '<dump_id>'}/",
+            "run_tables_layer": f"data/runs/{run_id or '<run_id>'}/tables/",
+            "run_passports_layer": f"data/runs/{run_id or '<run_id>'}/passports/",
+            "reports_layer": f"data/runs/{run_id or '<run_id>'}/reports/",
         },
         "optimization_policy": {
             "principle": "download minimum, store once, compute locally, cache repeated OpenAlex calls",
@@ -198,14 +192,14 @@ def build_passports(
         checksum_notes = [
             "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
             "CLI raw dumps live under data/raw/openalex_cli/{slice_id}/ outside the repository.",
-            "CSV files are latest-view exports; Parquet files are written alongside them for local analytical reads.",
+            "Primary checksums were built from the provided artifact list.",
         ]
         manifest_path = _write_sha256_manifest(root_path, data_root, cfg.slice_name, checksums)
     else:
         checksums = _primary_artifact_checksums(primary_artifacts)
         checksum_notes = [
             "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
-            "Primary checksums were built from scoped dump/run artifacts, not compatibility latest-view files.",
+            "Primary checksums were built from scoped dump/run artifacts.",
         ]
         manifest_path = _write_sha256_manifest_for_out_dir(out, checksums)
     checksums_doc = {

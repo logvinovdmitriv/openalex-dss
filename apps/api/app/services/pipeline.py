@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from app.core.paths import DATA, JSON_FILES, PARQUET_TABLE_FILES, ROOT, SRC, TABLE_FILES
+from app.core.paths import DATA, ROOT, SRC
 from app.providers import openalex_cli_provider
 from app.services import artifact_context, author_slice
 from app.services.filesystem import file_profile, resolve_safe_path
@@ -22,14 +22,6 @@ from openalex_mvp.metrics import build_author_work_metrics, compute_indices  # n
 from openalex_mvp.normalize import normalize_raw  # noqa: E402
 from openalex_mvp.passports import build_passports  # noqa: E402
 from openalex_mvp.ranking import build_ratings  # noqa: E402
-
-
-COMPATIBILITY_LATEST_FILES = [
-    *TABLE_FILES.values(),
-    *PARQUET_TABLE_FILES.values(),
-    *JSON_FILES.values(),
-]
-
 
 def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     cfg = _cfg(payload)
@@ -220,30 +212,6 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
     return author_slice.preview(payload)
 
 
-def clear_compatibility_latest_view() -> dict[str, Any]:
-    removed: list[str] = []
-    for path in COMPATIBILITY_LATEST_FILES:
-        if path.exists() and path.is_file():
-            path.unlink()
-            removed.append(_display_path(path))
-    for base in (DATA / "checksums", DATA / "curated", DATA / "reports"):
-        if not base.exists():
-            continue
-        for path in base.rglob("*"):
-            if path.is_file():
-                path.unlink()
-                removed.append(_display_path(path))
-    for fig in (DATA / "results/figures").glob("*"):
-        if fig.is_file():
-            fig.unlink()
-            removed.append(_display_path(fig))
-    return {"status": "ok", "mode": "clear_compatibility_latest_view", "removed": removed}
-
-
-def clear_generated_data() -> dict[str, Any]:
-    return clear_compatibility_latest_view()
-
-
 def resolve_dump_tables(dump_id: str, *, required: bool = True) -> dict[str, Path]:
     safe_dump_id = _safe_id(str(dump_id or ""))
     base = DATA / "tables" / safe_dump_id
@@ -377,8 +345,6 @@ def _run_compute(
         "indices": indices_csv,
         "ratings": ratings_csv,
     }
-    if _publish_latest_view_enabled():
-        _publish_latest_view(input_tables, run_table_outputs)
     input_table_manifest = _table_manifest(input_tables, input_table_checksums)
     primary_artifacts = {
         "dump/tables/works.parquet": input_table_manifest.get("works"),
@@ -413,45 +379,6 @@ def _run_compute(
     }
 
 
-def _publish_latest_view(input_tables: dict[str, Path], run_tables: dict[str, Path]) -> None:
-    for name in ("works", "authorships", "work_topics"):
-        target = PARQUET_TABLE_FILES.get(name)
-        source = input_tables.get(name)
-        if source and target:
-            Path(target).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-
-    table_pairs = {
-        "author_work": "author_work",
-        "indices": "indices",
-        "ratings": "ratings",
-    }
-    for source_key, table_key in table_pairs.items():
-        source_csv = run_tables[source_key]
-        csv_target = TABLE_FILES.get(table_key)
-        if csv_target:
-            Path(csv_target).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_csv, csv_target)
-        source_parquet = source_csv.with_suffix(".parquet")
-        parquet_target = PARQUET_TABLE_FILES.get(table_key)
-        if source_parquet.is_file() and parquet_target:
-            Path(parquet_target).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_parquet, parquet_target)
-        if table_key == "indices":
-            local_metrics_target = TABLE_FILES.get("authors_local_metrics")
-            local_metrics_parquet_target = PARQUET_TABLE_FILES.get("authors_local_metrics")
-            if local_metrics_target:
-                Path(local_metrics_target).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_csv, local_metrics_target)
-            if source_parquet.is_file() and local_metrics_parquet_target:
-                Path(local_metrics_parquet_target).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_parquet, local_metrics_parquet_target)
-
-
-def _publish_latest_view_enabled() -> bool:
-    return os.environ.get("OPENALEX_DSS_PUBLISH_LATEST_VIEW") == "1"
-
-
 def _table_checksums(paths: dict[str, Path]) -> dict[str, str]:
     return {name: sha256_file(path) for name, path in paths.items() if path.is_file()}
 
@@ -471,15 +398,6 @@ def _cfg(payload: dict[str, Any]) -> Any:
     return author_slice.config_from_payload(payload)
 
 
-def _display_path(path: Any) -> str:
-    resolved = path.resolve()
-    if resolved == DATA.resolve() or DATA.resolve() in resolved.parents:
-        return str(os.path.join("data", str(resolved.relative_to(DATA.resolve()))))
-    if resolved == ROOT.resolve() or ROOT.resolve() in resolved.parents:
-        return str(resolved.relative_to(ROOT.resolve()))
-    return str(resolved)
-
-
 def _write_pipeline_summary(mode: str, cfg: Any, payload: dict[str, Any]) -> None:
     doc = author_slice.preview(config_to_payload(cfg))
     doc["mode"] = mode
@@ -491,15 +409,16 @@ def _write_pipeline_summary(mode: str, cfg: Any, payload: dict[str, Any]) -> Non
         doc["dump"] = payload["dump"]
     if payload.get("analysis_eligibility"):
         doc["analysis_eligibility"] = payload["analysis_eligibility"]
-    if _publish_latest_view_enabled():
-        write_json(JSON_FILES["pipeline"], doc)
     run_id = str(payload.get("run_id") or "").strip()
     if run_id:
         write_json(DATA / "runs" / _safe_id(run_id) / "passports" / "pipeline_summary.json", doc)
 
 
 def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    run_id = _safe_id(str(payload.get("run_id") or "latest"))
+    raw_run_id = str(payload.get("run_id") or "").strip()
+    if not raw_run_id:
+        raise ValueError("run_id is required to archive scoped run artifacts")
+    run_id = _safe_id(raw_run_id)
     dump_id = _safe_id(str(payload.get("dump_id") or _dump_id_from_payload(payload) or cfg.slice_name))
     run_dir = DATA / "runs" / run_id
     dump_dir = DATA / "dumps" / dump_id
@@ -524,7 +443,6 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "input_table_checksums": payload.get("input_table_checksums") or {},
         "run_table_outputs": run_table_outputs,
         "passport_outputs": passport_outputs,
-        "latest_view_note": "Global normalized/results paths are only the UI latest-view; reproducible artifacts are archived under this run_id and dump_id.",
     }
     write_json(run_dir / "metric_run.json", manifest)
     if payload.get("dump_manifest"):

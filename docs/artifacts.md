@@ -1,9 +1,8 @@
 # Artifact Model
 
-The MVP uses scoped artifacts as the source of truth. Global latest-view files
-still exist as a compatibility layer for preview/UI fallback, but final analysis
-and reports should be addressed by explicit `dump_id`, `run_id`, and
-`report_scope_hash`.
+The MVP uses scoped artifacts as the source of truth. Data access is addressed
+by explicit `dump_id`, `run_id`, and `report_scope_hash`; endpoints do not read
+global fallback files.
 
 ## Artifact Classes
 
@@ -27,11 +26,7 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 | `runs/{run_id}/passports/checksums.json` | canonical | run | scoped checksum manifest for report bundles |
 | `runs/{run_id}/passports/pipeline_summary.json` | canonical | run | pipeline summary for report bundles |
 | `runs/{run_id}/reports/report_{report_scope_hash}.json` | canonical | report | reproducible report bundle for an analysis scope |
-| `results/author_indices.csv` | compatibility latest-view | latest | UI fallback only when no explicit scope is selected |
-| `results/rating_positions.csv` | compatibility latest-view | latest | UI fallback only when no explicit scope is selected |
-| `normalized/*.csv`, `parquet/*.parquet`, `marts/*` | compatibility latest-view | latest | current preview/read compatibility |
-| `passports/*.json` | compatibility latest-view | latest | latest UI/passport preview |
-| `workbench/active_context.json` | pointer | active context | small pointer to the latest active `run_id` and `dump_id` |
+| `workbench/active_context.json` | pointer | active context | small pointer to the current active `run_id` and `dump_id` |
 
 ## Rules
 
@@ -43,7 +38,7 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   `data/parquet` as staging.
 - Import/fetch metadata is written under `dumps/{dump_id}/fetch_meta.json` and
   copied into `runs/{run_id}/passports/fetch_meta.json` from that scoped source.
-  The global `data/passports/fetch_meta.json` path is legacy-only.
+  It is not written to a global passport path.
 - Import runs include `dumps/{dump_id}/fetch_meta.json` and
   `dumps/{dump_id}/quality_report.json` in scoped checksum passports alongside
   dump tables and run outputs. If a dump manifest is provided during import, it
@@ -54,47 +49,29 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   ratings, run passports, and scoped report bundles.
 - Slice, calculation, checksum, and pipeline summary passports are written
   directly under `runs/{run_id}/passports` when a `run_id` is available.
-  Compatibility latest passport paths are not the source for these run-scoped
-  passport artifacts.
-- Run checksum passports are built from scoped dump/run artifacts when the
-  pipeline provides a scoped artifact map. Compatibility latest-view paths are
-  used only by legacy `build_passports(...)` calls that do not provide scoped
-  primary artifacts. Scoped checksum manifests are written beside
+  Global passport paths are not the source for these run-scoped passport
+  artifacts.
+- Run checksum passports are built from scoped dump/run artifacts. Scoped
+  checksum manifests are written beside
   `runs/{run_id}/passports/checksums.json` as
-  `runs/{run_id}/passports/sha256_manifest.txt`; the shared
-  `data/checksums/{slice_id}` path is legacy-only.
+  `runs/{run_id}/passports/sha256_manifest.txt`.
 - Run archiving records/copies `run_id` artifacts from scoped compute outputs
   and dump tables from the scoped input table manifest. It does not use
-  compatibility latest-view table paths as the archive source.
+  global fallback table paths as the archive source.
 - `author_work` belongs to `run_id`; it must not be archived as a dump-owned
   table under `tables/{dump_id}`.
 - `report_scope_hash` owns report reproducibility for a selected metric,
-  filters, cohort, baseline, rank Top-N, and scientometric version set.
-- Latest-view files are compatibility artifacts. They are not a stable source
-  for dissertation-grade reports.
-- Latest-view publication is disabled by default for pipeline compute and the
-  global `passports/pipeline_summary.json` compatibility mirror. Set
-  `OPENALEX_DSS_PUBLISH_LATEST_VIEW=1` only when an explicit compatibility
-  mirror is needed for older local workflows.
-- Compatibility latest cleanup removes only legacy latest-view files and
-  scratch compatibility folders; it must not remove canonical `runs/`,
-  `dumps/`, or `tables/{dump_id}` artifacts.
-- Local-data preview routes may still read latest-view files during the
-  transition, but no-scope responses are marked as
-  `scope_status=implicit_latest_preview` and `reproducible=false`.
-- Local-data CSV exports require explicit `run_id`/`dump_id`; compatibility
-  latest CSV export is available only with `allow_latest_preview=true`.
-- Analytics CSV and Markdown exports require explicit `run_id`/`dump_id` or a
-  cohort-resolved scope; compatibility latest exports require
-  `allow_latest_preview=true`.
+  filters, cohort, baseline, rank Top-N, and scientometric analysis parameters.
+- Local-data preview and CSV routes require explicit `run_id`/`dump_id`.
+- Analytics JSON, CSV, and Markdown routes require explicit `run_id`/`dump_id`
+  or a cohort-resolved scope.
 - `/workbench` table summaries are resolved from `active_context` when it has
   an active `run_id` or `dump_id`. Without active context, `/workbench` does not
-  expose latest-view table counts as current scoped data.
+  expose global fallback table counts as current scoped data.
 - `/workbench` quality summary is resolved from the active `run_id`. Without an
-  active run, `/workbench` does not read compatibility latest-view quality
-  reports.
-- Final report and analytics paths must prefer explicit `run_id`/`dump_id` and
-  avoid implicit latest fallback.
+  active run, `/workbench` does not read global fallback quality reports.
+- Final report and analytics paths require scoped artifacts and avoid implicit
+  fallback.
 
 ## Active Context Pointer
 
@@ -111,13 +88,9 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 }
 ```
 
-It can replace large latest-view copies in a later storage cleanup. During the
-transition, latest-view files remain a compatibility layer while scoped
-artifacts remain the source of truth. `/workbench` exposes this pointer for UI
-state. The UI may use active context as the default preview scope for local
-data, rankings, cohorts, and scientometrics, but final reports should still use
-explicit scope parameters. `/workbench` uses the pointer to read scoped table
-counts and returns an empty table summary when the pointer is absent, rather
-than deriving status from compatibility latest-view files. Run quality is read
-from the active run only; dump-only or missing active context returns an empty
-quality summary instead of using latest-view quality.
+`/workbench` exposes this pointer for UI state. The UI may use active context as
+the default preview scope for local data, rankings, cohorts, and
+scientometrics, but final reports should still use explicit scope parameters.
+`/workbench` uses the pointer to read scoped table counts and returns an empty
+table summary when the pointer is absent. Run quality is read from the active
+run only; dump-only or missing active context returns an empty quality summary.

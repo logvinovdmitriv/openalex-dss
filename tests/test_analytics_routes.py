@@ -124,23 +124,23 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["run_id"], "run_a")
         self.assertEqual(payload["cohort"]["cohort_id"], "cohort_a")
 
-    def test_ranking_json_marks_no_scope_as_implicit_latest_preview(self) -> None:
+    def test_ranking_json_without_scope_requires_scope(self) -> None:
         with (
             patch.object(
                 analytics_routes.warehouse,
                 "metric_ranking",
                 return_value={"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "", "dump_id": ""},
-            ),
+            ) as metric_ranking,
             patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
         ):
-            payload = analytics_routes.ranking_json(fraction_mode="integer", metric="h", limit=100)
+            with self.assertRaises(analytics_routes.HTTPException) as raised:
+                analytics_routes.ranking_json(fraction_mode="integer", metric="h", limit=100)
 
-        self.assertEqual(payload["scope_status"], "implicit_latest_preview")
-        self.assertEqual(payload["reproducible"], False)
-        self.assertIn("No run_id or dump_id was provided", payload["scope_warnings"][0])
-        self.assertIn("No run_id or dump_id was provided", payload["warnings"][0])
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
+        metric_ranking.assert_not_called()
 
-    def test_ranking_json_does_not_treat_unrequested_resolved_scope_as_reproducible(self) -> None:
+    def test_ranking_json_rejects_unrequested_resolved_scope(self) -> None:
         with (
             patch.object(
                 analytics_routes.warehouse,
@@ -149,10 +149,11 @@ class AnalyticsRouteTests(unittest.TestCase):
             ),
             patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
         ):
-            payload = analytics_routes.ranking_json(fraction_mode="integer", metric="h", limit=100)
+            with self.assertRaises(analytics_routes.HTTPException) as raised:
+                analytics_routes.ranking_json(fraction_mode="integer", metric="h", limit=100)
 
-        self.assertEqual(payload["scope_status"], "implicit_latest_preview")
-        self.assertEqual(payload["reproducible"], False)
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
 
     def test_ranking_json_marks_explicit_scope_as_reproducible(self) -> None:
         with (
@@ -167,24 +168,23 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         self.assertEqual(payload["scope_status"], "explicit_scope")
         self.assertEqual(payload["reproducible"], True)
-        self.assertEqual(payload["scope_warnings"], [])
         self.assertEqual(payload["warnings"], [])
 
-    def test_distribution_marks_no_scope_as_implicit_latest_preview(self) -> None:
+    def test_distribution_without_scope_requires_scope(self) -> None:
         with (
             patch.object(
                 analytics_routes.warehouse,
                 "metric_distribution",
                 return_value={"histogram": [], "run_id": "", "dump_id": ""},
-            ),
+            ) as metric_distribution,
             patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
         ):
-            payload = analytics_routes.distribution(fraction_mode="integer", metric="h")
+            with self.assertRaises(analytics_routes.HTTPException) as raised:
+                analytics_routes.distribution(fraction_mode="integer", metric="h")
 
-        self.assertEqual(payload["scope_status"], "implicit_latest_preview")
-        self.assertEqual(payload["reproducible"], False)
-        self.assertIn("No run_id or dump_id was provided", payload["scope_warnings"][0])
-        self.assertIn("No run_id or dump_id was provided", payload["warnings"][0])
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
+        metric_distribution.assert_not_called()
 
     def test_ranking_csv_with_empty_cohort_has_header_only(self) -> None:
         cohort = {
@@ -213,7 +213,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(response.headers["X-OpenAlex-DSS-Scope-Status"], "cohort_resolved_scope")
         self.assertEqual(response.headers["X-OpenAlex-DSS-Reproducible"], "true")
 
-    def test_ranking_csv_without_scope_requires_explicit_opt_in(self) -> None:
+    def test_ranking_csv_without_scope_requires_scope(self) -> None:
         with (
             patch.object(
                 analytics_routes.warehouse,
@@ -227,27 +227,6 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
-
-    def test_ranking_csv_without_scope_opt_in_has_scope_headers(self) -> None:
-        with (
-            patch.object(
-                analytics_routes.warehouse,
-                "metric_ranking",
-                return_value={"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "", "dump_id": ""},
-            ),
-            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
-        ):
-            response = analytics_routes.ranking_csv(fraction_mode="integer", metric="h", allow_latest_preview=True, limit=100)
-
-        self.assertEqual(response.headers["X-OpenAlex-DSS-Scope-Status"], "implicit_latest_preview")
-        self.assertEqual(response.headers["X-OpenAlex-DSS-Reproducible"], "false")
-        self.assertIn("No run_id or dump_id was provided", response.headers["X-OpenAlex-DSS-Scope-Warning"])
-
-    def test_analytics_export_scope_guard_rejects_unannotated_payload(self) -> None:
-        with self.assertRaises(analytics_routes.HTTPException) as raised:
-            analytics_routes._require_export_scope({"rows": []})
-
-        self.assertEqual(raised.exception.status_code, 400)
 
     def test_unknown_cohort_returns_controlled_error(self) -> None:
         with patch.object(analytics_routes.cohorts, "resolve_cohort_context", side_effect=analytics_routes.cohorts.CohortNotFound("Unknown cohort_id: nope")):
@@ -290,7 +269,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["top_n"], 50)
         self.assertEqual(captured["filters"], {"country_code": "RU", "filter_mode": "search", "text_search_query": "ergodesign", "work_type": "article"})
 
-    def test_scientometric_analysis_marks_no_scope_as_preview_warning(self) -> None:
+    def test_scientometric_analysis_without_scope_requires_scope(self) -> None:
         payload = {
             "schema": "scientometric_analysis",
             "scope": {"run_id": "", "dump_id": ""},
@@ -298,14 +277,11 @@ class AnalyticsRouteTests(unittest.TestCase):
             "n_authors": 0,
         }
         with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload):
-            result = analytics_routes.scientometric_analysis(fraction_mode="integer", metrics="h", baseline_metric="h", top_n=100)
+            with self.assertRaises(analytics_routes.HTTPException) as raised:
+                analytics_routes.scientometric_analysis(fraction_mode="integer", metrics="h", baseline_metric="h", top_n=100)
 
-        self.assertEqual(result["scope_status"], "implicit_latest_preview")
-        self.assertEqual(result["scope"]["scope_status"], "implicit_latest_preview")
-        self.assertEqual(result["scope"]["reproducible"], False)
-        self.assertIn("No run_id or dump_id was provided", result["scope"]["scope_warnings"][0])
-        self.assertEqual(result["reproducible"], False)
-        self.assertIn("No run_id or dump_id was provided", result["warnings"][0])
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
 
     def test_scientometric_export_routes_return_csv_artifacts(self) -> None:
         payload = {
@@ -449,7 +425,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertIn("- Метрики не заменяют экспертную оценку.", conclusion_text)
         self.assertEqual(conclusion.headers["X-OpenAlex-DSS-Scope-Status"], "explicit_scope")
 
-    def test_scientometric_export_without_scope_requires_explicit_opt_in(self) -> None:
+    def test_scientometric_export_without_scope_requires_scope(self) -> None:
         payload = {
             "schema": "scientometric_analysis",
             "scope": {"run_id": "", "dump_id": ""},
@@ -462,20 +438,6 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
-
-    def test_scientometric_export_without_scope_opt_in_has_scope_headers(self) -> None:
-        payload = {
-            "schema": "scientometric_analysis",
-            "scope": {"run_id": "", "dump_id": ""},
-            "descriptive": {},
-            "warnings": [],
-        }
-        with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload):
-            response = analytics_routes.scientometric_descriptive_csv(_request(metrics="h"), allow_latest_preview=True)
-
-        self.assertEqual(response.headers["X-OpenAlex-DSS-Scope-Status"], "implicit_latest_preview")
-        self.assertEqual(response.headers["X-OpenAlex-DSS-Reproducible"], "false")
-        self.assertIn("No run_id or dump_id was provided", response.headers["X-OpenAlex-DSS-Scope-Warning"])
 
     def test_cohort_statistics_route_forwards_analysis_scope(self) -> None:
         captured: dict[str, object] = {}

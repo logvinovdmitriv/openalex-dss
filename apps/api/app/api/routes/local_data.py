@@ -21,6 +21,7 @@ LOCAL_DATA_KINDS: dict[str, str] = {
 
 @router.get("/local-data/summary")
 def local_data_summary(run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    _require_local_data_scope(run_id=run_id, dump_id=dump_id)
     try:
         tables = warehouse.list_tables(run_id=run_id, dump_id=dump_id)
     except ValueError as exc:
@@ -52,6 +53,7 @@ def local_data_preview(
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     table = _local_data_kind(kind)
+    _require_local_data_scope(run_id=run_id, dump_id=dump_id)
     try:
         payload = warehouse.query_table(
             table,
@@ -88,17 +90,9 @@ def local_data_preview_csv(
     direction: str = "desc",
     limit: int = Query(100_000, ge=1, le=500_000),
     offset: int = Query(0, ge=0),
-    allow_latest_preview: bool = False,
 ) -> Response:
     table = _local_data_kind(kind)
-    if not (str(run_id or "").strip() or str(dump_id or "").strip()) and not allow_latest_preview:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "run_id or dump_id is required for reproducible CSV export; "
-                "pass allow_latest_preview=true for compatibility preview."
-            ),
-        )
+    _require_local_data_scope(run_id=run_id, dump_id=dump_id)
     try:
         data = warehouse.export_table_csv(
             table,
@@ -155,18 +149,8 @@ def _summary_entry(kind: str, label: str, raw: dict[str, Any]) -> dict[str, Any]
 
 
 def _local_data_scope_metadata(*, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
-    if str(run_id or "").strip() or str(dump_id or "").strip():
-        return {"scope_status": "explicit_scope", "reproducible": True, "scope_warnings": []}
-    return {
-        "scope_status": "implicit_latest_preview",
-        "reproducible": False,
-        "scope_warnings": [
-            (
-                "No run_id or dump_id was provided; this local-data preview uses compatibility "
-                "latest-view data and is not suitable for final analysis."
-            )
-        ],
-    }
+    _require_local_data_scope(run_id=run_id, dump_id=dump_id)
+    return {"scope_status": "explicit_scope", "reproducible": True}
 
 
 def _annotate_local_data_payload(payload: dict[str, Any], *, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
@@ -174,9 +158,6 @@ def _annotate_local_data_payload(payload: dict[str, Any], *, run_id: str = "", d
     payload.update(metadata)
     existing = payload.get("warnings")
     warnings = list(existing) if isinstance(existing, list) else ([] if existing is None else [existing])
-    for warning in metadata["scope_warnings"]:
-        if warning not in warnings:
-            warnings.append(warning)
     payload["warnings"] = warnings
     return payload
 
@@ -187,7 +168,10 @@ def _local_data_scope_headers(*, run_id: str = "", dump_id: str = "") -> dict[st
         "X-OpenAlex-DSS-Scope-Status": str(metadata["scope_status"]),
         "X-OpenAlex-DSS-Reproducible": "true" if metadata["reproducible"] else "false",
     }
-    warnings = metadata["scope_warnings"]
-    if warnings:
-        headers["X-OpenAlex-DSS-Scope-Warning"] = "; ".join(str(warning) for warning in warnings)
     return headers
+
+
+def _require_local_data_scope(*, run_id: str = "", dump_id: str = "") -> None:
+    if str(run_id or "").strip() or str(dump_id or "").strip():
+        return
+    raise HTTPException(status_code=400, detail="run_id or dump_id is required for local-data access.")

@@ -217,7 +217,6 @@ class PipelineIntegrityTests(unittest.TestCase):
 
             with (
                 patch.object(pipeline, "DATA", root / "data"),
-                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
                 patch.object(pipeline, "resolve_safe_path", return_value=raw),
                 patch.object(pipeline, "file_profile", return_value=profile),
                 patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
@@ -443,7 +442,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                         }
                     )
 
-    def test_recalculate_uses_requested_dump_tables_not_latest_view(self) -> None:
+    def test_recalculate_uses_requested_dump_tables_not_global_fallback(self) -> None:
         captured: dict[str, object] = {}
 
         def fake_author_work_metrics(works_path: object, authorships_path: object, *args: object, **kwargs: object) -> list[dict[str, object]]:
@@ -465,8 +464,8 @@ class PipelineIntegrityTests(unittest.TestCase):
             root = Path(tmp)
             dump_a = root / "tables" / "dump_A"
             dump_b = root / "tables" / "dump_B"
-            latest = root / "parquet"
-            for base in (dump_a, dump_b, latest):
+            global_parquet = root / "parquet"
+            for base in (dump_a, dump_b, global_parquet):
                 base.mkdir(parents=True)
                 for table in ("works", "authorships", "work_topics"):
                     (base / f"{table}.parquet").write_text(f"{base.name}:{table}", encoding="utf-8")
@@ -476,7 +475,6 @@ class PipelineIntegrityTests(unittest.TestCase):
                 patch.object(pipeline, "build_author_work_metrics", side_effect=fake_author_work_metrics),
                 patch.object(pipeline, "compute_indices", return_value=[]),
                 patch.object(pipeline, "build_ratings", return_value=[]),
-                patch.object(pipeline, "_publish_latest_view", return_value=None) as publish_latest_view,
                 patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
                 patch.object(pipeline.reports, "build_report_bundle", return_value={}),
                 patch.object(pipeline, "_archive_run_artifacts", return_value={}),
@@ -493,7 +491,6 @@ class PipelineIntegrityTests(unittest.TestCase):
                     }
                 )
 
-        publish_latest_view.assert_not_called()
         self.assertEqual(Path(captured["works_path"]), dump_a / "works.parquet")
         self.assertEqual(Path(captured["authorships_path"]), dump_a / "authorships.parquet")
         self.assertEqual(Path(captured["passport_out_dir"]), root / "runs" / "run_A" / "passports")
@@ -561,7 +558,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(captured["primary_artifacts"]["dump/quality_report.json"], quality)
         self.assertIn("run/tables/indices.csv", captured["primary_artifacts"])
 
-    def test_run_compute_publishes_latest_view_only_when_enabled(self) -> None:
+    def test_run_compute_writes_scoped_outputs_without_global_fallback(self) -> None:
         cfg = SimpleNamespace(
             fraction_modes=("integer",),
             iupv_n0=10,
@@ -596,28 +593,13 @@ class PipelineIntegrityTests(unittest.TestCase):
                 patch.object(pipeline, "compute_indices", side_effect=lambda _source, target, *_args: Path(target).write_text("indices\n", encoding="utf-8")),
                 patch.object(pipeline, "build_ratings", side_effect=lambda _source, target: Path(target).write_text("ratings\n", encoding="utf-8")),
                 patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
-                patch.object(pipeline, "_publish_latest_view", return_value=None) as publish_latest_view,
                 patch.dict("os.environ", {}, clear=True),
             ):
                 result = pipeline._run_compute(cfg, run_id="run_no_latest", dump_id="dump_no_latest", input_tables=input_tables)
 
-            publish_latest_view.assert_not_called()
             self.assertTrue((root / "runs" / "run_no_latest" / "tables" / "indices.csv").is_file())
             self.assertTrue((root / "runs" / "run_no_latest" / "passports" / "checksums.json").is_file())
             self.assertEqual(result["passport_outputs"]["checksums"], str(root / "runs" / "run_no_latest" / "passports" / "checksums.json"))
-
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "build_author_work_metrics", side_effect=lambda *_args, **_kwargs: Path(_args[2]).write_text("author_work\n", encoding="utf-8")),
-                patch.object(pipeline, "compute_indices", side_effect=lambda _source, target, *_args: Path(target).write_text("indices\n", encoding="utf-8")),
-                patch.object(pipeline, "build_ratings", side_effect=lambda _source, target: Path(target).write_text("ratings\n", encoding="utf-8")),
-                patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
-                patch.object(pipeline, "_publish_latest_view", return_value=None) as publish_latest_view,
-                patch.dict("os.environ", {"OPENALEX_DSS_PUBLISH_LATEST_VIEW": "1"}, clear=True),
-            ):
-                pipeline._run_compute(cfg, run_id="run_with_latest", dump_id="dump_with_latest", input_tables=input_tables)
-
-            publish_latest_view.assert_called_once()
 
     def test_recalculate_writes_pipeline_summary_before_archive_and_report(self) -> None:
         events: list[str] = []
@@ -694,12 +676,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             (dump_dir / "dump_manifest.json").write_text(json.dumps(original), encoding="utf-8")
             cfg = SimpleNamespace(slice_name="slice_keep")
 
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "TABLE_FILES", {}),
-                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
-                patch.object(pipeline, "JSON_FILES", {}),
-            ):
+            with patch.object(pipeline, "DATA", root):
                 archive = pipeline._archive_run_artifacts(
                     cfg,
                     {
@@ -740,12 +717,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cfg = SimpleNamespace(slice_name="slice_active")
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "TABLE_FILES", {}),
-                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
-                patch.object(pipeline, "JSON_FILES", {}),
-            ):
+            with patch.object(pipeline, "DATA", root):
                 archive = pipeline._archive_run_artifacts(
                     cfg,
                     {
@@ -770,18 +742,18 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(active["analysis_eligibility_status"], "dev_only_not_for_final_analysis")
         self.assertEqual(active["allowed_for_final_analysis"], False)
 
-    def test_archive_uses_scoped_outputs_without_latest_table_sources(self) -> None:
+    def test_archive_uses_scoped_outputs_without_global_table_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            latest = root / "latest"
-            latest.mkdir()
-            latest_author_work = latest / "author_work.parquet"
-            latest_author_work.write_text("legacy author_work", encoding="utf-8")
-            latest_passports = root / "passports"
-            latest_passports.mkdir()
-            (latest_passports / "slice_passport.json").write_text(json.dumps({"source": "legacy"}), encoding="utf-8")
-            (latest_passports / "calculation_passport.json").write_text(json.dumps({"source": "legacy"}), encoding="utf-8")
-            (latest_passports / "checksums.json").write_text(json.dumps({"source": "legacy"}), encoding="utf-8")
+            global_tables = root / "global"
+            global_tables.mkdir()
+            global_author_work = global_tables / "author_work.parquet"
+            global_author_work.write_text("global author_work", encoding="utf-8")
+            global_passports = root / "passports"
+            global_passports.mkdir()
+            (global_passports / "slice_passport.json").write_text(json.dumps({"source": "global"}), encoding="utf-8")
+            (global_passports / "calculation_passport.json").write_text(json.dumps({"source": "global"}), encoding="utf-8")
+            (global_passports / "checksums.json").write_text(json.dumps({"source": "global"}), encoding="utf-8")
 
             scoped_inputs = root / "scoped_inputs"
             scoped_outputs = root / "scoped_outputs"
@@ -800,12 +772,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 run_table_outputs[name] = str(path)
 
             cfg = SimpleNamespace(slice_name="slice_scoped")
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "TABLE_FILES", {"author_work": latest / "author_work.csv"}),
-                patch.object(pipeline, "PARQUET_TABLE_FILES", {"author_work": latest_author_work}),
-                patch.object(pipeline, "JSON_FILES", {}),
-            ):
+            with patch.object(pipeline, "DATA", root):
                 archive = pipeline._archive_run_artifacts(
                     cfg,
                     {
@@ -852,12 +819,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 passport_outputs[name] = str(path)
 
             cfg = SimpleNamespace(slice_name="slice_passports")
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "TABLE_FILES", {}),
-                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
-                patch.object(pipeline, "JSON_FILES", {}),
-            ):
+            with patch.object(pipeline, "DATA", root):
                 archive = pipeline._archive_run_artifacts(
                     cfg,
                     {
@@ -887,12 +849,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             scoped.write_text(json.dumps({"source": "scoped"}), encoding="utf-8")
 
             cfg = SimpleNamespace(slice_name="slice_fetch")
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "TABLE_FILES", {}),
-                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
-                patch.object(pipeline, "JSON_FILES", {"fetch_meta": legacy}),
-            ):
+            with patch.object(pipeline, "DATA", root):
                 archive = pipeline._archive_run_artifacts(
                     cfg,
                     {
@@ -912,12 +869,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cfg = SimpleNamespace(slice_name="slice_unknown")
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "TABLE_FILES", {}),
-                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
-                patch.object(pipeline, "JSON_FILES", {}),
-            ):
+            with patch.object(pipeline, "DATA", root):
                 archive = pipeline._archive_run_artifacts(
                     cfg,
                     {
@@ -948,7 +900,6 @@ class PipelineIntegrityTests(unittest.TestCase):
                 patch.object(reports, "DATA", root),
                 patch.object(reports, "JSON_FILES", json_files),
                 patch.object(warehouse, "DATA", root),
-                patch.object(warehouse, "JSON_FILES", json_files),
             ):
                 bundle = reports.build_report_bundle(run_id="run_missing", dump_id="dump_missing")
 
@@ -1647,11 +1598,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             global_summary = root / "passports" / "pipeline_summary.json"
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "JSON_FILES", {"pipeline": global_summary}),
-                patch.dict("os.environ", {}, clear=True),
-            ):
+            with patch.object(pipeline, "DATA", root):
                 pipeline._write_pipeline_summary(
                     "recalculate",
                     pipeline._cfg({"entity_level": "subfield", "entity_id_short": "1706", "entity_display_name": "Computer Science Applications"}),
@@ -1668,11 +1615,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             global_summary = root / "passports" / "pipeline_summary.json"
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "JSON_FILES", {"pipeline": global_summary}),
-                patch.dict("os.environ", {}, clear=True),
-            ):
+            with patch.object(pipeline, "DATA", root):
                 pipeline._write_pipeline_summary(
                     "fetch_slice_dump",
                     pipeline._cfg({"entity_level": "subfield", "entity_id_short": "1706", "entity_display_name": "Computer Science Applications"}),
@@ -1680,54 +1623,6 @@ class PipelineIntegrityTests(unittest.TestCase):
                 )
 
         self.assertFalse(global_summary.exists())
-
-    def test_pipeline_summary_writes_global_latest_only_when_enabled(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            global_summary = root / "passports" / "pipeline_summary.json"
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "JSON_FILES", {"pipeline": global_summary}),
-                patch.dict("os.environ", {"OPENALEX_DSS_PUBLISH_LATEST_VIEW": "1"}, clear=True),
-            ):
-                pipeline._write_pipeline_summary(
-                    "fetch_slice_dump",
-                    pipeline._cfg({"entity_level": "subfield", "entity_id_short": "1706", "entity_display_name": "Computer Science Applications"}),
-                    {},
-                )
-
-            captured = json.loads(global_summary.read_text(encoding="utf-8"))
-
-        self.assertEqual(captured["mode"], "fetch_slice_dump")
-
-    def test_compatibility_latest_cleanup_preserves_scoped_artifacts(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            latest_table = root / "normalized" / "works_flat.csv"
-            latest_summary = root / "passports" / "pipeline_summary.json"
-            legacy_checksum = root / "checksums" / "slice_a" / "sha256_manifest.txt"
-            legacy_report = root / "reports" / "old_report.json"
-            legacy_figure = root / "results" / "figures" / "plot.png"
-            scoped_run = root / "runs" / "run_a" / "passports" / "pipeline_summary.json"
-            scoped_dump = root / "dumps" / "dump_a" / "fetch_meta.json"
-            scoped_table = root / "tables" / "dump_a" / "works.parquet"
-            for path in (latest_table, latest_summary, legacy_checksum, legacy_report, legacy_figure, scoped_run, scoped_dump, scoped_table):
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text("artifact", encoding="utf-8")
-
-            with (
-                patch.object(pipeline, "DATA", root),
-                patch.object(pipeline, "COMPATIBILITY_LATEST_FILES", [latest_table, latest_summary]),
-            ):
-                result = pipeline.clear_compatibility_latest_view()
-                alias_result = pipeline.clear_generated_data()
-
-            self.assertEqual(result["mode"], "clear_compatibility_latest_view")
-            self.assertEqual(alias_result["mode"], "clear_compatibility_latest_view")
-            for removed in (latest_table, latest_summary, legacy_checksum, legacy_report, legacy_figure):
-                self.assertFalse(removed.exists(), str(removed))
-            for kept in (scoped_run, scoped_dump, scoped_table):
-                self.assertTrue(kept.exists(), str(kept))
 
     def test_final_local_import_requires_final_eligible_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

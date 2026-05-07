@@ -81,9 +81,8 @@ def analytics(
         cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
+        _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
-        stats = warehouse.read_json_doc("stats", run_id=run_id) or {}
-        theory = warehouse.read_json_doc("theory", run_id=run_id) or {}
         filter_warnings = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
         bundle = warehouse.metric_bundle(fraction_mode, metric, filters, limit=limit, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
         distribution = bundle["distribution"]
@@ -93,13 +92,6 @@ def analytics(
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    run_global_stats = {
-        "metric_summary": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("metrics", {}).get(metric),
-        "spearman": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("spearman_on_competition_ranks"),
-        "top_overlap": stats.get("fraction_modes", {}).get(fraction_mode, {}).get("top_overlap"),
-        "scope": "full_run_precomputed",
-        "note": "These statistics come from the full selected run; filtered_distribution and filtered_top are recomputed after current filters.",
-    }
     payload = {
         "fraction_mode": fraction_mode,
         "metric": metric,
@@ -114,12 +106,7 @@ def analytics(
         "filtered_distribution": distribution,
         "filtered_top": top,
         "filtered_metric_lines": metric_lines,
-        "run_global_stats": run_global_stats,
         "distribution": distribution,
-        "metric_summary": run_global_stats["metric_summary"],
-        "spearman": run_global_stats["spearman"],
-        "top_overlap": run_global_stats["top_overlap"],
-        "theory": theory,
         "top": top["rows"],
         "top_table": top,
         "metric_lines": metric_lines,
@@ -201,6 +188,7 @@ def distribution(
         cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
+        _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
         payload = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
         payload["cohort"] = cohort_ctx["cohort"]
@@ -287,6 +275,7 @@ def ranking_json(
         cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
         run_id = cohort_ctx["run_id"]
         dump_id = cohort_ctx["dump_id"]
+        _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
         payload = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=run_id, dump_id=dump_id, author_ids=cohort_ctx["author_ids"])
         payload["cohort"] = cohort_ctx["cohort"]
@@ -341,10 +330,6 @@ def ranking_csv(
     to_publication_date: str = "",
     work_type: str = "",
     limit: int = Query(100_000, ge=1, le=500_000),
-    allow_latest_preview: bool = Query(
-        False,
-        description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id.",
-    ),
 ) -> Response:
     try:
         payload = ranking_json(
@@ -384,7 +369,6 @@ def ranking_csv(
         )
     except HTTPException:
         raise
-    _require_export_scope(payload, allow_latest_preview=_bool_query(allow_latest_preview))
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=payload["fields"], extrasaction="ignore")
     writer.writeheader()
@@ -504,12 +488,9 @@ def scientometric_analysis_json(request: Request) -> Response:
 
 
 @router.get("/analytics/scientometrics/descriptive.csv")
-def scientometric_descriptive_csv(
-    request: Request,
-    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
-) -> Response:
+def scientometric_descriptive_csv(request: Request) -> Response:
     try:
-        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
+        payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -543,12 +524,9 @@ def scientometric_descriptive_csv(
 
 
 @router.get("/analytics/scientometrics/correlations.csv")
-def scientometric_correlations_csv(
-    request: Request,
-    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
-) -> Response:
+def scientometric_correlations_csv(request: Request) -> Response:
     try:
-        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
+        payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -558,12 +536,9 @@ def scientometric_correlations_csv(
 
 
 @router.get("/analytics/scientometrics/rank-shifts.csv")
-def scientometric_rank_shifts_csv(
-    request: Request,
-    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
-) -> Response:
+def scientometric_rank_shifts_csv(request: Request) -> Response:
     try:
-        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
+        payload = _scientometric_export_payload_from_request(request)
         rows = scientometrics.build_rank_shift_export_rows(**_scientometric_kwargs_from_request(request))
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
@@ -574,12 +549,9 @@ def scientometric_rank_shifts_csv(
 
 
 @router.get("/analytics/scientometrics/largest-rank-shifts.csv")
-def scientometric_largest_rank_shifts_csv(
-    request: Request,
-    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
-) -> Response:
+def scientometric_largest_rank_shifts_csv(request: Request) -> Response:
     try:
-        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
+        payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -589,12 +561,9 @@ def scientometric_largest_rank_shifts_csv(
 
 
 @router.get("/analytics/scientometrics/outliers.csv")
-def scientometric_outliers_csv(
-    request: Request,
-    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
-) -> Response:
+def scientometric_outliers_csv(request: Request) -> Response:
     try:
-        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
+        payload = _scientometric_export_payload_from_request(request)
         rows = scientometrics.build_outlier_export_rows(**_scientometric_kwargs_from_request(request))
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
@@ -605,12 +574,9 @@ def scientometric_outliers_csv(
 
 
 @router.get("/analytics/scientometrics/top-outliers.csv")
-def scientometric_top_outliers_csv(
-    request: Request,
-    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
-) -> Response:
+def scientometric_top_outliers_csv(request: Request) -> Response:
     try:
-        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
+        payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -620,12 +586,9 @@ def scientometric_top_outliers_csv(
 
 
 @router.get("/analytics/scientometrics/findings.csv")
-def scientometric_findings_csv(
-    request: Request,
-    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view CSV export without run_id/dump_id."),
-) -> Response:
+def scientometric_findings_csv(request: Request) -> Response:
     try:
-        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
+        payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -635,12 +598,9 @@ def scientometric_findings_csv(
 
 
 @router.get("/analytics/scientometrics/conclusion.md")
-def scientometric_conclusion_markdown(
-    request: Request,
-    allow_latest_preview: bool = Query(False, description="Allow non-reproducible compatibility latest-view Markdown export without run_id/dump_id."),
-) -> Response:
+def scientometric_conclusion_markdown(request: Request) -> Response:
     try:
-        payload = _scientometric_export_payload_from_request(request, allow_latest_preview=allow_latest_preview)
+        payload = _scientometric_export_payload_from_request(request)
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Cohort not found") from exc
     except ValueError as exc:
@@ -730,10 +690,8 @@ def _scientometric_payload_from_request(request: Request) -> dict[str, Any]:
     return payload
 
 
-def _scientometric_export_payload_from_request(request: Request, *, allow_latest_preview: bool = False) -> dict[str, Any]:
-    payload = _scientometric_payload_from_request(request)
-    _require_export_scope(payload, allow_latest_preview=_bool_query(allow_latest_preview))
-    return payload
+def _scientometric_export_payload_from_request(request: Request) -> dict[str, Any]:
+    return _scientometric_payload_from_request(request)
 
 
 def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
@@ -879,15 +837,6 @@ def _int_query(value: Any, default: int) -> int:
         return default
 
 
-def _bool_query(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    default = getattr(value, "default", None)
-    if isinstance(default, bool):
-        return default
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _scope_metadata(
     *,
     requested_run_id: str = "",
@@ -902,19 +851,12 @@ def _scope_metadata(
     resolved_dump_id = str(resolved_dump_id or "").strip()
     cohort_id = str(cohort_id or "").strip()
     if requested_run_id or requested_dump_id:
-        return {"scope_status": "explicit_scope", "reproducible": True, "scope_warnings": []}
+        _require_analysis_scope(run_id=resolved_run_id or requested_run_id, dump_id=resolved_dump_id or requested_dump_id)
+        return {"scope_status": "explicit_scope", "reproducible": True}
     if cohort_id and (resolved_run_id or resolved_dump_id):
-        return {"scope_status": "cohort_resolved_scope", "reproducible": True, "scope_warnings": []}
-    return {
-        "scope_status": "implicit_latest_preview",
-        "reproducible": False,
-        "scope_warnings": [
-            (
-                "No run_id or dump_id was provided; this payload uses compatibility latest-view "
-                "data and is not suitable for final analysis."
-            )
-        ],
-    }
+        _require_analysis_scope(run_id=resolved_run_id, dump_id=resolved_dump_id)
+        return {"scope_status": "cohort_resolved_scope", "reproducible": True}
+    raise ValueError("run_id or dump_id is required for analytics access.")
 
 
 def _annotate_scope_payload(
@@ -938,37 +880,23 @@ def _annotate_scope_payload(
     if isinstance(scope, dict):
         scope["scope_status"] = metadata["scope_status"]
         scope["reproducible"] = metadata["reproducible"]
-        scope["scope_warnings"] = list(metadata["scope_warnings"])
     existing = payload.get("warnings")
     warnings = existing if isinstance(existing, list) else ([] if existing is None else [existing])
-    for warning in metadata["scope_warnings"]:
-        if warning not in warnings:
-            warnings.append(warning)
     payload["warnings"] = warnings
     return payload
 
 
-def _require_export_scope(payload: dict[str, Any], *, allow_latest_preview: bool = False) -> None:
-    if allow_latest_preview or payload.get("scope_status") in {"explicit_scope", "cohort_resolved_scope"}:
-        return
-    raise HTTPException(
-        status_code=400,
-        detail=(
-            "run_id or dump_id is required for reproducible analytics export; "
-            "pass allow_latest_preview=true for compatibility preview."
-        ),
-    )
-
-
 def _scope_response_headers(payload: dict[str, Any]) -> dict[str, str]:
-    headers = {
+    return {
         "X-OpenAlex-DSS-Scope-Status": str(payload.get("scope_status") or ""),
         "X-OpenAlex-DSS-Reproducible": "true" if payload.get("reproducible") is True else "false",
     }
-    warnings = payload.get("scope_warnings") if isinstance(payload.get("scope_warnings"), list) else []
-    if warnings:
-        headers["X-OpenAlex-DSS-Scope-Warning"] = "; ".join(str(warning) for warning in warnings)
-    return headers
+
+
+def _require_analysis_scope(*, run_id: str = "", dump_id: str = "") -> None:
+    if str(run_id or "").strip() or str(dump_id or "").strip():
+        return
+    raise ValueError("run_id or dump_id is required for analytics access.")
 
 
 def _cohort_context(cohort_id: str, *, run_id: str, dump_id: str, fraction_mode: str, filters: dict[str, Any], filter_policy: str = "membership") -> dict[str, Any]:

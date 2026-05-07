@@ -28,16 +28,6 @@ TABLE_FILES = {
     "ratings": DATA / "results" / "rating_positions.csv",
 }
 
-PARQUET_TABLE_FILES = {
-    "works": DATA / "parquet" / "works_flat.parquet",
-    "authorships": DATA / "parquet" / "authorships_flat.parquet",
-    "work_topics": DATA / "parquet" / "work_topics_flat.parquet",
-    "author_work": DATA / "marts" / "author_work_metrics.parquet",
-    "authors_local_metrics": DATA / "results" / "author_indices.parquet",
-    "indices": DATA / "results" / "author_indices.parquet",
-    "ratings": DATA / "results" / "rating_positions.parquet",
-}
-
 JSON_FILES = {
     "fetch_meta": DATA / "passports" / "fetch_meta.json",
     "quality": DATA / "passports" / "quality_report.json",

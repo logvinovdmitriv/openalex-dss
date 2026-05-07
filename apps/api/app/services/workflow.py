@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from app.core.paths import JSON_FILES, ROOT, SRC
+from app.core.paths import ROOT, SRC
 from app.services import author_slice, warehouse
 
 if str(SRC) not in sys.path:
@@ -59,7 +59,7 @@ def state() -> dict[str, Any]:
         "ingestion": bool(fetch_meta.get("fetched_works") or rows.get("works")),
         "flatten": rows.get("works", 0) > 0 and rows.get("authorships", 0) > 0,
         "indices": rows.get("indices", 0) > 0 and rows.get("ratings", 0) > 0,
-        "analytics": JSON_FILES["stats"].exists() and JSON_FILES["theory"].exists(),
+        "analytics": rows.get("indices", 0) > 0 and rows.get("ratings", 0) > 0,
         "export": rows.get("ratings", 0) > 0,
     }
     stages = [

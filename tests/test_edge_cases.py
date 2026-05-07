@@ -154,11 +154,11 @@ class EdgeCaseTests(unittest.TestCase):
             scoped.mkdir()
             works = scoped / "works.parquet"
             indices = scoped / "indices.csv"
-            latest_indices = data / "results" / "author_indices.csv"
-            latest_indices.parent.mkdir(parents=True)
+            global_indices = data / "results" / "author_indices.csv"
+            global_indices.parent.mkdir(parents=True)
             works.write_text("scoped works", encoding="utf-8")
             indices.write_text("scoped indices", encoding="utf-8")
-            latest_indices.write_text("latest indices", encoding="utf-8")
+            global_indices.write_text("global indices", encoding="utf-8")
             cfg = replace_config(
                 load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
                 slice_name="slice_scoped_checksums",
