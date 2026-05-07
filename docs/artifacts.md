@@ -44,7 +44,10 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 - Run checksum passports are built from scoped dump/run artifacts when the
   pipeline provides a scoped artifact map. Compatibility latest-view paths are
   used only by legacy `build_passports(...)` calls that do not provide scoped
-  primary artifacts.
+  primary artifacts. Scoped checksum manifests are written beside
+  `runs/{run_id}/passports/checksums.json` as
+  `runs/{run_id}/passports/sha256_manifest.txt`; the shared
+  `data/checksums/{slice_id}` path is legacy-only.
 - Run archiving records/copies `run_id` artifacts from scoped compute outputs
   and dump tables from the scoped input table manifest. It does not use
   compatibility latest-view table paths as the archive source.

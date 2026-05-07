@@ -212,13 +212,14 @@ def build_passports(
             "CLI raw dumps live under data/raw/openalex_cli/{slice_id}/ outside the repository.",
             "CSV files are latest-view exports; Parquet files are written alongside them for local analytical reads.",
         ]
+        manifest_path = _write_sha256_manifest(root_path, data_root, cfg.slice_name, checksums)
     else:
         checksums = _primary_artifact_checksums(primary_artifacts)
         checksum_notes = [
             "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
             "Primary checksums were built from scoped dump/run artifacts, not compatibility latest-view files.",
         ]
-    manifest_path = _write_sha256_manifest(root_path, data_root, cfg.slice_name, checksums)
+        manifest_path = _write_sha256_manifest_for_out_dir(out, checksums)
     checksums_doc = {
         "algorithm": "SHA-256",
         "slice_id": cfg.slice_name,
@@ -233,6 +234,14 @@ def build_passports(
 def _write_sha256_manifest(root_path: Path, data_root: Path, slice_id: str, checksums: dict[str, str]) -> Path:
     del root_path
     out = data_root / "checksums" / slice_id
+    out.mkdir(parents=True, exist_ok=True)
+    manifest = out / "sha256_manifest.txt"
+    lines = [f"{digest}  {rel}" for rel, digest in sorted(checksums.items())]
+    manifest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8", newline="\n")
+    return manifest
+
+
+def _write_sha256_manifest_for_out_dir(out: Path, checksums: dict[str, str]) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     manifest = out / "sha256_manifest.txt"
     lines = [f"{digest}  {rel}" for rel, digest in sorted(checksums.items())]

@@ -180,6 +180,10 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertIn("dump/tables/works.parquet", primary)
             self.assertIn("run/tables/indices.csv", primary)
             self.assertNotIn("data/results/author_indices.csv", primary)
+            manifest = data / "runs/run_a/passports/sha256_manifest.txt"
+            self.assertTrue(manifest.is_file())
+            self.assertEqual(checksums["sha256_manifest"], "data/runs/run_a/passports/sha256_manifest.txt")
+            self.assertFalse((data / "checksums/slice_scoped_checksums/sha256_manifest.txt").exists())
             self.assertTrue(any("scoped dump/run artifacts" in note for note in checksums["notes"]))
 
 
