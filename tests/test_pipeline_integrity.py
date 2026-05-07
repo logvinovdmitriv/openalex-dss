@@ -166,7 +166,6 @@ class PipelineIntegrityTests(unittest.TestCase):
                 patch.object(pipeline, "DATA", root / "data"),
                 patch.object(pipeline, "resolve_safe_path", return_value=raw),
                 patch.object(pipeline, "file_profile", return_value=profile),
-                patch.object(pipeline, "_materialize_dump_tables", return_value={"works": raw, "authorships": raw, "work_topics": raw}),
                 patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
                 patch.object(pipeline, "_archive_run_artifacts", return_value={}),
                 patch.object(pipeline, "_write_pipeline_summary", return_value=None),

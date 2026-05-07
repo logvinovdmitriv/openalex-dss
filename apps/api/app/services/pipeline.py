@@ -261,23 +261,6 @@ def resolve_dump_tables(dump_id: str, *, required: bool = True) -> dict[str, Pat
     return {name: path for name, path in tables.items() if path.is_file()}
 
 
-def _materialize_dump_tables(dump_id: str) -> dict[str, Path]:
-    safe_dump_id = _safe_id(str(dump_id or ""))
-    target_dir = DATA / "tables" / safe_dump_id
-    target_dir.mkdir(parents=True, exist_ok=True)
-    mapping = {
-        "works": "works.parquet",
-        "authorships": "authorships.parquet",
-        "work_topics": "work_topics.parquet",
-    }
-    for name, filename in mapping.items():
-        source = PARQUET_TABLE_FILES.get(name)
-        if not source or not Path(source).is_file():
-            raise FileNotFoundError(f"Не удалось материализовать dump_id={dump_id}: отсутствует parquet-таблица {name}.")
-        shutil.copy2(Path(source), target_dir / filename)
-    return resolve_dump_tables(safe_dump_id, required=True)
-
-
 def _normalize_dump_to_scope(source: Path, dump_id: str) -> tuple[dict[str, Any], dict[str, Path], Path]:
     safe_dump_id = _safe_id(str(dump_id or ""))
     dump_dir = DATA / "dumps" / safe_dump_id
