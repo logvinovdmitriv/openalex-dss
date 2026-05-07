@@ -162,7 +162,7 @@ The primary DSS workflow is:
 3. optionally restrict by organization and country code;
 4. materialize the Works request as a fixed JSONL.GZ dump through OpenAlex CLI;
 5. import the fixed dump, then flatten works and authorships locally;
-6. build `author_work_metrics`;
+6. build run-scoped `author_work`;
 7. compute core indices P, C, C_frac, CPP, h, i10, g and m_local;
 8. compute ISLV as the default balanced local ranking and IUPV/LRDI/f5/fm5 as
    diagnostic extensions;

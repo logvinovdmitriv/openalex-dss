@@ -9,6 +9,7 @@ from typing import get_type_hints
 from unittest.mock import patch
 
 from pydantic import ValidationError
+from fastapi import HTTPException
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,7 @@ from app.main import app  # noqa: E402
 from app.api.routes import runs as runs_routes  # noqa: E402
 from app.api.routes import slices as slices_routes  # noqa: E402
 from app.api import schemas as public_schemas  # noqa: E402
-from app.api.schemas import AnalysisRunRequest, RunRequest, SliceCreateRequest  # noqa: E402
+from app.api.schemas import AnalysisRunRequest, MaterializationPlanRequest, RunRequest, SliceCreateRequest, SliceEstimateRequest  # noqa: E402
 from app.services.internal_payloads import InternalPipelinePayload, normalize_internal_pipeline_payload  # noqa: E402
 
 
@@ -96,6 +97,22 @@ class PublicApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(annotation_name, "SliceCreateRequest")
         self.assertIs(annotation, SliceCreateRequest)
+
+    def test_slice_estimate_route_maps_openalex_runtime_errors_to_http(self) -> None:
+        with patch.object(slices_routes.slice_workbench, "estimate_slice", side_effect=RuntimeError("OpenAlex HTTP 400: invalid select")):
+            with self.assertRaises(HTTPException) as raised:
+                slices_routes.estimate_slice("slice_a", SliceEstimateRequest())
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertIn("OpenAlex HTTP 400", str(raised.exception.detail))
+
+    def test_materialization_plan_route_maps_openalex_runtime_errors_to_http(self) -> None:
+        with patch.object(slices_routes.slice_workbench, "create_materialization_plan", side_effect=RuntimeError("OpenAlex HTTP 400: invalid sample")):
+            with self.assertRaises(HTTPException) as raised:
+                slices_routes.create_materialization_plan("slice_a", MaterializationPlanRequest())
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertIn("OpenAlex HTTP 400", str(raised.exception.detail))
 
     def test_internal_pipeline_payload_is_not_a_public_schema(self) -> None:
         public_exports = set(vars(public_schemas))

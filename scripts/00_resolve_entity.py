@@ -13,7 +13,7 @@ def main() -> None:
     parser.add_argument("--entity-id-short", required=True)
     parser.add_argument("--entity-id-full", required=True)
     parser.add_argument("--display-name", required=True)
-    parser.add_argument("--out", default="data/passports/resolved_entity.json")
+    parser.add_argument("--out", default="data/ref/resolved_entity.json")
     args = parser.parse_args()
 
     write_json(

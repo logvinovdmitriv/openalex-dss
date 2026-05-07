@@ -57,7 +57,7 @@ metrics: p, c, c_frac, h, i10, g, islv
 raw_works: 12
 n_authors: 5
 findings: 29
-report_scope_hash: 0b41f7b1d24779ff
+report_scope_hash: 44919fc9808e8b60
 ```
 
 `n_authors: 5` - это число авторов в зафиксированной Top-5 cohort, а не полное число авторов raw fixture. В fixture есть шестой автор, который не входит в Top-5 когорту по `h`.
@@ -96,21 +96,22 @@ validation/exports/validation_scientometric/top-outliers.csv
 validation/exports/validation_scientometric/findings.csv
 validation/exports/validation_scientometric/conclusion.md
 validation/exports/validation_scientometric/report_bundle.json
-runs/validation_scientometric/reports/report_0b41f7b1d24779ff.json
+runs/validation_scientometric/reports/report_44919fc9808e8b60.json
 ```
 
 Run-scoped pipeline artifacts:
 
 ```text
-runs/validation_scientometric/tables/works.csv
-runs/validation_scientometric/tables/authorships.csv
-runs/validation_scientometric/tables/work_topics.csv
 runs/validation_scientometric/tables/author_work.csv
+runs/validation_scientometric/tables/author_work.parquet
 runs/validation_scientometric/tables/indices.csv
+runs/validation_scientometric/tables/indices.parquet
 runs/validation_scientometric/tables/ratings.csv
+runs/validation_scientometric/tables/ratings.parquet
 runs/validation_scientometric/passports/slice_passport.json
 runs/validation_scientometric/passports/calculation_passport.json
 runs/validation_scientometric/passports/checksums.json
+runs/validation_scientometric/passports/sha256_manifest.txt
 ```
 
 ## Проверка согласованности scope
@@ -154,12 +155,12 @@ top-outliers.csv: 2 lines
 findings.csv: 30 lines
 conclusion.md: 55 lines
 scientometrics.json: 4423 lines
-report_bundle.json: 9338 lines
+report_bundle.json: 5098 lines
 ```
 
 ## Checksums
 
-`validation/scientometric_validation_manifest.json` содержит `artifact_checksums` для каждого export и run report artifact. Это фиксирует byte-level содержимое текущего validation-прогона и позволяет сравнивать артефакты между повторными запусками. Некоторые runtime artifacts могут включать системные или форматные метаданные, поэтому главным стабильным инвариантом проверки остается совпадение scope, versions, cohort checksum и report scope hash.
+`validation/scientometric_validation_manifest.json` содержит `artifact_checksums` для каждого export и run report artifact. Это фиксирует byte-level содержимое текущего validation-прогона и позволяет сравнивать артефакты между повторными запусками. Некоторые runtime artifacts могут включать системные или форматные метаданные, поэтому главным стабильным инвариантом проверки остается совпадение scope, schema markers, cohort checksum и report scope hash.
 
 ## Вывод проверки
 

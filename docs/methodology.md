@@ -121,12 +121,12 @@ OpenAlex Works API возвращает вложенные `authorships`; DSS н
 5. Backend запускает OpenAlex CLI для скачивания фиксированного Works
    JSONL.GZ-dump или импортирует уже
    существующий локальный OpenAlex Works dump.
-6. JSON нормализуется в тонкий curated-слой `works_flat` и
-   `authorships_flat`; dependency-light реализация пишет CSV, production-слой
-   зарезервирован под slice-based Parquet.
-7. Собирается mart `author_work_metrics.csv`.
-8. Считаются `indices.csv`, `ratings.csv` и паспорта
-   воспроизводимости.
+6. JSON нормализуется в dump-scoped слой
+   `dumps/{dump_id}/normalized` и `dumps/{dump_id}/parquet`, после чего
+   canonical таблицы корпуса материализуются в `tables/{dump_id}`.
+7. Собирается run-scoped таблица `author_work.csv`.
+8. Считаются `indices.csv`, `ratings.csv`, их parquet-пары и паспорта
+   воспроизводимости под `runs/{run_id}`.
 9. UI обновляет рейтинг, ящик с усами, линейное сравнение индексов, плоские
    таблицы и CSV/JSON export.
 
@@ -138,7 +138,7 @@ OpenAlex Works API возвращает вложенные `authorships`; DSS н
   `m_local`;
 - Spearman и Kendall tau-b для рангов;
 - overlap@10/20/50 между индексами;
-- leave-top1 sensitivity и сдвиг рангов;
+- сдвиги рангов и Top-N overlap между baseline и сравниваемыми индексами;
 - сравнение `C` vs `C_frac` как проверка эффекта соавторства;
 - quality funnel: сырые работы, плоские авторства, NULL/deleted authors,
   авторы с локальными индексами.

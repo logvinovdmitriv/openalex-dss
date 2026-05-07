@@ -18,14 +18,13 @@ LAKE_ZONES = {
 SAFE_SCAN_ROOTS = {
     "raw": DATA / "raw",
     "ref": DATA / "ref",
+    "dumps": DATA / "dumps",
+    "tables": DATA / "tables",
+    "runs": DATA / "runs",
+    "cohorts": DATA / "cohorts",
+    "validation": DATA / "validation",
+    "workbench": DATA / "workbench",
     "lake": DATA / "lake",
-    "curated": DATA / "curated",
-    "normalized": DATA / "normalized",
-    "marts": DATA / "marts",
-    "reports": DATA / "reports",
-    "results": DATA / "results",
-    "passports": DATA / "passports",
-    "checksums": DATA / "checksums",
     "warehouse": DATA / "warehouse",
 }
 

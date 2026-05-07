@@ -40,6 +40,8 @@ def resolve_slice(slice_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Slice not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/slices/{slice_id}/estimate")
@@ -50,6 +52,8 @@ def estimate_slice(slice_id: str, payload: SliceEstimateRequest = Body(default_f
         raise HTTPException(status_code=404, detail="Slice not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/slices/{slice_id}/materialization-plans")
@@ -60,6 +64,8 @@ def create_materialization_plan(slice_id: str, payload: MaterializationPlanReque
         raise HTTPException(status_code=404, detail="Slice not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/materialization-plans")

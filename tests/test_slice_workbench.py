@@ -361,6 +361,11 @@ class SliceWorkbenchTests(unittest.TestCase):
                 self.assertEqual(materialization["download_policy"]["complete_slice_required"], True)
                 self.assertEqual(materialization["download_policy"]["user_controls_download_after_estimate"], True)
                 self.assertEqual(materialization["state"], "planned")
+                self.assertIn("runs/{run_id}/tables/indices.csv", materialization["outputs"])
+                self.assertIn("runs/{run_id}/tables/indices.parquet", materialization["outputs"])
+                self.assertIn("runs/{run_id}/tables/ratings.csv", materialization["outputs"])
+                self.assertIn("runs/{run_id}/tables/ratings.parquet", materialization["outputs"])
+                self.assertIn("runs/{run_id}/reports/report_{report_scope_hash}.json", materialization["outputs"])
 
     def test_materialization_completion_advances_slice_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

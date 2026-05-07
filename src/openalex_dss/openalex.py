@@ -85,6 +85,7 @@ def estimate_works(
     count_params["cursor"] = "*"
     sample_params = _works_params(cfg, sample_page_size)
     sample_params.pop("cursor", None)
+    sample_params.pop("sort", None)
     sample_params["sample"] = str(sample_page_size)
     sample_params["seed"] = str(cfg.random_seed)
     api_key = os.environ.get(cfg.api_key_env)
@@ -245,7 +246,7 @@ def _works_params(cfg: SliceConfig, per_page: int) -> dict[str, str]:
 
 
 def _works_select_fields(cfg: SliceConfig) -> tuple[str, ...]:
-    required = ("language", "open_access", "has_abstract")
+    required = ("language", "open_access")
     return tuple(dict.fromkeys([*cfg.select_fields, *required]))
 
 

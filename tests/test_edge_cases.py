@@ -116,6 +116,9 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertEqual(estimate["facets"]["work_types"]["rows"][0]["key"], "article")
             called_params = [call.args[1] for call in get_json.call_args_list]
             self.assertTrue(all("per-page" not in params for params in called_params))
+            self.assertTrue(all("has_abstract" not in params.get("select", "") for params in called_params))
+            self.assertNotIn("sort", called_params[1])
+            self.assertIn("sample", called_params[1])
 
     def test_search_mode_is_not_cli_download_compatible(self) -> None:
         cfg = replace_config(
