@@ -258,6 +258,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual(captured["extra_primary_artifacts"]["dump/fetch_meta.json"], dump_dir / "fetch_meta.json")
             self.assertEqual(captured["extra_primary_artifacts"]["dump/quality_report.json"], dump_dir / "quality_report.json")
             self.assertNotIn("dump/dump_manifest.json", captured["extra_primary_artifacts"])
+            self.assertFalse((dump_dir / "dump_manifest.json").exists())
             self.assertEqual(result["fetch_meta"], str(dump_dir / "fetch_meta.json"))
             self.assertEqual(result["quality_report"], str(dump_dir / "quality_report.json"))
 

@@ -154,6 +154,8 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     if dump_manifest:
         dump_manifest = {**dump_manifest, "dump_id": dump_id}
     dump_manifest_path = _write_dump_manifest_if_present(dump_id, dump_manifest)
+    if not dump_manifest_path:
+        _clear_stale_dump_manifest(dump_id)
     quality, dump_table_sources, quality_report = _normalize_dump_to_scope(source, dump_id)
     input_tables = _materialize_dump_tables_from_sources(dump_id, dump_table_sources)
     source_type = "openalex_cli_dump_import" if dump_manifest else "local_file"
@@ -317,6 +319,15 @@ def _write_dump_manifest_if_present(dump_id: str, dump_manifest: dict[str, Any])
     path = dump_dir / "dump_manifest.json"
     write_json(path, {**dump_manifest, "dump_id": dump_id})
     return path
+
+
+def _clear_stale_dump_manifest(dump_id: str) -> None:
+    raw_dump_id = str(dump_id or "").strip()
+    if not raw_dump_id:
+        return
+    path = DATA / "dumps" / _safe_id(raw_dump_id) / "dump_manifest.json"
+    if path.is_file():
+        path.unlink()
 
 
 def _dump_provenance_primary_artifacts(dump_id: str) -> dict[str, Path]:
