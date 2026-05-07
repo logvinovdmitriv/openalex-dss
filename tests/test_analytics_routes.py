@@ -243,6 +243,12 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(response.headers["X-OpenAlex-DSS-Reproducible"], "false")
         self.assertIn("No run_id or dump_id was provided", response.headers["X-OpenAlex-DSS-Scope-Warning"])
 
+    def test_analytics_export_scope_guard_rejects_unannotated_payload(self) -> None:
+        with self.assertRaises(analytics_routes.HTTPException) as raised:
+            analytics_routes._require_export_scope({"rows": []})
+
+        self.assertEqual(raised.exception.status_code, 400)
+
     def test_unknown_cohort_returns_controlled_error(self) -> None:
         with patch.object(analytics_routes.cohorts, "resolve_cohort_context", side_effect=analytics_routes.cohorts.CohortNotFound("Unknown cohort_id: nope")):
             with self.assertRaises(analytics_routes.HTTPException) as raised:

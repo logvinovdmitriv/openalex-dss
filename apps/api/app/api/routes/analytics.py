@@ -949,7 +949,7 @@ def _annotate_scope_payload(
 
 
 def _require_export_scope(payload: dict[str, Any], *, allow_latest_preview: bool = False) -> None:
-    if payload.get("scope_status") != "implicit_latest_preview" or allow_latest_preview:
+    if allow_latest_preview or payload.get("scope_status") in {"explicit_scope", "cohort_resolved_scope"}:
         return
     raise HTTPException(
         status_code=400,
