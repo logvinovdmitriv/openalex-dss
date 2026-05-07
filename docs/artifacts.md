@@ -18,6 +18,10 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 | `runs/{run_id}/tables/author_work.csv` | canonical | run | author-work evidence and local exports |
 | `runs/{run_id}/tables/indices.csv` | canonical | run | rankings, cohorts, scientometrics |
 | `runs/{run_id}/tables/ratings.csv` | canonical | run | rank table and ranking exports |
+| `runs/{run_id}/passports/slice_passport.json` | canonical | run | slice passport for report bundles |
+| `runs/{run_id}/passports/calculation_passport.json` | canonical | run | analysis/run passport and final-analysis eligibility |
+| `runs/{run_id}/passports/checksums.json` | canonical | run | scoped checksum manifest for report bundles |
+| `runs/{run_id}/passports/pipeline_summary.json` | canonical | run | pipeline summary for report bundles |
 | `runs/{run_id}/results/stats_summary.json` | legacy/internal | run | compatibility statistics, not the primary scientometric layer |
 | `runs/{run_id}/results/theory_validation.json` | legacy/internal | run | compatibility diagnostics, not the primary report layer |
 | `runs/{run_id}/reports/report_{report_scope_hash}.json` | canonical | report | reproducible report bundle for an analysis scope |
@@ -33,6 +37,10 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   `authorships`, and `work_topics`.
 - `run_id` owns derived calculations: author-work rows, author indices,
   ratings, run passports, and run-local diagnostic outputs.
+- Slice, calculation and checksum passports are written directly under
+  `runs/{run_id}/passports`. Pipeline summary is also mirrored there when a
+  `run_id` is available. Compatibility latest passport paths are not the source
+  for these run-scoped passport artifacts.
 - Run archiving records/copies `run_id` artifacts from scoped compute outputs
   and dump tables from the scoped input table manifest. It does not use
   compatibility latest-view table paths as the archive source.

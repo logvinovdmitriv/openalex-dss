@@ -45,7 +45,7 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
     input_tables = resolve_dump_tables(dump_id, required=True)
     analysis_eligibility = _recover_analysis_eligibility(payload, dump_id=dump_id, run_id=run_id)
     compute = _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
-    _write_pipeline_summary("recalculate", cfg, {**payload, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
+    _write_pipeline_summary("recalculate", cfg, {**payload, "run_id": run_id, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, "active_context_source": "recalculate", **compute})
     report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
     return {"status": "ok", "mode": "recalculate", "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
@@ -173,12 +173,14 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             "used_api_key": bool(dump_manifest.get("used_api_key")) if dump_manifest else False,
         },
     )
-    compute = _run_compute(cfg, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
-    _write_pipeline_summary("import_local_file", cfg, {**payload, "source_file": profile, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
+    run_id = str(payload.get("run_id") or "local_file")
+    compute = _run_compute(cfg, run_id=run_id, dump_id=dump_id, analysis_eligibility=analysis_eligibility, input_tables=input_tables)
+    _write_pipeline_summary("import_local_file", cfg, {**payload, "run_id": run_id, "source_file": profile, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(
         cfg,
         {
             **payload,
+            "run_id": run_id,
             "source_file": profile,
             "dump_id": dump_id,
             "analysis_eligibility": analysis_eligibility,
@@ -186,7 +188,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
             **compute,
         },
     )
-    report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=str(payload.get("run_id") or "local_file"), dump_id=dump_id)
+    report = reports.build_report_bundle(metric="islv", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
     return {"status": "ok", "mode": "import_local_file", "source": profile, "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
 
 
@@ -259,6 +261,7 @@ def _run_compute(
     run_dir = DATA / "runs" / _safe_id(run_id)
     run_tables = run_dir / "tables"
     run_results = run_dir / "results"
+    run_passports = run_dir / "passports"
     run_figures = run_results / "figures"
     run_tables.mkdir(parents=True, exist_ok=True)
     run_results.mkdir(parents=True, exist_ok=True)
@@ -309,18 +312,24 @@ def _run_compute(
     build_passports(
         cfg,
         ROOT,
-        DATA / "passports",
+        run_passports,
         run_id=run_id,
         dump_id=dump_id,
         analysis_eligibility=analysis_eligibility,
         input_tables=input_table_manifest,
     )
+    passport_outputs = {
+        "slice_passport": str(run_passports / "slice_passport.json"),
+        "calculation_passport": str(run_passports / "calculation_passport.json"),
+        "checksums": str(run_passports / "checksums.json"),
+    }
     return {
         "input_dump_id": dump_id,
         "input_tables": input_table_manifest,
         "input_table_checksums": input_table_checksums,
         "run_table_outputs": {key: str(path) for key, path in run_table_outputs.items()},
         "run_result_outputs": {key: str(path) for key, path in run_result_outputs.items()},
+        "passport_outputs": passport_outputs,
     }
 
 
@@ -415,6 +424,9 @@ def _write_pipeline_summary(mode: str, cfg: Any, payload: dict[str, Any]) -> Non
     if payload.get("analysis_eligibility"):
         doc["analysis_eligibility"] = payload["analysis_eligibility"]
     write_json(JSON_FILES["pipeline"], doc)
+    run_id = str(payload.get("run_id") or "").strip()
+    if run_id:
+        write_json(DATA / "runs" / _safe_id(run_id) / "passports" / "pipeline_summary.json", doc)
 
 
 def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
@@ -426,6 +438,7 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
     input_tables = payload.get("input_tables") if isinstance(payload.get("input_tables"), dict) else {}
     run_table_outputs = payload.get("run_table_outputs") if isinstance(payload.get("run_table_outputs"), dict) else {}
     run_result_outputs = payload.get("run_result_outputs") if isinstance(payload.get("run_result_outputs"), dict) else {}
+    passport_outputs = payload.get("passport_outputs") if isinstance(payload.get("passport_outputs"), dict) else {}
     copied: dict[str, str] = {}
 
     for base in (run_dir, dump_dir, tables_dir):
@@ -443,6 +456,7 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "input_table_checksums": payload.get("input_table_checksums") or {},
         "run_table_outputs": run_table_outputs,
         "run_result_outputs": run_result_outputs,
+        "passport_outputs": passport_outputs,
         "latest_view_note": "Global normalized/results paths are only the UI latest-view; reproducible artifacts are archived under this run_id and dump_id.",
     }
     write_json(run_dir / "metric_run.json", manifest)
@@ -471,13 +485,20 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
             rel = f"results/{filename}"
             _copy_or_record_artifact(source, run_dir / rel, copied, rel)
 
+    run_passport_filenames = {
+        "slice_passport": "slice_passport.json",
+        "calculation_passport": "calculation_passport.json",
+        "checksums": "checksums.json",
+    }
+    for name, filename in run_passport_filenames.items():
+        source = _artifact_path(passport_outputs.get(name))
+        if source:
+            rel = f"passports/{filename}"
+            _copy_or_record_artifact(source, run_dir / rel, copied, rel)
+
     passport_artifacts = {
         "passports/fetch_meta.json": JSON_FILES.get("fetch_meta"),
         "passports/quality_report.json": JSON_FILES.get("quality"),
-        "passports/checksums.json": JSON_FILES.get("checksums"),
-        "passports/pipeline_summary.json": JSON_FILES.get("pipeline"),
-        "passports/slice_passport.json": DATA / "passports/slice_passport.json",
-        "passports/calculation_passport.json": DATA / "passports/calculation_passport.json",
     }
     for rel, path in passport_artifacts.items():
         source = _artifact_path(path)

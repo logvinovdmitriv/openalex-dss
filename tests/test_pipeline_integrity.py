@@ -342,6 +342,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             return []
 
         def fake_build_passports(*args: object, **kwargs: object) -> dict[str, object]:
+            captured["passport_out_dir"] = args[2]
             captured["passport_input_tables"] = kwargs.get("input_tables")
             return {}
 
@@ -381,6 +382,7 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertEqual(Path(captured["works_path"]), dump_a / "works.parquet")
         self.assertEqual(Path(captured["authorships_path"]), dump_a / "authorships.parquet")
+        self.assertEqual(Path(captured["passport_out_dir"]), root / "runs" / "run_A" / "passports")
         self.assertIn("works", captured["passport_input_tables"])
         self.assertEqual(captured["passport_input_tables"]["works"]["path"], str(dump_a / "works.parquet"))
 
@@ -544,6 +546,11 @@ class PipelineIntegrityTests(unittest.TestCase):
             latest_author_work.write_text("legacy author_work", encoding="utf-8")
             latest_stats = latest / "stats_summary.json"
             latest_stats.write_text(json.dumps({"source": "latest"}), encoding="utf-8")
+            latest_passports = root / "passports"
+            latest_passports.mkdir()
+            (latest_passports / "slice_passport.json").write_text(json.dumps({"source": "legacy"}), encoding="utf-8")
+            (latest_passports / "calculation_passport.json").write_text(json.dumps({"source": "legacy"}), encoding="utf-8")
+            (latest_passports / "checksums.json").write_text(json.dumps({"source": "legacy"}), encoding="utf-8")
 
             scoped_inputs = root / "scoped_inputs"
             scoped_outputs = root / "scoped_outputs"
@@ -601,6 +608,9 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual((run_dir / "results" / "stats_summary.json").read_text(encoding="utf-8"), "stats_summary: scoped")
             self.assertEqual((dump_tables / "works.parquet").read_text(encoding="utf-8"), "scoped works")
             self.assertFalse((dump_tables / "author_work.parquet").exists())
+            self.assertFalse((run_dir / "passports" / "slice_passport.json").exists())
+            self.assertFalse((run_dir / "passports" / "calculation_passport.json").exists())
+            self.assertFalse((run_dir / "passports" / "checksums.json").exists())
             self.assertIn("tables/author_work.csv", archive["copied"])
             self.assertIn("results/stats_summary.json", archive["copied"])
             self.assertIn("tables_by_dump/works.parquet", archive["copied"])
@@ -608,6 +618,45 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual(manifest["run_table_outputs"]["indices"], run_table_outputs["indices"])
             self.assertEqual(manifest["run_result_outputs"]["stats_summary"], run_result_outputs["stats_summary"])
             self.assertEqual(archive["active_context"]["active_run_id"], "run_scoped")
+
+    def test_archive_records_direct_run_passport_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_passports = root / "runs" / "run_passports" / "passports"
+            run_passports.mkdir(parents=True)
+            passport_outputs: dict[str, str] = {}
+            for name, filename in {
+                "slice_passport": "slice_passport.json",
+                "calculation_passport": "calculation_passport.json",
+                "checksums": "checksums.json",
+            }.items():
+                path = run_passports / filename
+                path.write_text(json.dumps({"name": name}), encoding="utf-8")
+                passport_outputs[name] = str(path)
+
+            cfg = SimpleNamespace(slice_name="slice_passports")
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "TABLE_FILES", {}),
+                patch.object(pipeline, "PARQUET_TABLE_FILES", {}),
+                patch.object(pipeline, "JSON_FILES", {}),
+            ):
+                archive = pipeline._archive_run_artifacts(
+                    cfg,
+                    {
+                        "run_id": "run_passports",
+                        "dump_id": "dump_passports",
+                        "input_tables": {},
+                        "input_table_checksums": {},
+                        "passport_outputs": passport_outputs,
+                    },
+                )
+                manifest = json.loads((root / "runs" / "run_passports" / "metric_run.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(archive["copied"]["passports/slice_passport.json"], str(run_passports / "slice_passport.json"))
+            self.assertEqual(archive["copied"]["passports/calculation_passport.json"], str(run_passports / "calculation_passport.json"))
+            self.assertEqual(archive["copied"]["passports/checksums.json"], str(run_passports / "checksums.json"))
+            self.assertEqual(manifest["passport_outputs"]["slice_passport"], passport_outputs["slice_passport"])
 
     def test_archive_preserves_unknown_active_context_eligibility_as_null(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
