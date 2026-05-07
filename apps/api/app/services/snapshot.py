@@ -27,7 +27,7 @@ def fetch_manifest(entity: str = "works", max_entries: int = 1000) -> dict[str, 
         "total_records": total_records,
         "total_compressed_bytes": total_bytes,
         "partitions_count": len(partitions),
-        "latest_partitions": sorted(partitions)[-20:],
+        "recent_partitions": sorted(partitions)[-20:],
         "sample_entries": entries[:max(0, min(max_entries, 20))],
     }
 

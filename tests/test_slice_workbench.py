@@ -54,14 +54,14 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(summary["workflow"]["quality_summary"]["analysis_eligibility_status"], "final")
         self.assertEqual(summary["workflow"]["quality_summary"]["allowed_for_final_analysis"], True)
 
-    def test_workbench_summary_without_active_context_does_not_expose_latest_table_counts(self) -> None:
+    def test_workbench_summary_without_active_context_does_not_expose_unscoped_table_counts(self) -> None:
         with (
             patch.object(
                 slice_workbench.warehouse,
                 "list_tables",
                 return_value={"indices": {"rows": 99}, "ratings": {"rows": 99}},
             ) as list_tables,
-            patch.object(slice_workbench.warehouse, "read_json_doc", return_value={"quality_counts": {"legacy": 99}}) as read_json_doc,
+            patch.object(slice_workbench.warehouse, "read_json_doc", return_value={"quality_counts": {"stale": 99}}) as read_json_doc,
             patch.object(slice_workbench.artifact_context, "read_active_context", return_value={}),
             patch.object(slice_workbench, "list_slices", return_value={"slices": [], "total": 0}),
             patch.object(slice_workbench, "list_materialization_plans", return_value={"materializations": []}),
@@ -76,11 +76,11 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(summary["workflow"]["active_stage"], "idle")
         self.assertEqual(summary["workflow"]["quality_summary"]["authors_indexed"], 0)
 
-    def test_workbench_summary_with_dump_only_active_context_does_not_read_latest_quality(self) -> None:
+    def test_workbench_summary_with_dump_only_active_context_does_not_read_unscoped_quality(self) -> None:
         active_context = {"active_dump_id": "dump_a"}
         with (
             patch.object(slice_workbench.warehouse, "list_tables", return_value={"works": {"rows": 3}}) as list_tables,
-            patch.object(slice_workbench.warehouse, "read_json_doc", return_value={"quality_counts": {"legacy": 99}}) as read_json_doc,
+            patch.object(slice_workbench.warehouse, "read_json_doc", return_value={"quality_counts": {"stale": 99}}) as read_json_doc,
             patch.object(slice_workbench.artifact_context, "read_active_context", return_value=active_context),
             patch.object(slice_workbench, "list_slices", return_value={"slices": [], "total": 0}),
             patch.object(slice_workbench, "list_materialization_plans", return_value={"materializations": []}),
@@ -712,7 +712,7 @@ class SliceWorkbenchTests(unittest.TestCase):
                         "slice_id": "slice_payload",
                         "filter_mode": "all",
                         "accepted_download_signature": "old-download",
-                        "unknown_legacy": "drop-me",
+                        "unknown_extra": "drop-me",
                     }
                 )
                 materialization = slice_workbench.create_materialization_plan(created["slice_id"])
@@ -721,7 +721,7 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(technical["accepted_estimate_signature"], "estimate-ok")
         self.assertEqual(technical["accepted_download_signature"], "download-ok")
         self.assertEqual(technical["download_policy"]["user_controls_download_after_estimate"], True)
-        self.assertNotIn("unknown_legacy", technical)
+        self.assertNotIn("unknown_extra", technical)
 
 
 if __name__ == "__main__":

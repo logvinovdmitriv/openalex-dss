@@ -44,7 +44,7 @@ sources:
     label: "OpenAlex snapshot Parquet"
     role: "Parquet snapshot для серверного/enterprise режима; не является основным режимом ноутбука и не используется без локального/серверного lakehouse."
     status: "research_note"
-    research_note: "Документация OpenAlex описывает enterprise Parquet snapshot и план публичного Parquet snapshot; в MVP это будущий provider, а не готовый источник маленьких тематических срезов."
+    research_note: "Документация OpenAlex описывает enterprise Parquet snapshot и план публичного Parquet snapshot; в DSS это будущий provider, а не готовый источник маленьких тематических срезов."
     supports:
       - parquet
       - duckdb

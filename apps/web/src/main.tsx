@@ -309,7 +309,7 @@ function Workbench() {
       return { doc, result };
     },
     onSuccess: ({ doc, result }) => {
-      setSliceDoc({ ...doc, latest_estimate: result, state: "estimated" });
+      setSliceDoc({ ...doc, current_estimate: result, state: "estimated" });
       setEstimate(result);
       qc.invalidateQueries({ queryKey: ["workbench"] });
       navigate("slices");
@@ -344,7 +344,7 @@ function Workbench() {
       setSliceDoc(doc);
       const estimateResult = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { download_policy: downloadPolicy });
       setEstimate(estimateResult);
-      setSliceDoc({ ...doc, latest_estimate: estimateResult, state: "estimated" });
+      setSliceDoc({ ...doc, current_estimate: estimateResult, state: "estimated" });
       const decision = estimateResult?.decision ?? {};
       if (decision.can_execute === false) {
         const reason = [...(decision.reasons ?? []), ...(decision.warnings ?? [])].filter(Boolean).join(" ");
@@ -508,7 +508,7 @@ function Workbench() {
             <p>{pageLead(view)}</p>
           </div>
         </header>
-        <WorkflowStepper view={view} estimate={estimate ?? sliceDoc?.latest_estimate} materialization={materialization ?? sliceDoc?.latest_materialization_plan} run={run.data} hasIndices={Boolean(tables?.indices?.rows)} hasCohort={Boolean(selectedCohortId)} />
+        <WorkflowStepper view={view} estimate={estimate ?? sliceDoc?.current_estimate} materialization={materialization ?? sliceDoc?.current_materialization_plan} run={run.data} hasIndices={Boolean(tables?.indices?.rows)} hasCohort={Boolean(selectedCohortId)} />
 
         {errors.length > 0 && <div className="notice error">{errors[0]}</div>}
 
@@ -523,8 +523,8 @@ function Workbench() {
             onOpenResolver={() => setResolverOpen(true)}
             onSave={() => createSlice.mutate({ ...slicePayload, title: humanSliceTitle(filters) })}
             onEstimate={() => estimateSlice.mutate()}
-            estimate={estimate ?? sliceDoc?.latest_estimate}
-            materialization={materialization ?? sliceDoc?.latest_materialization_plan}
+            estimate={estimate ?? sliceDoc?.current_estimate}
+            materialization={materialization ?? sliceDoc?.current_materialization_plan}
             storageProfileId={activeStorageProfileId}
             setStorageProfileId={setStorageProfileId}
             storageProfileOptions={storageProfileOptions}
@@ -2178,8 +2178,8 @@ function PassportsPage({ state, sliceDoc, estimate, materialization }: { state: 
   return (
     <div className="passport-grid">
       <JsonPanel title="Паспорт среза" value={sliceDoc ?? state?.workflow?.current_slice ?? {}} />
-      <JsonPanel title="Паспорт оценки" value={estimate ?? sliceDoc?.latest_estimate ?? {}} />
-      <JsonPanel title="Паспорт загрузки и хранения" value={materialization ?? sliceDoc?.latest_materialization_plan ?? {}} />
+      <JsonPanel title="Паспорт оценки" value={estimate ?? sliceDoc?.current_estimate ?? {}} />
+      <JsonPanel title="Паспорт загрузки и хранения" value={materialization ?? sliceDoc?.current_materialization_plan ?? {}} />
       <JsonPanel title="Quality report" value={state?.quality ?? {}} />
     </div>
   );

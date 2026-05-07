@@ -27,17 +27,17 @@ from app.services.internal_payloads import InternalPipelinePayload, normalize_in
 
 
 class PublicApiSurfaceTests(unittest.TestCase):
-    def test_legacy_pipeline_routes_are_not_public(self) -> None:
+    def test_stale_pipeline_routes_are_not_public(self) -> None:
         route_paths = {getattr(route, "path", "") for route in app.routes}
 
         self.assertFalse(any(path.startswith("/api/v1/pipeline") for path in route_paths))
 
-    def test_legacy_slice_plan_route_is_not_public(self) -> None:
+    def test_stale_slice_plan_route_is_not_public(self) -> None:
         route_paths = {getattr(route, "path", "") for route in app.routes}
 
         self.assertNotIn("/api/v1/slices/plan", route_paths)
 
-    def test_legacy_state_and_snapshot_diagnostics_are_not_public(self) -> None:
+    def test_stale_state_and_snapshot_diagnostics_are_not_public(self) -> None:
         route_paths = {getattr(route, "path", "") for route in app.routes}
 
         self.assertNotIn("/api/v1/state", route_paths)
@@ -90,7 +90,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
     def test_slice_create_request_rejects_internal_pipeline_fields(self) -> None:
         for field in ("slice_name", "workflow_mode", "sort", "per_page", "api_key", "raw_openalex_filter", "source_path", "accepted_download_signature", "lrdi_p0"):
             with self.assertRaises(ValidationError):
-                SliceCreateRequest(filter_mode="all", **{field: "legacy"})
+                SliceCreateRequest(filter_mode="all", **{field: "stale"})
 
     def test_public_slices_route_uses_slice_create_request_schema(self) -> None:
         annotation_name = inspect.signature(slices_routes.create_slice).parameters["payload"].annotation
@@ -116,7 +116,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertIn("active_context_source", internal_props)
         self.assertIn("run_id", internal_props)
         self.assertIn("dump_id", internal_props)
-        internal = InternalPipelinePayload(filter_mode="all", api_key="secret", workflow_mode="strict_works", extra_legacy="ignored")
+        internal = InternalPipelinePayload(filter_mode="all", api_key="secret", workflow_mode="strict_works", extra_field="ignored")
         self.assertEqual(internal.api_key, "secret")
         self.assertEqual(internal.workflow_mode, "strict_works")
 
@@ -132,7 +132,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
                 "dump_manifest": {"dump_id": "dump_a"},
                 "analysis_eligibility": {"status": "final", "allowed_for_final_analysis": True},
                 "active_context_source": "materialization",
-                "unknown_legacy": "drop-me",
+                "unknown_extra": "drop-me",
             }
         )
 
@@ -144,7 +144,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertEqual(normalized["dump_manifest"], {"dump_id": "dump_a"})
         self.assertEqual(normalized["analysis_eligibility"]["status"], "final")
         self.assertEqual(normalized["active_context_source"], "materialization")
-        self.assertNotIn("unknown_legacy", normalized)
+        self.assertNotIn("unknown_extra", normalized)
 
     def test_run_request_exposes_only_recalculate_action(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")
@@ -163,7 +163,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 RunRequest(action="recalculate", payload=payload)
 
-    def test_public_runs_route_defensively_rejects_legacy_actions(self) -> None:
+    def test_public_runs_route_defensively_rejects_stale_actions(self) -> None:
         for action in ("plan", "fetch_slice_dump", "build_from_openalex", "download"):
             request = SimpleNamespace(action=action, payload=AnalysisRunRequest(dump_id="dump_a"))
 

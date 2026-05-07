@@ -11,13 +11,13 @@ from openalex_dss.metrics import compute_indices
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config/slice.yaml")
-    parser.add_argument("--in", dest="input_path", default="data/marts/author_work_metrics.csv")
-    parser.add_argument("--out", default="data/results/author_indices.csv")
+    parser.add_argument("--in", dest="input_path", default="data/runs/local/tables/author_work.csv")
+    parser.add_argument("--out", default="data/runs/local/tables/indices.csv")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     rows = compute_indices(data_path(args.input_path), data_path(args.out), n0=cfg.iupv_n0, lam=cfg.iupv_lambda)
-    print(f"author_indices_rows={len(rows)}")
+    print(f"indices_rows={len(rows)}")
 
 
 if __name__ == "__main__":

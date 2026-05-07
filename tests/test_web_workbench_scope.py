@@ -131,7 +131,7 @@ class WebWorkbenchScopeTests(unittest.TestCase):
                       throw new Error(`expected missing active context detail, got ${{JSON.stringify(noContext)}}`);
                     }}
 
-                    const emptyActive = localDataMissingScopeState({{ activeContext: {{ source: "legacy" }} }});
+                    const emptyActive = localDataMissingScopeState({{ activeContext: {{ source: "stale" }} }});
                     if (emptyActive.missing !== true || !emptyActive.detail.includes("не содержит run_id")) {{
                       throw new Error(`expected empty active context detail, got ${{JSON.stringify(emptyActive)}}`);
                     }}

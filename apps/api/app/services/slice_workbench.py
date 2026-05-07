@@ -64,8 +64,8 @@ def create_slice(payload: dict[str, Any]) -> dict[str, Any]:
         "download_policy_default": _download_policy(payload),
         "technical_payload": _public_payload(technical_payload),
         "lifecycle": _lifecycle("draft"),
-        "latest_estimate": None,
-        "latest_materialization_plan": None,
+        "current_estimate": None,
+        "current_materialization_plan": None,
     }
     _write_slice(doc)
     return doc
@@ -117,7 +117,7 @@ def estimate_slice(slice_id: str, payload: dict[str, Any] | None = None) -> dict
     doc["technical_payload"] = _public_payload(merged_payload)
     doc["state"] = _advance_state(str(doc.get("state") or "draft"), "estimated")
     doc["updated_at_utc"] = _now()
-    doc["latest_estimate"] = estimate
+    doc["current_estimate"] = estimate
     doc["lifecycle"] = _lifecycle(doc["state"])
     _write_slice(doc)
     return estimate
@@ -177,7 +177,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
     }
     _write_materialization(materialization)
     doc["state"] = _advance_state(str(doc.get("state") or "estimated"), "planned")
-    doc["latest_materialization_plan"] = materialization
+    doc["current_materialization_plan"] = materialization
     doc["updated_at_utc"] = _now()
     doc["lifecycle"] = _lifecycle(doc["state"])
     _write_slice(doc)
@@ -195,7 +195,7 @@ def run_materialization(materialization_id: str, payload: dict[str, Any] | None 
     try:
         doc = get_slice(plan["slice_id"])
         doc["state"] = _advance_state(str(doc.get("state") or "planned"), "materializing")
-        doc["latest_materialization_plan"] = plan
+        doc["current_materialization_plan"] = plan
         doc["updated_at_utc"] = _now()
         doc["lifecycle"] = _lifecycle(doc["state"])
         _write_slice(doc)
@@ -252,7 +252,7 @@ def mark_materialization_run_completed(run_id: str, result: dict[str, Any], *, m
         except KeyError:
             return
         doc["state"] = _advance_state(str(doc.get("state") or "materializing"), target_slice_state)
-        doc["latest_materialization_plan"] = plan
+        doc["current_materialization_plan"] = plan
         doc["updated_at_utc"] = _now()
         doc["lifecycle"] = _lifecycle(doc["state"])
         _write_slice(doc)
@@ -274,7 +274,7 @@ def mark_materialization_run_failed(run_id: str, error: str, *, materialization_
         except KeyError:
             return
         doc["state"] = "failed"
-        doc["latest_materialization_plan"] = plan
+        doc["current_materialization_plan"] = plan
         doc["updated_at_utc"] = _now()
         doc["error"] = error
         doc["lifecycle"] = _lifecycle(doc["state"])

@@ -145,7 +145,7 @@ class AnalyticsRouteTests(unittest.TestCase):
             patch.object(
                 analytics_routes.warehouse,
                 "metric_ranking",
-                return_value={"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "run_latest", "dump_id": "dump_latest"},
+                return_value={"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "run_resolved", "dump_id": "dump_resolved"},
             ),
             patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
         ):

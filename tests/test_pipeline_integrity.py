@@ -341,20 +341,20 @@ class PipelineIntegrityTests(unittest.TestCase):
 
     def test_jobs_dispatch_delegates_analysis_actions_to_analysis_jobs(self) -> None:
         with patch.object(jobs.analysis_jobs, "recalculate", return_value={"status": "ok"}) as recalculate:
-            result = jobs._dispatch("run_analysis", "recalculate", {"dump_id": "dump_a", "unknown_legacy": "drop-me"})
+            result = jobs._dispatch("run_analysis", "recalculate", {"dump_id": "dump_a", "unknown_extra": "drop-me"})
 
         self.assertEqual(result, {"status": "ok"})
         recalculate.assert_called_once()
         self.assertEqual(recalculate.call_args.args[0], "run_analysis")
         self.assertEqual(recalculate.call_args.args[1]["dump_id"], "dump_a")
-        self.assertNotIn("unknown_legacy", recalculate.call_args.args[1])
+        self.assertNotIn("unknown_extra", recalculate.call_args.args[1])
 
     def test_jobs_dispatch_delegates_materialization_actions_to_materialization_jobs(self) -> None:
         with patch.object(jobs.materialization_jobs, "dispatch", return_value={"status": "ok"}) as dispatch:
             result = jobs._dispatch(
                 "run_materialization",
                 "build_from_openalex",
-                {"accepted_estimate_signature": "estimate", "accepted_download_signature": "download", "unknown_legacy": "drop-me"},
+                {"accepted_estimate_signature": "estimate", "accepted_download_signature": "download", "unknown_extra": "drop-me"},
             )
 
         self.assertEqual(result, {"status": "ok"})
@@ -362,7 +362,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(dispatch.call_args.args[0], "run_materialization")
         self.assertEqual(dispatch.call_args.args[1], "build_from_openalex")
         self.assertEqual(dispatch.call_args.args[2]["accepted_download_signature"], "download")
-        self.assertNotIn("unknown_legacy", dispatch.call_args.args[2])
+        self.assertNotIn("unknown_extra", dispatch.call_args.args[2])
         self.assertIn("download_progress_callback", dispatch.call_args.kwargs)
         self.assertIn("update_progress_callback", dispatch.call_args.kwargs)
 
@@ -686,11 +686,11 @@ class PipelineIntegrityTests(unittest.TestCase):
             return {"status": "ok"}
 
         with patch.object(pipeline, "recalculate", side_effect=fake_recalculate):
-            jobs._dispatch("run_scope", "recalculate", {"dump_id": "dump_scope", "unknown_legacy": "drop-me"})
+            jobs._dispatch("run_scope", "recalculate", {"dump_id": "dump_scope", "unknown_extra": "drop-me"})
 
         self.assertEqual(captured["recalculate"]["run_id"], "run_scope")
         self.assertEqual(captured["recalculate"]["dump_id"], "dump_scope")
-        self.assertNotIn("unknown_legacy", captured["recalculate"])
+        self.assertNotIn("unknown_extra", captured["recalculate"])
 
     def test_archive_does_not_overwrite_existing_dump_manifest_on_recalculate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -867,9 +867,9 @@ class PipelineIntegrityTests(unittest.TestCase):
             root = Path(tmp)
             dump_dir = root / "dumps" / "dump_fetch"
             dump_dir.mkdir(parents=True)
-            legacy = root / "passports" / "fetch_meta.json"
-            legacy.parent.mkdir(parents=True)
-            legacy.write_text(json.dumps({"source": "legacy"}), encoding="utf-8")
+            stale = root / "passports" / "fetch_meta.json"
+            stale.parent.mkdir(parents=True)
+            stale.write_text(json.dumps({"source": "stale"}), encoding="utf-8")
             scoped = dump_dir / "fetch_meta.json"
             scoped.write_text(json.dumps({"source": "scoped"}), encoding="utf-8")
 
