@@ -50,6 +50,7 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
         dump_id=dump_id,
         analysis_eligibility=analysis_eligibility,
         input_tables=input_tables,
+        extra_primary_artifacts=_dump_provenance_primary_artifacts(dump_id),
     )
     _write_pipeline_summary("recalculate", cfg, {**payload, "run_id": run_id, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, "active_context_source": "recalculate", **compute})
@@ -179,6 +180,7 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         analysis_eligibility=analysis_eligibility,
         input_tables=input_tables,
         extra_primary_artifacts={
+            **_dump_provenance_primary_artifacts(dump_id),
             "dump/fetch_meta.json": fetch_meta_path,
             "dump/quality_report.json": quality_report,
         },
@@ -299,6 +301,19 @@ def _write_dump_fetch_meta(dump_id: str, fetch_meta: dict[str, Any]) -> Path:
     path = dump_dir / "fetch_meta.json"
     write_json(path, fetch_meta)
     return path
+
+
+def _dump_provenance_primary_artifacts(dump_id: str) -> dict[str, Path]:
+    raw_dump_id = str(dump_id or "").strip()
+    if not raw_dump_id:
+        return {}
+    dump_dir = DATA / "dumps" / _safe_id(raw_dump_id)
+    candidates = {
+        "dump/fetch_meta.json": dump_dir / "fetch_meta.json",
+        "dump/quality_report.json": dump_dir / "quality_report.json",
+        "dump/dump_manifest.json": dump_dir / "dump_manifest.json",
+    }
+    return {label: path for label, path in candidates.items() if path.is_file()}
 
 
 def _materialize_dump_tables_from_sources(dump_id: str, sources: dict[str, Path]) -> dict[str, Path]:

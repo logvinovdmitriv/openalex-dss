@@ -49,6 +49,8 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 - Import runs include `dumps/{dump_id}/fetch_meta.json` and
   `dumps/{dump_id}/quality_report.json` in scoped checksum passports alongside
   dump tables and run outputs.
+- Recalculation runs include existing dump provenance files from
+  `dumps/{dump_id}` in scoped checksum passports when those files are present.
 - `run_id` owns derived calculations: author-work rows, author indices,
   ratings, run passports, and run-local diagnostic outputs.
 - Slice, calculation and checksum passports are written directly under

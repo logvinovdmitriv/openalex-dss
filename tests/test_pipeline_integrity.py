@@ -364,6 +364,8 @@ class PipelineIntegrityTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (dump_dir / "fetch_meta.json").write_text("{}", encoding="utf-8")
+            (dump_dir / "quality_report.json").write_text("{}", encoding="utf-8")
             with (
                 patch.object(pipeline, "DATA", root),
                 patch.object(pipeline, "resolve_dump_tables", return_value={"works": root / "works.parquet", "authorships": root / "authorships.parquet", "work_topics": root / "work_topics.parquet"}),
@@ -381,7 +383,37 @@ class PipelineIntegrityTests(unittest.TestCase):
                 )
 
         self.assertEqual(captured["analysis_eligibility"]["status"], "final")
+        self.assertEqual(captured["extra_primary_artifacts"]["dump/fetch_meta.json"], dump_dir / "fetch_meta.json")
+        self.assertEqual(captured["extra_primary_artifacts"]["dump/quality_report.json"], dump_dir / "quality_report.json")
+        self.assertEqual(captured["extra_primary_artifacts"]["dump/dump_manifest.json"], dump_dir / "dump_manifest.json")
         self.assertEqual(result["analysis_eligibility"]["allowed_for_final_analysis"], True)
+
+    def test_recalculate_omits_missing_dump_provenance_from_checksums(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_compute(*args: object, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {"input_tables": {}, "input_table_checksums": {}}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "resolve_dump_tables", return_value={"works": root / "works.parquet", "authorships": root / "authorships.parquet", "work_topics": root / "work_topics.parquet"}),
+                patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
+                patch.object(pipeline, "_archive_run_artifacts", return_value={}),
+                patch.object(pipeline, "_write_pipeline_summary", return_value=None),
+            ):
+                pipeline.recalculate(
+                    {
+                        "dump_id": "dump_without_provenance",
+                        "entity_level": "subfield",
+                        "entity_id_short": "1706",
+                        "entity_display_name": "Computer Science Applications",
+                    }
+                )
+
+        self.assertEqual(captured["extra_primary_artifacts"], {})
 
     def test_recalculate_requires_dump_tables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
