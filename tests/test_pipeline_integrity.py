@@ -1681,20 +1681,63 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(filters["source_display_name"], "Journal One")
 
     def test_pipeline_summary_includes_analysis_eligibility(self) -> None:
-        captured: dict[str, object] = {}
         eligibility = {"status": "final", "allowed_for_final_analysis": True}
 
-        def fake_write_json(path: object, doc: dict[str, object]) -> None:
-            captured.update(doc)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            global_summary = root / "passports" / "pipeline_summary.json"
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "JSON_FILES", {"pipeline": global_summary}),
+                patch.dict("os.environ", {}, clear=True),
+            ):
+                pipeline._write_pipeline_summary(
+                    "recalculate",
+                    pipeline._cfg({"entity_level": "subfield", "entity_id_short": "1706", "entity_display_name": "Computer Science Applications"}),
+                    {"run_id": "run_summary", "analysis_eligibility": eligibility},
+                )
 
-        with patch.object(pipeline, "write_json", side_effect=fake_write_json):
-            pipeline._write_pipeline_summary(
-                "recalculate",
-                pipeline._cfg({"entity_level": "subfield", "entity_id_short": "1706", "entity_display_name": "Computer Science Applications"}),
-                {"analysis_eligibility": eligibility},
-            )
+            run_summary = root / "runs" / "run_summary" / "passports" / "pipeline_summary.json"
+            captured = json.loads(run_summary.read_text(encoding="utf-8"))
 
         self.assertEqual(captured["analysis_eligibility"], eligibility)
+        self.assertFalse(global_summary.exists())
+
+    def test_pipeline_summary_skips_global_latest_without_run_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            global_summary = root / "passports" / "pipeline_summary.json"
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "JSON_FILES", {"pipeline": global_summary}),
+                patch.dict("os.environ", {}, clear=True),
+            ):
+                pipeline._write_pipeline_summary(
+                    "fetch_slice_dump",
+                    pipeline._cfg({"entity_level": "subfield", "entity_id_short": "1706", "entity_display_name": "Computer Science Applications"}),
+                    {},
+                )
+
+        self.assertFalse(global_summary.exists())
+
+    def test_pipeline_summary_writes_global_latest_only_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            global_summary = root / "passports" / "pipeline_summary.json"
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "JSON_FILES", {"pipeline": global_summary}),
+                patch.dict("os.environ", {"OPENALEX_DSS_PUBLISH_LATEST_VIEW": "1"}, clear=True),
+            ):
+                pipeline._write_pipeline_summary(
+                    "fetch_slice_dump",
+                    pipeline._cfg({"entity_level": "subfield", "entity_id_short": "1706", "entity_display_name": "Computer Science Applications"}),
+                    {},
+                )
+
+            captured = json.loads(global_summary.read_text(encoding="utf-8"))
+
+        self.assertEqual(captured["mode"], "fetch_slice_dump")
 
     def test_final_local_import_requires_final_eligible_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

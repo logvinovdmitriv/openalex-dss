@@ -538,7 +538,8 @@ def _write_pipeline_summary(mode: str, cfg: Any, payload: dict[str, Any]) -> Non
         doc["dump"] = payload["dump"]
     if payload.get("analysis_eligibility"):
         doc["analysis_eligibility"] = payload["analysis_eligibility"]
-    write_json(JSON_FILES["pipeline"], doc)
+    if _publish_latest_view_enabled():
+        write_json(JSON_FILES["pipeline"], doc)
     run_id = str(payload.get("run_id") or "").strip()
     if run_id:
         write_json(DATA / "runs" / _safe_id(run_id) / "passports" / "pipeline_summary.json", doc)

@@ -54,10 +54,10 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   `dumps/{dump_id}` in scoped checksum passports when those files are present.
 - `run_id` owns derived calculations: author-work rows, author indices,
   ratings, run passports, and run-local diagnostic outputs.
-- Slice, calculation and checksum passports are written directly under
-  `runs/{run_id}/passports`. Pipeline summary is also mirrored there when a
-  `run_id` is available. Compatibility latest passport paths are not the source
-  for these run-scoped passport artifacts.
+- Slice, calculation, checksum, and pipeline summary passports are written
+  directly under `runs/{run_id}/passports` when a `run_id` is available.
+  Compatibility latest passport paths are not the source for these run-scoped
+  passport artifacts.
 - Run checksum passports are built from scoped dump/run artifacts when the
   pipeline provides a scoped artifact map. Compatibility latest-view paths are
   used only by legacy `build_passports(...)` calls that do not provide scoped
@@ -74,7 +74,8 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
   filters, cohort, baseline, rank Top-N, and scientometric version set.
 - Latest-view files are compatibility artifacts. They are not a stable source
   for dissertation-grade reports.
-- Latest-view publication is disabled by default for pipeline compute. Set
+- Latest-view publication is disabled by default for pipeline compute and the
+  global `passports/pipeline_summary.json` compatibility mirror. Set
   `OPENALEX_DSS_PUBLISH_LATEST_VIEW=1` only when an explicit compatibility
   mirror is needed for older local workflows.
 - Local-data preview routes may still read latest-view files during the
