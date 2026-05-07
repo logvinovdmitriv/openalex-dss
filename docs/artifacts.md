@@ -40,6 +40,8 @@ and reports should be addressed by explicit `dump_id`, `run_id`, and
 - Local-data preview routes may still read latest-view files during the
   transition, but no-scope responses are marked as
   `scope_status=implicit_latest_preview` and `reproducible=false`.
+- Local-data CSV exports require explicit `run_id`/`dump_id`; compatibility
+  latest CSV export is available only with `allow_latest_preview=true`.
 - Final report and analytics paths must prefer explicit `run_id`/`dump_id` and
   avoid implicit latest fallback.
 

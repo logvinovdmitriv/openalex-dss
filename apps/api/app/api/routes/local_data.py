@@ -88,8 +88,17 @@ def local_data_preview_csv(
     direction: str = "desc",
     limit: int = Query(100_000, ge=1, le=500_000),
     offset: int = Query(0, ge=0),
+    allow_latest_preview: bool = False,
 ) -> Response:
     table = _local_data_kind(kind)
+    if not (str(run_id or "").strip() or str(dump_id or "").strip()) and not allow_latest_preview:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "run_id or dump_id is required for reproducible CSV export; "
+                "pass allow_latest_preview=true for compatibility preview."
+            ),
+        )
     try:
         data = warehouse.export_table_csv(
             table,
