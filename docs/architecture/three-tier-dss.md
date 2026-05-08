@@ -143,15 +143,17 @@ mode with roles, durable jobs and permissions.
 calculates local author metrics only inside the current slice. Mathematical
 conclusions about indices must use this mode.
 
-For reproducible dissertation runs, `scripts/01_fetch_openalex_slice.py` or
-`POST /api/v1/materializations/{materialization_id}/run` materializes the
-strict Works request through the installed OpenAlex downloader. API calls are
+For reproducible DSS runs,
+`POST /api/v1/materializations/{materialization_id}/run` materializes the strict
+Works request through the installed OpenAlex downloader. API calls are
 kept for field catalogs, entity resolving, estimates, rate-limit visibility and
 explicit selected-entity lookup. The downloader output is packed as
 `$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/works.jsonl.gz` with a
-passport and checksum. The calculation step imports this fixed file locally;
-the materialization endpoint does not calculate rankings. This is the DSS local
-slice mode and is intentionally separate from the full S3 snapshot.
+passport and checksum. The `build_from_openalex` materialization path then
+imports this fixed file locally, normalizes works/authorships and writes
+run-scoped author tables, ratings, passports and checksums. A fetch-only path is
+kept for downloading or repairing a local slice before calculation. This is the
+DSS local slice mode and is intentionally separate from the full S3 snapshot.
 
 ## Primary Workflow
 

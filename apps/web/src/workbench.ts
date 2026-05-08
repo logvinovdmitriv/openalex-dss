@@ -1,4 +1,4 @@
-import { DEFAULT_FILTERS, FRACTION_MODES, type ActiveFilters, countryLabel, filterParams, fmt } from "./domain";
+import { DEFAULT_FILTERS, FRACTION_MODES, type ActiveFilters, countryLabel, filterParams } from "./domain";
 import type { CustomMetricDefinition, TableColumnFilters } from "./api";
 
 export type View = "slices" | "data" | "rankings" | "statistics" | "reports";

@@ -16,7 +16,7 @@ npm install
 Запустите backend и frontend:
 
 ```bash
-python3 scripts/run_dss.py
+./start
 ```
 
 Откройте:

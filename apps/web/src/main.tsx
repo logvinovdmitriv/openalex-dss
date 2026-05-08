@@ -340,7 +340,6 @@ function Workbench() {
   const effectiveDumpId = uiScope.dumpId;
   const usingActiveContextScope = uiScope.source === "active_context";
   const scopeReady = Boolean(effectiveRunId || effectiveDumpId);
-  const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
   const dataFilterKey = useMemo(() => JSON.stringify(dataColumnFilters), [dataColumnFilters]);
   const customMetricKey = useMemo(() => JSON.stringify(customMetrics), [customMetrics]);
   const analysisFilters = useMemo(() => DATA_ONLY_ANALYSIS_FILTERS, []);
@@ -515,7 +514,6 @@ function Workbench() {
   const activeTopN = topN;
   const slicePayload = useMemo(() => buildSliceDefinitionPayload(filters), [filters]);
   const analysisRunPayload = useMemo(() => buildAnalysisRunPayload(fractionMode, displayFractionModeOptions.map((item) => item.value)), [fractionMode, displayFractionModeOptions]);
-  const cliApiKeyReady = true;
   const downloadConfigReady = Boolean(activeStorageProfileId && activeSourceStrategy);
   const downloadPolicy = useMemo(() => buildDownloadPolicy(), []);
 
@@ -632,17 +630,6 @@ function Workbench() {
       navigate("data");
     },
   });
-  const deleteSavedSlice = useMutation({
-    mutationFn: (sliceId: string) => deleteJson<any>(`/slices/${encodeURIComponent(sliceId)}`),
-    onSuccess: (_result, sliceId) => {
-      if (sliceDoc?.slice_id === sliceId) {
-        setSliceDoc(null);
-        setEstimate(null);
-        setMaterialization(null);
-      }
-      qc.invalidateQueries({ queryKey: ["workbench"] });
-    },
-  });
   const deleteDownloadedDump = useMutation({
     mutationFn: (nextDumpId: string) => deleteJson<any>(`/dumps/${encodeURIComponent(nextDumpId)}`),
     onSuccess: (_result, nextDumpId) => {
@@ -729,30 +716,6 @@ function Workbench() {
     }).toString()}`, {}),
     onSuccess: () => qc.invalidateQueries(),
   });
-  const selectSavedSlice = (doc: any) => {
-    setSliceDoc(doc);
-    setFilters(filtersFromSlicePayload(doc?.technical_payload ?? doc, filters));
-    setEstimate(doc?.current_estimate ?? null);
-    setMaterialization(doc?.current_materialization_plan ?? null);
-    const plan = doc?.current_materialization_plan ?? {};
-    setRunId(String(plan.run_id ?? ""));
-    setDumpId(String(plan.dump_id ?? plan.dump_manifest?.dump_id ?? ""));
-    setDownloadDir(String(plan.download_dir ?? plan.technical_payload?.download_dir ?? ""));
-    navigate("slices");
-  };
-
-  const selectMaterializationPlan = (plan: any) => {
-    setMaterialization(plan);
-    setEstimate(plan?.estimated ?? null);
-    setFilters(filtersFromSlicePayload(plan?.technical_payload ?? {}, filters));
-    const slice = (workbench.data?.slices ?? []).find((item: any) => String(item.slice_id ?? "") === String(plan?.slice_id ?? ""));
-    if (slice) setSliceDoc(slice);
-    setRunId(String(plan?.run_id ?? ""));
-    setDumpId(String(plan?.dump_id ?? plan?.dump_manifest?.dump_id ?? ""));
-    setDownloadDir(String(plan?.download_dir ?? plan?.technical_payload?.download_dir ?? ""));
-    navigate(plan?.run_id ? "data" : "slices");
-  };
-
   const selectDownloadedDump = (dump: any) => {
     const nextDumpId = String(dump?.dump_id ?? "");
     const slice = (workbench.data?.slices ?? []).find((item: any) => String(item.slice_id ?? "") === String(dump?.slice_id ?? ""));
@@ -768,7 +731,6 @@ function Workbench() {
     navigate("data");
   };
 
-  const tables = localDataSummary.data?.tables ?? workbench.data?.tables ?? {};
   const errors = [
     createSlice.error,
     estimateSlice.error,
@@ -777,7 +739,6 @@ function Workbench() {
     downloadSlice.error,
     selectDownloadedDumpRemote.error,
     repairDownloadedDump.error,
-    deleteSavedSlice.error,
     deleteDownloadedDump.error,
     recalculate.error,
   ].filter(Boolean).map(mutationError);
@@ -888,7 +849,6 @@ function Workbench() {
             countryOptions={countryOptions}
             workTypeOptions={workTypeOptions}
             onOpenResolver={() => setResolverOpen(true)}
-            onSave={() => createSlice.mutate({ ...slicePayload, title: humanSliceTitle(filters) })}
             onEstimate={() => estimateSlice.mutate()}
             estimate={estimate ?? sliceDoc?.current_estimate}
             materialization={materialization ?? sliceDoc?.current_materialization_plan}
@@ -913,26 +873,18 @@ function Workbench() {
               else downloadSlice.mutate();
             }}
             onCancelRun={() => runId && cancelRun.mutate(runId)}
-            saving={createSlice.isPending}
             estimating={estimateSlice.isPending}
             materializing={downloadSlice.isPending || runMaterialization.isPending || running || cancelRun.isPending}
             downloadConfigReady={downloadConfigReady}
             run={run.data}
             sliceDoc={sliceDoc}
-            savedSlices={workbench.data?.slices ?? []}
-            materializations={workbench.data?.materializations ?? []}
             downloadedDumps={dumps.data?.dumps ?? workbench.data?.dumps ?? []}
-            onSelectSavedSlice={selectSavedSlice}
-            onSelectMaterialization={selectMaterializationPlan}
             onSelectDownloadedDump={selectDownloadedDump}
             onShowDumpInfo={setDumpInfo}
             onRepairDownloadedDump={(nextDumpId) => repairDownloadedDump.mutate(nextDumpId)}
-            onDeleteSavedSlice={(sliceId) => deleteSavedSlice.mutate(sliceId)}
             onDeleteDownloadedDump={(nextDumpId) => deleteDownloadedDump.mutate(nextDumpId)}
-            deletingSliceId={String(deleteSavedSlice.variables ?? "")}
             deletingDumpId={String(deleteDownloadedDump.variables ?? "")}
             repairingDumpId={activeRepairDumpId(run.data, repairDownloadedDump.variables)}
-            selectedSliceId={String(sliceDoc?.slice_id ?? "")}
             selectedDumpId={effectiveDumpId}
           />
         )}
@@ -1013,13 +965,10 @@ function Workbench() {
             fractionMode={fractionMode}
             runId={effectiveRunId}
             dumpId={effectiveDumpId}
-            metricOptions={primaryMetricOptions}
             metricLabels={metricLabelMap}
             customMetrics={customMetrics}
             scientometricMetrics={scientometricMetrics}
-            setScientometricMetrics={setScientometricMetrics}
             baselineMetric={baselineMetric}
-            setBaselineMetric={setBaselineMetric}
             rankTopN={analysisRankTopN}
             topN={activeTopN}
             setTopN={setTopN}
@@ -1065,7 +1014,6 @@ function SlicesPage({
   countryOptions,
   workTypeOptions,
   onOpenResolver,
-  onSave,
   onEstimate,
   estimate,
   materialization,
@@ -1086,26 +1034,18 @@ function SlicesPage({
   rateLimit,
   onRun,
   onCancelRun,
-  saving,
   estimating,
   materializing,
   downloadConfigReady,
   run,
   sliceDoc,
-  savedSlices,
-  materializations,
   downloadedDumps,
-  onSelectSavedSlice,
-  onSelectMaterialization,
   onSelectDownloadedDump,
   onShowDumpInfo,
   onRepairDownloadedDump,
-  onDeleteSavedSlice,
   onDeleteDownloadedDump,
-  deletingSliceId,
   deletingDumpId,
   repairingDumpId,
-  selectedSliceId,
   selectedDumpId,
 }: {
   filters: ActiveFilters;
@@ -1115,7 +1055,6 @@ function SlicesPage({
   countryOptions: SelectOption[];
   workTypeOptions: SelectOption[];
   onOpenResolver: () => void;
-  onSave: () => void;
   onEstimate: () => void;
   estimate: any;
   materialization: any;
@@ -1136,26 +1075,18 @@ function SlicesPage({
   rateLimit: any;
   onRun: () => void;
   onCancelRun: () => void;
-  saving: boolean;
   estimating: boolean;
   materializing: boolean;
   downloadConfigReady: boolean;
   run: any;
   sliceDoc: any;
-  savedSlices: any[];
-  materializations: any[];
   downloadedDumps: any[];
-  onSelectSavedSlice: (doc: any) => void;
-  onSelectMaterialization: (plan: any) => void;
   onSelectDownloadedDump: (dump: any) => void;
   onShowDumpInfo: (dump: any) => void;
   onRepairDownloadedDump: (dumpId: string) => void;
-  onDeleteSavedSlice: (sliceId: string) => void;
   onDeleteDownloadedDump: (dumpId: string) => void;
-  deletingSliceId: string;
   deletingDumpId: string;
   repairingDumpId: string;
-  selectedSliceId: string;
   selectedDumpId: string;
 }) {
   const dateInvalid = Boolean(filters.from_publication_date && filters.to_publication_date && filters.from_publication_date > filters.to_publication_date);
@@ -2758,13 +2689,10 @@ function StatisticsPage({
   fractionMode,
   runId,
   dumpId,
-  metricOptions,
   metricLabels,
   customMetrics,
   scientometricMetrics,
-  setScientometricMetrics,
   baselineMetric,
-  setBaselineMetric,
   rankTopN,
   topN,
   setTopN,
@@ -2793,13 +2721,10 @@ function StatisticsPage({
   fractionMode: string;
   runId: string;
   dumpId: string;
-  metricOptions: SelectOption[];
   metricLabels: Record<string, string>;
   customMetrics: CustomMetricDefinition[];
   scientometricMetrics: string[];
-  setScientometricMetrics: (value: string[]) => void;
   baselineMetric: string;
-  setBaselineMetric: (value: string) => void;
   rankTopN: number;
   topN: number;
   setTopN: (value: number) => void;
@@ -3282,7 +3207,7 @@ function DistributionComparisonPanel({
                         if (row?.author) return `${row.author}: ${formatAnalysisValue(row.value)}`;
                         return row ? `${formatAnalysisValue(row.lo)} – ${formatAnalysisValue(row.hi)}` : "";
                       }}
-                      formatter={(value, name, item: any) => {
+                      formatter={(value, _name, item: any) => {
                         if (item?.payload?.author) return [`${metricLabelFor(String(item.payload.metricName), metricLabels)}: ${formatAnalysisValue(item.payload.value)}`, "выбранный автор"];
                         return [fmt(value), "авторов"];
                       }}
@@ -3866,24 +3791,6 @@ function WorkTypePicker({ options, selected, onChange }: { options: SelectOption
         {options.length === 0 && <span className="muted">Справочник типов пока не загружен.</span>}
       </div>
       <small className="field-hint">Выберите один или несколько типов. «Все» снимает ограничение по типу.</small>
-    </div>
-  );
-}
-
-function SingleChoicePicker({ options, selected, onChange }: { options: SelectOption[]; selected: string; onChange: (value: string) => void }) {
-  return (
-    <div className="choice-grid compact" role="group">
-      {options.map((item) => (
-        <button
-          key={item.value}
-          type="button"
-          className={String(selected) === String(item.value) ? "choice-pill active" : "choice-pill"}
-          onClick={() => onChange(String(item.value))}
-          title={item.description}
-        >
-          {item.label}
-        </button>
-      ))}
     </div>
   );
 }

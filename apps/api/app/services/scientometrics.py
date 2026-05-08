@@ -1451,10 +1451,6 @@ def _interpretation(
     }
 
 
-def _describe_metric(rows: list[dict[str, Any]], metric: str) -> dict[str, Any]:
-    return _describe_values(_metric_values(rows, metric), len(rows))
-
-
 def _describe_values(values: list[float], n_total: int) -> dict[str, Any]:
     values = sorted(value for value in values if math.isfinite(value))
     n = len(values)
@@ -1522,10 +1518,6 @@ def _describe_values(values: list[float], n_total: int) -> dict[str, Any]:
         "outlier_count_iqr": outlier_count,
         "outlier_share_iqr": outlier_count / n if n else None,
     }
-
-
-def _boxplot_metric(rows: list[dict[str, Any]], metric: str) -> dict[str, Any]:
-    return _boxplot_values(rows, [_number(row.get(metric)) for row in rows])
 
 
 def _boxplot_values(rows: list[dict[str, Any]], raw_values: list[float | None]) -> dict[str, Any]:
@@ -1661,18 +1653,6 @@ def _qq_points(values: list[float], *, max_points: int = 101, presorted: bool = 
     ]
 
 
-def _correlation_matrix(rows: list[dict[str, Any]], metrics: list[str], *, method: str) -> dict[str, dict[str, float | None]]:
-    value_vectors = _metric_value_vectors(rows, metrics)
-    if method == "pearson_log1p":
-        vectors = {
-            metric: [math.log1p(max(0.0, value)) if value is not None else None for value in values]
-            for metric, values in value_vectors.items()
-        }
-    else:
-        vectors = _rank_vectors(value_vectors)
-    return _correlation_matrix_from_vectors(metrics, vectors)
-
-
 def _correlation_matrix_from_vectors(metrics: list[str], vectors: dict[str, list[float | None]]) -> dict[str, dict[str, float | None]]:
     matrix: dict[str, dict[str, float | None]] = {metric: {} for metric in metrics}
     for left in metrics:
@@ -1680,10 +1660,6 @@ def _correlation_matrix_from_vectors(metrics: list[str], vectors: dict[str, list
         for right in metrics:
             matrix[left][right] = _pearson_paired_vectors(left_values, vectors.get(right, []))
     return matrix
-
-
-def _kendall_tau_b_matrix(rows: list[dict[str, Any]], metrics: list[str]) -> dict[str, Any]:
-    return _kendall_tau_b_matrix_from_vectors(metrics, _metric_value_vectors(rows, metrics))
 
 
 def _kendall_tau_b_matrix_from_vectors(metrics: list[str], value_vectors: dict[str, list[float | None]]) -> dict[str, Any]:
@@ -1715,10 +1691,6 @@ def _kendall_tau_b_matrix_from_vectors(metrics: list[str], value_vectors: dict[s
         "max_exact_n": KENDALL_MAX_EXACT_N,
         "skipped": skipped,
     }
-
-
-def _spearman_for_metrics(rows: list[dict[str, Any]], left: str, right: str) -> float | None:
-    return _spearman_pairs(_paired_values(rows, left, right))
 
 
 def _metric_value_vectors(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, list[float | None]]:
@@ -1784,24 +1756,6 @@ def _paired_values_from_vectors(left_values: list[float | None], right_values: l
         for left, right in zip(left_values, right_values)
         if left is not None and right is not None
     ]
-
-
-def _paired_values(rows: list[dict[str, Any]], left: str, right: str) -> list[tuple[float, float]]:
-    pairs: list[tuple[float, float]] = []
-    for row in rows:
-        left_value = _number(row.get(left))
-        right_value = _number(row.get(right))
-        if left_value is not None and right_value is not None:
-            pairs.append((left_value, right_value))
-    return pairs
-
-
-def _spearman_pairs(pairs: list[tuple[float, float]]) -> float | None:
-    if len(pairs) < 2:
-        return None
-    x_ranks = _average_ranks([pair[0] for pair in pairs])
-    y_ranks = _average_ranks([pair[1] for pair in pairs])
-    return _pearson(x_ranks, y_ranks)
 
 
 def _pearson(x_values: list[float], y_values: list[float]) -> float | None:
@@ -1887,31 +1841,6 @@ def _competition_ranks_from_vectors(author_ids: list[str], values: list[float | 
     return ranks
 
 
-def _top_overlap_matrix(ranks: dict[str, dict[str, int]], cuts: list[int]) -> dict[str, Any]:
-    metrics = list(ranks.keys())
-    top_sets = {metric: _top_exact_sets(ranks[metric], cuts) for metric in metrics}
-    payload: dict[str, Any] = {}
-    for left in metrics:
-        payload[left] = {}
-        for right in metrics:
-            by_cut = {}
-            for cut in cuts:
-                left_top = top_sets[left].get(cut, set())
-                right_top = top_sets[right].get(cut, set())
-                by_cut[str(cut)] = {
-                    "overlap": len(left_top & right_top),
-                    "jaccard": _jaccard(left_top, right_top),
-                    "left_n": len(left_top),
-                    "right_n": len(right_top),
-                }
-            payload[left][right] = by_cut
-    return {
-        "mode": "exact_n_by_competition_rank_then_author_id",
-        "cuts": cuts,
-        "matrix": payload,
-    }
-
-
 def _top_overlap_matrix_from_ordered(ordered_authors: dict[str, list[str]], cuts: list[int]) -> dict[str, Any]:
     metrics = list(ordered_authors.keys())
     top_sets = {metric: {cut: set(authors[:cut]) for cut in cuts} for metric, authors in ordered_authors.items()}
@@ -1935,17 +1864,6 @@ def _top_overlap_matrix_from_ordered(ordered_authors: dict[str, list[str]], cuts
         "cuts": cuts,
         "matrix": payload,
     }
-
-
-def _top_exact_set(ranks: dict[str, int], n: int) -> set[str]:
-    return {author_id for author_id, _ in sorted(ranks.items(), key=lambda item: (item[1], item[0]))[:n]}
-
-
-def _top_exact_sets(ranks: dict[str, int], cuts: list[int]) -> dict[int, set[str]]:
-    if not cuts:
-        return {}
-    ordered = [author_id for author_id, _ in sorted(ranks.items(), key=lambda item: (item[1], item[0]))]
-    return {cut: set(ordered[:cut]) for cut in cuts}
 
 
 def _overlap_cuts(top_n: int) -> list[int]:
@@ -1985,10 +1903,6 @@ def _metric_outlier_rows(rows: list[dict[str, Any]], metric: str) -> list[dict[s
     return sorted(payload, key=lambda item: (-float(item["value"]), str(item["author_id"])))
 
 
-def _metric_values(rows: list[dict[str, Any]], metric: str) -> list[float]:
-    return [value for _, value in _metric_pairs(rows, metric)]
-
-
 def _metric_pairs(rows: list[dict[str, Any]], metric: str) -> list[tuple[dict[str, Any], float]]:
     pairs: list[tuple[dict[str, Any], float]] = []
     for row in rows:
@@ -1996,10 +1910,6 @@ def _metric_pairs(rows: list[dict[str, Any]], metric: str) -> list[tuple[dict[st
         if value is not None:
             pairs.append((row, value))
     return pairs
-
-
-def _has_metric_data(rows: list[dict[str, Any]], metric: str) -> bool:
-    return any(_number(row.get(metric)) is not None for row in rows)
 
 
 def _number(value: Any) -> float | None:
@@ -2053,19 +1963,6 @@ def _excess_kurtosis(values: list[float], mean: float, stddev: float) -> float |
     return sum(((value - mean) / stddev) ** 4 for value in values) / n - 3.0
 
 
-def _iqr_outlier_values(values: list[float]) -> list[float]:
-    if not values:
-        return []
-    q1 = _quantile(values, 0.25)
-    q3 = _quantile(values, 0.75)
-    iqr = q3 - q1
-    if iqr == 0.0:
-        return []
-    low = q1 - 1.5 * iqr
-    high = q3 + 1.5 * iqr
-    return [value for value in values if value < low or value > high]
-
-
 def _dependence_payload(value: float | None) -> dict[str, Any]:
     if value is None:
         return {"spearman_rho": None, "abs_spearman_rho": None, "direction": "undefined"}
@@ -2080,21 +1977,6 @@ def _dependence_payload(value: float | None) -> dict[str, Any]:
         "abs_spearman_rho": abs(value),
         "direction": direction,
     }
-
-
-def _average_ranks(values: list[float]) -> list[float]:
-    ordered = sorted((value, index) for index, value in enumerate(values))
-    ranks = [0.0 for _ in values]
-    position = 0
-    while position < len(ordered):
-        end = position
-        while end + 1 < len(ordered) and ordered[end + 1][0] == ordered[position][0]:
-            end += 1
-        average_rank = (position + 1 + end + 1) / 2.0
-        for offset in range(position, end + 1):
-            ranks[ordered[offset][1]] = average_rank
-        position = end + 1
-    return ranks
 
 
 def _share(values: list[float], predicate: Any) -> float | None:

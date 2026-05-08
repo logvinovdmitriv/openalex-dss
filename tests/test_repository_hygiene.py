@@ -55,6 +55,8 @@ class RepositoryHygieneTests(unittest.TestCase):
                 if marker in rel:
                     violations.append(f"{rel}: path contains {marker}")
             path = ROOT / rel
+            if not path.exists():
+                continue
             try:
                 text = path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
