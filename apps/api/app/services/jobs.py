@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.core.paths import DATA
+from app.core.paths import DATA, ROOT, SRC
 from app.services.internal_payloads import normalize_internal_pipeline_payload
 from app.services import analysis_jobs, materialization_jobs
 
 
 RUNS_DIR = DATA / "runs"
-_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="openalex-dss-run")
 _LOCK = threading.Lock()
 _RUNS: dict[str, dict[str, Any]] = {}
 _RUN_EXECUTION_PAYLOADS: dict[str, tuple[str, dict[str, Any]]] = {}
@@ -46,6 +46,7 @@ def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) 
         "result": None,
         "artifacts": {},
     }
+    _write_execution_payload(run_id, action, payload)
     _save(doc)
     with _LOCK:
         _RUN_EXECUTION_PAYLOADS[run_id] = (action, dict(payload))
@@ -56,24 +57,50 @@ def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) 
 
 def start_run(run_id: str) -> dict[str, Any]:
     doc = get_run(run_id)
-    if doc.get("status") != "queued":
+    status = str(doc.get("status") or "")
+    if status == "running" and _pid_alive(_int_value(doc.get("worker_pid"))):
+        return doc
+    if status != "queued":
         return doc
     with _LOCK:
         execution = _RUN_EXECUTION_PAYLOADS.get(run_id)
-    action, payload = execution if execution else (str(doc.get("action") or ""), dict(doc.get("payload") or {}))
+    action, payload = execution if execution else _read_execution_payload(run_id)
     if not action:
         raise ValueError(f"Run {run_id} has no executable action")
     doc["status"] = "running"
     doc["progress_stage"] = "starting"
+    doc["cancel_requested"] = False
+    _cancel_path(run_id).unlink(missing_ok=True)
+    _write_execution_payload(run_id, action, payload)
+    proc = _spawn_worker(run_id)
+    doc["worker_pid"] = proc.pid
+    doc["worker_started_at"] = _now()
     _save(doc)
-    _EXECUTOR.submit(_execute, run_id, action, payload)
+    return doc
+
+
+def cancel_run(run_id: str) -> dict[str, Any]:
+    doc = get_run(run_id)
+    status = str(doc.get("status") or "")
+    if status not in {"queued", "running", "cancelling"}:
+        return doc
+    _cancel_path(run_id).write_text(
+        json.dumps({"requested_at": _now(), "mode": "keep_partial"}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    doc["cancel_requested"] = True
+    doc["status"] = "cancelling"
+    doc["progress_stage"] = "Остановка загрузки; уже скачанные файлы будут упакованы как частичный срез"
+    _save(doc)
     return doc
 
 
 def get_run(run_id: str) -> dict[str, Any]:
     with _LOCK:
         if run_id in _RUNS:
-            return dict(_RUNS[run_id])
+            cached = dict(_RUNS[run_id])
+            if str(cached.get("status") or "") not in {"queued", "running", "cancelling"}:
+                return cached
     path = _run_path(run_id)
     if not path.exists():
         raise KeyError(run_id)
@@ -87,6 +114,10 @@ def update_progress(run_id: str, percent: int, stage: str, extra: dict[str, Any]
     if extra:
         doc.setdefault("progress", {}).update(extra)
     _save(doc)
+
+
+def cancel_requested(run_id: str) -> bool:
+    return _cancel_path(run_id).exists()
 
 
 def list_runs(limit: int = 20) -> dict[str, Any]:
@@ -111,24 +142,28 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
         _save(doc)
         result = _dispatch(run_id, action, payload)
         materialization_jobs.mark_completed(run_id, action, result, payload)
+        partial = _result_is_partial(result)
         doc.update({
             "status": "completed",
             "progress_percent": 100,
-            "progress_stage": "completed",
+            "progress_stage": "partial_completed" if partial else "completed",
             "finished_at": _now(),
             "result": result,
             "artifacts": _artifact_links(action, run_id, result),
         })
     except Exception as exc:  # pragma: no cover - defensive job boundary
         materialization_jobs.mark_failed(run_id, action, str(exc), payload)
-        doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
+        if cancel_requested(run_id):
+            doc.update({"status": "cancelled", "progress_percent": 100, "progress_stage": "cancelled", "finished_at": _now(), "error": str(exc)})
+        else:
+            doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "error": str(exc)})
     _save(doc)
     with _LOCK:
         _RUN_EXECUTION_PAYLOADS.pop(run_id, None)
 
 
 def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
-    payload = normalize_internal_pipeline_payload(payload)
+    payload = normalize_internal_pipeline_payload({**payload, "run_id": run_id})
     if action in analysis_jobs.ANALYSIS_ACTIONS:
         return analysis_jobs.recalculate(run_id, payload)
     if action in materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS:
@@ -138,6 +173,7 @@ def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, An
             payload,
             download_progress_callback=lambda progress: _download_progress(run_id, progress),
             update_progress_callback=lambda percent, stage, extra=None: update_progress(run_id, percent, stage, extra),
+            cancel_callback=lambda: cancel_requested(run_id),
             allow_unchecked_download=_allow_unchecked_download(),
         )
     raise ValueError(f"Unsupported run action: {action}")
@@ -156,9 +192,15 @@ def _save(doc: dict[str, Any]) -> None:
 def _normalize_loaded_run(doc: dict[str, Any]) -> dict[str, Any]:
     status = str(doc.get("status") or "")
     run_id = str(doc.get("run_id") or "")
-    with _LOCK:
-        in_memory = run_id in _RUNS or run_id in _RUN_EXECUTION_PAYLOADS
-    if status in {"queued", "running"} and not in_memory:
+    worker_alive = _pid_alive(_int_value(doc.get("worker_pid")))
+    if status == "failed" and "прервана при остановке сервера" in str(doc.get("error") or ""):
+        recovered = _recover_completed_run(doc)
+        if recovered:
+            return recovered
+    if status in {"running", "cancelling"} and not worker_alive:
+        recovered = _recover_completed_run(doc)
+        if recovered:
+            return recovered
         doc = dict(doc)
         doc["status"] = "failed"
         doc["progress_percent"] = 100
@@ -171,6 +213,102 @@ def _normalize_loaded_run(doc: dict[str, Any]) -> dict[str, Any]:
         if run_id:
             _save(doc)
     return doc
+
+
+def _spawn_worker(run_id: str) -> subprocess.Popen[bytes]:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "apps/api"), str(SRC), env.get("PYTHONPATH", "")])
+    log_path = _run_path(run_id).with_name("worker.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log = log_path.open("ab")
+    return subprocess.Popen(
+        [sys.executable, "-m", "app.services.job_worker", run_id],
+        cwd=str(ROOT / "apps/api"),
+        env=env,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+
+
+def execute_run_in_worker(run_id: str) -> None:
+    action, payload = _read_execution_payload(run_id)
+    if not action:
+        raise ValueError(f"Run {run_id} has no executable payload")
+    _execute(run_id, action, payload)
+
+
+def _write_execution_payload(run_id: str, action: str, payload: dict[str, Any]) -> None:
+    path = _execution_payload_path(run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"action": action, "payload": payload}, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def _read_execution_payload(run_id: str) -> tuple[str, dict[str, Any]]:
+    path = _execution_payload_path(run_id)
+    if not path.exists():
+        return "", {}
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    return str(doc.get("action") or ""), dict(doc.get("payload") or {})
+
+
+def _execution_payload_path(run_id: str) -> Path:
+    return _run_path(run_id).with_name("execution_payload.json")
+
+
+def _cancel_path(run_id: str) -> Path:
+    return _run_path(run_id).with_name("cancel.request.json")
+
+
+def _pid_alive(pid: int | None) -> bool:
+    if not pid or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _int_value(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _result_is_partial(result: dict[str, Any]) -> bool:
+    dump = result.get("dump") if isinstance(result.get("dump"), dict) else {}
+    fetch = result.get("fetch") if isinstance(result.get("fetch"), dict) else {}
+    if not dump and isinstance(fetch.get("dump"), dict):
+        dump = fetch["dump"]
+    return str(dump.get("scientific_completeness") or "") == "partial"
+
+
+def _recover_completed_run(doc: dict[str, Any]) -> dict[str, Any] | None:
+    run_id = str(doc.get("run_id") or "")
+    if not run_id:
+        return None
+    run_dir = RUNS_DIR / "".join(ch for ch in run_id if ch.isalnum() or ch in "_-")
+    if not (run_dir / "passports/checksums.json").exists():
+        return None
+    recovered = dict(doc)
+    recovered.update({
+        "status": "completed",
+        "progress_percent": 100,
+        "progress_stage": "completed_recovered",
+        "finished_at": recovered.get("finished_at") or _now(),
+        "error": None,
+        "artifacts": _run_artifact_links(run_id, {"archive": {"run_dir": str(run_dir)}}),
+    })
+    _save(recovered)
+    return recovered
 
 
 def _run_path(run_id: str) -> Path:

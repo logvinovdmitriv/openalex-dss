@@ -42,6 +42,8 @@ def download_works_metadata(
     out_dir: str | Path | None = None,
     estimate: dict[str, Any] | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    cancel_callback: Callable[[], bool] | None = None,
+    max_download_bytes: int = 0,
 ) -> dict[str, Any]:
     status = cli_status()
     if not status["available"]:
@@ -95,7 +97,7 @@ def download_works_metadata(
             "external_progress": True,
         })
 
-    completed = _run_cli_download(
+    download_result = _run_cli_download(
         command,
         base_dir=base_dir,
         files_dir=files_dir,
@@ -105,8 +107,15 @@ def download_works_metadata(
         planned_records=planned_records,
         planned_raw_bytes=planned_raw_bytes,
         progress_callback=progress_callback,
+        cancel_callback=cancel_callback,
+        max_download_bytes=max_download_bytes,
     )
-    if completed.returncode != 0:
+    if isinstance(download_result, tuple):
+        completed, stop_reason = download_result
+    else:  # Test doubles and older internal callers may return only a CompletedProcess-like object.
+        completed, stop_reason = download_result, "cli_completed"
+    partial_stop = stop_reason in {"user_cancelled", "size_limit_reached"}
+    if completed.returncode != 0 and not partial_stop:
         stderr_text = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
         stdout_text = stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else ""
         raise RuntimeError((stderr_text or stdout_text or "Загрузка OpenAlex завершилась ошибкой").strip())
@@ -115,7 +124,7 @@ def download_works_metadata(
         progress_callback({"percent": 82, "stage": "Упаковка файлов OpenAlex", "fetched": 0})
 
     try:
-        records, files_manifest = _pack_work_json_files(files_dir, raw_path, progress_callback=progress_callback, manifest_path=manifest_path)
+        records, files_manifest = _pack_work_json_files(files_dir, raw_path, strict=not partial_stop, progress_callback=progress_callback, manifest_path=manifest_path)
     except Exception as exc:
         finished_at = datetime.now(timezone.utc)
         failed_manifest = {
@@ -162,12 +171,14 @@ def download_works_metadata(
     dump_id = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
     finished_at = datetime.now(timezone.utc)
     actual_raw_bytes = raw_path.stat().st_size
+    completeness = "partial" if partial_stop and records > 0 else "complete" if records > 0 else "empty"
     allowed_for_final_analysis = (
         bool(consistency.get("compatible"))
         and estimate_signature_verified
         and accepted_estimate_signature_verified
         and download_signature_verified
         and records > 0
+        and completeness == "complete"
     )
     dump_manifest = {
         "slice_id": cfg.slice_name,
@@ -209,8 +220,9 @@ def download_works_metadata(
         "bytes_written": actual_raw_bytes,
         "estimated_raw_bytes": planned_raw_bytes or None,
         "actual_vs_estimate_ratio": round(actual_raw_bytes / planned_raw_bytes, 4) if planned_raw_bytes else None,
-        "stop_reason": "cli_completed",
-        "scientific_completeness": "complete" if records > 0 else "empty",
+        "stop_reason": stop_reason,
+        "scientific_completeness": completeness,
+        "usable_for_exploratory_analysis": records > 0,
         "allowed_for_final_analysis": allowed_for_final_analysis,
         "raw_jsonl": str(raw_path),
         "raw_jsonl_sha256": checksum,
@@ -232,12 +244,14 @@ def download_works_metadata(
             "raw_size_mb": round(actual_raw_bytes / (1024 * 1024), 3),
             "cleanup_policy": "keep_cli_files_and_packed_jsonl_gz",
             "kept_raw_files": True,
+            "max_download_bytes": max_download_bytes or None,
         },
     }
     write_json(dump_manifest_path, dump_manifest)
 
     if progress_callback:
-        progress_callback({"percent": 95, "stage": "Локальный срез упакован", "fetched": records})
+        stage = "Частичный локальный срез упакован" if completeness == "partial" else "Локальный срез упакован"
+        progress_callback({"percent": 95, "stage": stage, "fetched": records, "stop_reason": stop_reason})
 
     return dump_manifest
 
@@ -298,27 +312,55 @@ def _run_cli_download(
     planned_records: int,
     planned_raw_bytes: int,
     progress_callback: Callable[[dict[str, Any]], None] | None,
-) -> subprocess.CompletedProcess[str]:
+    cancel_callback: Callable[[], bool] | None,
+    max_download_bytes: int,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    stop_reason = "cli_completed"
     with stdout_path.open("w", encoding="utf-8", newline="\n") as stdout_handle, stderr_path.open("w", encoding="utf-8", newline="\n") as stderr_handle:
         process = subprocess.Popen(command, cwd=str(base_dir), text=True, stdout=stdout_handle, stderr=stderr_handle)
         while process.poll() is None:
             time.sleep(5)
+            snapshot = _cli_download_snapshot(files_dir)
+            elapsed = max(0, int((datetime.now(timezone.utc) - started_at).total_seconds()))
+            if cancel_callback and cancel_callback():
+                stop_reason = "user_cancelled"
+                _terminate_process_group(process)
+            elif max_download_bytes > 0 and snapshot["bytes_written"] >= max_download_bytes:
+                stop_reason = "size_limit_reached"
+                _terminate_process_group(process)
             if progress_callback:
-                snapshot = _cli_download_snapshot(files_dir)
-                elapsed = max(0, int((datetime.now(timezone.utc) - started_at).total_seconds()))
                 percent = _cli_download_percent(snapshot["bytes_written"], planned_raw_bytes, elapsed)
+                stage = _cli_download_stage(snapshot["files_seen"], snapshot["bytes_written"], elapsed)
+                if stop_reason == "user_cancelled":
+                    stage = "Остановка по запросу пользователя; готовим частичный срез"
+                elif stop_reason == "size_limit_reached":
+                    stage = "Достигнут лимит загрузки; готовим частичный срез"
                 progress_callback({
                     "percent": percent,
-                    "stage": _cli_download_stage(snapshot["files_seen"], snapshot["bytes_written"], elapsed),
+                    "stage": stage,
                     "fetched": 0,
                     "files_seen": snapshot["files_seen"],
                     "bytes_written": snapshot["bytes_written"],
                     "elapsed_seconds": elapsed,
                     "target_records": planned_records or None,
                     "estimated_raw_bytes": planned_raw_bytes or None,
+                    "max_download_bytes": max_download_bytes or None,
+                    "stop_reason": stop_reason,
                     "external_progress": True,
                 })
-    return subprocess.CompletedProcess(command, process.returncode)
+        return_code = process.wait()
+    return subprocess.CompletedProcess(command, return_code), stop_reason
+
+
+def _terminate_process_group(process: subprocess.Popen[str]) -> None:
+    try:
+        process.terminate()
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+    except ProcessLookupError:
+        return
 
 
 def _cli_download_snapshot(files_dir: Path) -> dict[str, int]:

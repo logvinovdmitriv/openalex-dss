@@ -229,6 +229,7 @@ function Workbench() {
   const [baselineMetric, setBaselineMetric] = useState("h");
   const [storageProfileId, setStorageProfileId] = useState("");
   const [downloadDir, setDownloadDir] = useState("");
+  const [maxDownloadMb, setMaxDownloadMb] = useState("");
   const [dataSort, setDataSort] = useState("");
   const [dataDirection, setDataDirection] = useState<"asc" | "desc">("desc");
   const [dataSearch, setDataSearch] = useState("");
@@ -289,10 +290,10 @@ function Workbench() {
     enabled: Boolean(runId),
     refetchInterval: (query) => {
       const status = (query.state.data as any)?.status;
-      return status === "queued" || status === "running" ? 1000 : false;
+      return status === "queued" || status === "running" || status === "cancelling" ? 1000 : false;
     },
   });
-  const running = run.data?.status === "queued" || run.data?.status === "running";
+  const running = run.data?.status === "queued" || run.data?.status === "running" || run.data?.status === "cancelling";
 
   const notifiedRunRef = useRef("");
   useEffect(() => {
@@ -558,7 +559,7 @@ function Workbench() {
   const runMaterialization = useMutation({
     mutationFn: async () => {
       const plan = materialization ?? (await createMaterialization.mutateAsync());
-      return postJson<any>(`/materializations/${encodeURIComponent(plan.materialization_id)}/run`, { ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}), ...(downloadDir.trim() ? { download_dir: downloadDir.trim() } : {}) });
+      return postJson<any>(`/materializations/${encodeURIComponent(plan.materialization_id)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb));
     },
     onSuccess: (result) => {
       setApiKey("");
@@ -582,7 +583,7 @@ function Workbench() {
       }
       const plan = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy, download_dir: downloadDir.trim() || undefined });
       setMaterialization(plan);
-      return postJson<any>(`/materializations/${encodeURIComponent(plan.materialization_id)}/run`, { ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}), ...(downloadDir.trim() ? { download_dir: downloadDir.trim() } : {}) });
+      return postJson<any>(`/materializations/${encodeURIComponent(plan.materialization_id)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb));
     },
     onSuccess: (result) => {
       setApiKey("");
@@ -645,6 +646,13 @@ function Workbench() {
       setRunId(result.run_id);
       setDumpId("");
       navigate("rankings");
+    },
+  });
+  const cancelRun = useMutation({
+    mutationFn: (nextRunId: string) => postJson<any>(`/runs/${encodeURIComponent(nextRunId)}/cancel`, {}),
+    onSuccess: (result) => {
+      setRunId(String(result?.run_id ?? runId));
+      qc.invalidateQueries({ queryKey: ["run", result?.run_id ?? runId] });
     },
   });
   const buildReport = useMutation({
@@ -829,6 +837,8 @@ function Workbench() {
             materialization={materialization ?? sliceDoc?.current_materialization_plan}
             downloadDir={downloadDir}
             setDownloadDir={setDownloadDir}
+            maxDownloadMb={maxDownloadMb}
+            setMaxDownloadMb={setMaxDownloadMb}
             onPickDownloadDir={() => pickDownloadDir.mutate()}
             pickingDownloadDir={pickDownloadDir.isPending}
             dataRoot={String(catalog.data?.data_root ?? "")}
@@ -842,12 +852,13 @@ function Workbench() {
             rateLimit={rateLimit.data}
             onRun={() => {
               const plan = materialization ?? sliceDoc?.current_materialization_plan;
-              if (plan?.materialization_id && !plan?.run_id) runMaterialization.mutate();
+              if (plan?.materialization_id) runMaterialization.mutate();
               else downloadSlice.mutate();
             }}
+            onCancelRun={() => runId && cancelRun.mutate(runId)}
             saving={createSlice.isPending}
             estimating={estimateSlice.isPending}
-            materializing={downloadSlice.isPending || runMaterialization.isPending || running}
+            materializing={downloadSlice.isPending || runMaterialization.isPending || running || cancelRun.isPending}
             downloadConfigReady={downloadConfigReady}
             run={run.data}
             sliceDoc={sliceDoc}
@@ -990,6 +1001,8 @@ function SlicesPage({
   materialization,
   downloadDir,
   setDownloadDir,
+  maxDownloadMb,
+  setMaxDownloadMb,
   onPickDownloadDir,
   pickingDownloadDir,
   dataRoot,
@@ -1002,6 +1015,7 @@ function SlicesPage({
   onApplyToSlice,
   rateLimit,
   onRun,
+  onCancelRun,
   saving,
   estimating,
   materializing,
@@ -1034,6 +1048,8 @@ function SlicesPage({
   materialization: any;
   downloadDir: string;
   setDownloadDir: (value: string) => void;
+  maxDownloadMb: string;
+  setMaxDownloadMb: (value: string) => void;
   onPickDownloadDir: () => void;
   pickingDownloadDir: boolean;
   dataRoot: string;
@@ -1046,6 +1062,7 @@ function SlicesPage({
   onApplyToSlice: (tab: PointLookupTab, item: EntitySuggestion) => void;
   rateLimit: any;
   onRun: () => void;
+  onCancelRun: () => void;
   saving: boolean;
   estimating: boolean;
   materializing: boolean;
@@ -1244,6 +1261,17 @@ function SlicesPage({
                 Пусто = стандартная папка внутри хранилища данных{dataRoot ? `: ${dataRoot}/raw/openalex_cli/<slice_id>` : ""}. Кнопка открывает системный выбор папки на этом компьютере.
               </small>
             </Field>
+            <Field label="Лимит загрузки, МБ">
+              <input
+                type="number"
+                min={1}
+                max={500000}
+                value={maxDownloadMb}
+                onChange={(event) => setMaxDownloadMb(event.target.value)}
+                placeholder="Без лимита"
+              />
+              <small className="field-hint">Если лимит достигнут, загрузка остановится, а уже скачанные записи будут упакованы как частичный срез для предварительного анализа.</small>
+            </Field>
             <Field label="Ключ OpenAlex">
               <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Необязательно" />
               <small className="field-hint">Оставьте пустым, если не хотите передавать ключ загрузчику. Если установленный загрузчик потребует ключ, ошибка появится уведомлением.</small>
@@ -1261,6 +1289,11 @@ function SlicesPage({
         )}
         <div className="action-row">
           <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !hasEstimate || !downloadConfigReady || decision.can_execute === false}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} Скачать срез</button>
+          {run && ["queued", "running", "cancelling"].includes(String(run.status ?? "")) && (
+            <button type="button" className="danger-button" onClick={onCancelRun} disabled={String(run.status ?? "") === "cancelling"}>
+              {String(run.status ?? "") === "cancelling" ? "Останавливаем..." : "Остановить и сохранить частичный срез"}
+            </button>
+          )}
         </div>
       </section>
 
@@ -1318,6 +1351,17 @@ function downloadedSliceTitle(dump: any) {
   const period = [dump?.from_publication_date, dump?.to_publication_date].map((item) => String(item ?? "").trim()).filter(Boolean).join("–");
   const dumpId = String(dump?.dump_id ?? "").trim();
   return [subject || "Локальный срез", period, dumpId ? dumpId.replace(/^dump_/, "") : ""].filter(Boolean).join(" · ");
+}
+
+function materializationRunPayload(apiKey: string, downloadDir: string, maxDownloadMb: string) {
+  const payload: Record<string, unknown> = {};
+  const key = apiKey.trim();
+  const dir = downloadDir.trim();
+  const limit = Number(maxDownloadMb);
+  if (key) payload.api_key = key;
+  if (dir) payload.download_dir = dir;
+  if (Number.isFinite(limit) && limit > 0) payload.max_download_mb = limit;
+  return payload;
 }
 
 function ArtifactChoice({
@@ -3701,6 +3745,8 @@ function runLiveState(run: WorkbenchRun) {
   if (status === "queued") return { active: true, title: "Срез в очереди", detail: "Загрузка начнется автоматически." };
   if (status === "running" && isSliceLoad) return { active: true, title: "Загрузка среза", detail: "Статус обновляется в реальном времени." };
   if (status === "running") return { active: true, title: "Выполнение", detail: "Статус обновляется в реальном времени." };
+  if (status === "cancelling") return { active: true, title: "Остановка загрузки", detail: "Система сохраняет уже скачанные записи как частичный срез." };
+  if (status === "cancelled") return { active: false, title: "Загрузка остановлена", detail: "Частичный срез будет доступен, если успели скачаться записи." };
   if (status === "completed" && isSliceLoad) return { active: false, title: "Срез готов", detail: "Локальные таблицы доступны для анализа." };
   if (status === "completed") return { active: false, title: "Готово", detail: "Задача завершена." };
   if (status === "failed") return { active: false, title: "Ошибка выполнения", detail: "Подробности показаны ниже и в уведомлении." };

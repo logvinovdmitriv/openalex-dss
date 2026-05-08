@@ -188,6 +188,46 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(run["status"], "queued")
         self.assertEqual(run["artifacts"], {})
 
+    def test_start_run_spawns_worker_and_persists_private_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp) / "runs"
+            with jobs._LOCK:
+                jobs._RUNS.clear()
+                jobs._RUN_EXECUTION_PAYLOADS.clear()
+            with (
+                patch.object(jobs, "RUNS_DIR", runs_dir),
+                patch.object(jobs, "_spawn_worker", return_value=SimpleNamespace(pid=12345)) as spawn_worker,
+                patch.object(jobs, "_pid_alive", return_value=True),
+            ):
+                run = jobs.create_run("recalculate", {"dump_id": "dump_a"}, autostart=False)
+                started = jobs.start_run(run["run_id"])
+                payload_path = runs_dir / run["run_id"] / "execution_payload.json"
+                self.assertTrue(payload_path.exists())
+                self.assertEqual(json.loads(payload_path.read_text(encoding="utf-8"))["payload"]["dump_id"], "dump_a")
+
+        self.assertEqual(started["status"], "running")
+        self.assertEqual(started["worker_pid"], 12345)
+        spawn_worker.assert_called_once_with(run["run_id"])
+
+    def test_cancel_run_requests_partial_download_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp) / "runs"
+            with jobs._LOCK:
+                jobs._RUNS.clear()
+                jobs._RUN_EXECUTION_PAYLOADS.clear()
+            with (
+                patch.object(jobs, "RUNS_DIR", runs_dir),
+                patch.object(jobs, "_spawn_worker", return_value=SimpleNamespace(pid=12345)),
+                patch.object(jobs, "_pid_alive", return_value=True),
+            ):
+                run = jobs.create_run("recalculate", {"dump_id": "dump_a"}, autostart=False)
+                jobs.start_run(run["run_id"])
+                cancelled = jobs.cancel_run(run["run_id"])
+                cancel_path = runs_dir / run["run_id"] / "cancel.request.json"
+                self.assertTrue(cancel_path.exists())
+
+        self.assertEqual(cancelled["status"], "cancelling")
+
     def test_stale_running_run_is_marked_failed_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runs_dir = Path(tmp) / "runs"

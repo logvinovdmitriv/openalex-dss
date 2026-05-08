@@ -151,7 +151,7 @@ export type DownloadPolicy = {
 export type WorkbenchRun = {
   run_id?: string;
   action?: string;
-  status?: "queued" | "running" | "completed" | "failed" | string;
+  status?: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed" | string;
   progress_percent?: number;
   progress_stage?: string;
   error?: string | null;
@@ -425,7 +425,9 @@ export function progressForRun(run?: WorkbenchRun | null) {
   }
   if (run.status === "queued") return { percent: 8, label: "В очереди" };
   if (run.status === "running") return { percent: 55, label: "Выполнение" };
+  if (run.status === "cancelling") return { percent: 95, label: "Остановка" };
   if (run.status === "completed") return { percent: 100, label: "Готово" };
+  if (run.status === "cancelled") return { percent: 100, label: "Остановлено" };
   if (run.status === "failed") return { percent: 100, label: "Ошибка" };
   return { percent: 0, label: run.status || "Ожидание" };
 }
@@ -433,6 +435,8 @@ export function progressForRun(run?: WorkbenchRun | null) {
 function humanRunStage(stage: unknown, status?: string, action?: string) {
   const raw = String(stage || "").trim();
   if (status === "completed") return "Готово";
+  if (status === "cancelled") return "Остановлено";
+  if (status === "cancelling") return "Остановка загрузки";
   if (status === "failed") return "Ошибка";
   if (raw.includes("OpenAlex") || raw.includes("Упаковано") || raw.includes("Нормализация")) return raw.replaceAll("OpenAlex CLI", "загрузчик OpenAlex").replaceAll("CLI", "OpenAlex");
   const known: Record<string, string> = {

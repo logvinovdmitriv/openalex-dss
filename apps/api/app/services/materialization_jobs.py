@@ -14,6 +14,7 @@ MATERIALIZATION_LIFECYCLE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
 
 DownloadProgressCallback = Callable[[dict[str, Any]], None]
 StageProgressCallback = Callable[[int, str, dict[str, Any] | None], None]
+CancelCallback = Callable[[], bool]
 
 
 def dispatch(
@@ -23,6 +24,7 @@ def dispatch(
     *,
     download_progress_callback: DownloadProgressCallback | None = None,
     update_progress_callback: StageProgressCallback | None = None,
+    cancel_callback: CancelCallback | None = None,
     allow_unchecked_download: bool = False,
 ) -> dict[str, Any]:
     payload = normalize_internal_pipeline_payload(payload)
@@ -30,6 +32,7 @@ def dispatch(
         return pipeline.fetch_slice_dump(
             payload,
             progress_callback=download_progress_callback,
+            cancel_callback=cancel_callback,
             require_accepted_signatures=not allow_unchecked_download,
         )
     if action == "build_from_openalex":
@@ -38,6 +41,7 @@ def dispatch(
             payload,
             download_progress_callback=download_progress_callback,
             update_progress_callback=update_progress_callback,
+            cancel_callback=cancel_callback,
             allow_unchecked_download=allow_unchecked_download,
         )
     raise ValueError(f"Unsupported materialization job action: {action}")
@@ -49,11 +53,13 @@ def _build_from_openalex(
     *,
     download_progress_callback: DownloadProgressCallback | None,
     update_progress_callback: StageProgressCallback | None,
+    cancel_callback: CancelCallback | None,
     allow_unchecked_download: bool,
 ) -> dict[str, Any]:
     fetched = pipeline.fetch_slice_dump(
         payload,
         progress_callback=download_progress_callback,
+        cancel_callback=cancel_callback,
         require_accepted_signatures=not allow_unchecked_download,
     )
     dump = fetched.get("dump") or {}
@@ -61,8 +67,9 @@ def _build_from_openalex(
     if not raw_jsonl or dump.get("no_data"):
         return {"fetch": fetched, "build": None, "no_data": True}
     analysis_eligibility = pipeline.analysis_eligibility_from_dump(dump, dev_override=allow_unchecked_download)
-    if not analysis_eligibility["allowed_for_final_analysis"] and not allow_unchecked_download:
-        raise ValueError("Дамп не допущен к финальному анализу. Обновите оценку и скачивание либо используйте явный dev-режим.")
+    partial_ok = str(dump.get("scientific_completeness") or "") == "partial" and bool(dump.get("usable_for_exploratory_analysis"))
+    if not analysis_eligibility["allowed_for_final_analysis"] and not (allow_unchecked_download or partial_ok):
+        raise ValueError("Срез не допущен к анализу: скачивание не завершилось и нет пригодной частичной выборки.")
     if update_progress_callback:
         update_progress_callback(96, "Нормализация локального среза", {"source_path": raw_jsonl})
     built = pipeline.import_local_file(

@@ -756,11 +756,15 @@ def _metadata_dump_by_id(dump_id: str) -> dict[str, Any] | None:
 
 
 def _filesystem_dump_records(limit: int = 250) -> list[dict[str, Any]]:
-    dumps_dir = DATA / "dumps"
-    if not dumps_dir.exists():
-        return []
     records: list[dict[str, Any]] = []
-    manifests = sorted(dumps_dir.glob("*/dump_manifest.json"), key=_path_mtime, reverse=True)
+    manifests = []
+    dumps_dir = DATA / "dumps"
+    if dumps_dir.exists():
+        manifests.extend(dumps_dir.glob("*/dump_manifest.json"))
+    raw_dir = DATA / "raw" / "openalex_cli"
+    if raw_dir.exists():
+        manifests.extend(raw_dir.glob("**/dump_manifest.json"))
+    manifests = sorted(set(manifests), key=_path_mtime, reverse=True)
     for manifest_path in manifests[: max(1, min(limit, 250))]:
         manifest = _read_json(manifest_path)
         if not manifest:

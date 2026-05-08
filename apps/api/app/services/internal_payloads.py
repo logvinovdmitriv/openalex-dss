@@ -27,6 +27,8 @@ class InternalPipelinePayload(SliceDefinitionPayload):
     source_path: str | None = None
     source_strategy: str | None = None
     download_dir: str | None = None
+    max_download_mb: float | None = Field(default=None, ge=1)
+    max_download_bytes: int | None = Field(default=None, ge=1)
     download_policy: dict[str, Any] | None = None
     dump_manifest: dict[str, Any] | None = None
     analysis_eligibility: dict[str, Any] | None = None

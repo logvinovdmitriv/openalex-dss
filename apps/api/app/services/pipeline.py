@@ -47,6 +47,7 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
 def fetch_slice_dump(
     payload: dict[str, Any],
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    cancel_callback: Callable[[], bool] | None = None,
     *,
     require_accepted_signatures: bool = False,
 ) -> dict[str, Any]:
@@ -91,6 +92,8 @@ def fetch_slice_dump(
                 "accepted_download_signature": accepted_download_signature or None,
             },
             progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+            max_download_bytes=_max_download_bytes(payload),
         )
         passport["query_plan"] = plan
         if not passport.get("dump_id"):
@@ -435,7 +438,21 @@ def _download_output_dir(payload: dict[str, Any], cfg: Any) -> Path:
     except ValueError as exc:
         raise ValueError(f"Папка загрузки должна находиться внутри хранилища данных DSS: {DATA}") from exc
     safe_slice = _safe_id(str(cfg.slice_name or "slice"))
-    return resolved if resolved.name == safe_slice else resolved / safe_slice
+    raw_folder_id = str(payload.get("materialization_id") or payload.get("run_id") or "").strip()
+    folder_id = _safe_id(raw_folder_id) if raw_folder_id else ""
+    base = resolved if resolved.name == safe_slice else resolved / safe_slice
+    return base / folder_id if folder_id else base
+
+
+def _max_download_bytes(payload: dict[str, Any]) -> int:
+    raw = payload.get("max_download_bytes")
+    if raw in (None, ""):
+        mb = payload.get("max_download_mb")
+        raw = int(float(mb) * 1024 * 1024) if mb not in (None, "") else 0
+    try:
+        return max(0, int(raw or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _write_pipeline_summary(mode: str, cfg: Any, payload: dict[str, Any]) -> None:

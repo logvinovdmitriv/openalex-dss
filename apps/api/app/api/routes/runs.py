@@ -42,3 +42,11 @@ def get_run(run_id: str) -> dict[str, Any]:
         return jobs.get_run(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Задача не найдена") from exc
+
+
+@router.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: str) -> dict[str, Any]:
+    try:
+        return jobs.cancel_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Задача не найдена") from exc

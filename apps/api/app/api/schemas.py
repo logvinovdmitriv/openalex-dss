@@ -58,6 +58,7 @@ class MaterializationPlanRequest(BaseModel):
 class MaterializationRunRequest(BaseModel):
     api_key: str | None = None
     download_dir: str | None = None
+    max_download_mb: float | None = Field(default=None, ge=1)
 
 
 class AuthorCohortCreateRequest(BaseModel):

@@ -156,6 +156,48 @@ class OpenAlexCliProviderTests(unittest.TestCase):
             self.assertFalse(manifest["signatures"]["download_signature_verified"])
             self.assertIn("--api-key", commands[0])
 
+    def test_cancelled_cli_download_packs_partial_dump(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = replace_config(
+                load_config(ROOT / "config/slice.yaml"),
+                slice_name="cli_partial",
+                filter_mode="primary_topic",
+                entity_level="subfield",
+                entity_id_short="1706",
+            )
+
+            def fake_run(command: list[str], **_: object) -> SimpleNamespace:
+                if command[1:] == ["--version"]:
+                    return SimpleNamespace(stdout="openalex 0.test", stderr="", returncode=0)
+                return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+            def fake_cli_download(command: list[str], *, files_dir: Path, **_: object) -> tuple[SimpleNamespace, str]:
+                files_dir.mkdir(parents=True, exist_ok=True)
+                (files_dir / "W1.json").write_text(json.dumps(_work("W1")), encoding="utf-8")
+                return SimpleNamespace(returncode=-15), "user_cancelled"
+
+            with (
+                patch.object(openalex_cli_provider, "cli_status", return_value={"available": True, "executable": "/tmp/openalex"}),
+                patch.object(openalex_cli_provider.subprocess, "run", side_effect=fake_run),
+                patch.object(openalex_cli_provider, "_run_cli_download", side_effect=fake_cli_download),
+            ):
+                manifest = openalex_cli_provider.download_works_metadata(
+                    cfg,
+                    api_key="",
+                    out_dir=root / "raw",
+                    estimate={
+                        "estimate_signature": corpus_signature(cfg),
+                        "download_signature": cli_download_signature(cfg),
+                        "estimate_count": 10,
+                    },
+                )
+
+        self.assertEqual(manifest["stop_reason"], "user_cancelled")
+        self.assertEqual(manifest["scientific_completeness"], "partial")
+        self.assertFalse(manifest["allowed_for_final_analysis"])
+        self.assertTrue(manifest["usable_for_exploratory_analysis"])
+
     def test_malformed_cli_output_writes_failed_dump_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
