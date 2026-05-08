@@ -443,8 +443,9 @@ def rank_comparisons(
     else:
         ranks = {metric: _competition_ranks_from_vectors(author_ids, value_vectors.get(metric, [])) for metric in selected}
     overlap_cuts = _overlap_cuts(rank_top_n)
+    top_limit = max([rank_top_n, *overlap_cuts], default=rank_top_n)
     ordered_authors = {
-        metric: [author_id for author_id, _ in sorted(metric_ranks.items(), key=lambda item: (item[1], item[0]))]
+        metric: _ordered_top_authors(metric_ranks, top_limit)
         for metric, metric_ranks in ranks.items()
     }
     top_overlap = _top_overlap_matrix_from_ordered(ordered_authors, overlap_cuts)
@@ -460,7 +461,7 @@ def rank_comparisons(
         if metric == baseline_metric:
             continue
         metric_ranks = ranks.get(metric, {})
-        common_author_ids = sorted(set(baseline_ranks) & set(metric_ranks))
+        common_author_ids = set(baseline_ranks) & set(metric_ranks)
         abs_values: list[float] = []
         largest_shifts_heap: list[tuple[int, str, int, dict[str, Any]]] = []
         for candidate_index, author_id in enumerate(common_author_ids):
@@ -502,6 +503,15 @@ def rank_comparisons(
             "largest_shifts": sorted((item[3] for item in largest_shifts_heap), key=lambda item: (-int(item["abs_rank_delta"]), str(item["author_id"]))),
         }
     return {"comparisons": comparisons, "top_overlap": top_overlap}
+
+
+def _ordered_top_authors(metric_ranks: dict[str, int], limit: int) -> list[str]:
+    if limit <= 0 or not metric_ranks:
+        return []
+    key = lambda item: (item[1], item[0])
+    if limit >= len(metric_ranks):
+        return [author_id for author_id, _ in sorted(metric_ranks.items(), key=key)]
+    return [author_id for author_id, _ in heapq.nsmallest(limit, metric_ranks.items(), key=key)]
 
 
 def build_rank_shift_export_rows(
