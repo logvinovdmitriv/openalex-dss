@@ -119,14 +119,18 @@ OpenAlex Works API возвращает вложенные `authorships`; DSS н
    оценки и доступные лимиты API.
 5. Backend запускает установленный загрузчик OpenAlex для скачивания фиксированного
    файла Works JSONL.GZ или импортирует уже существующий локальный файл OpenAlex Works.
-6. JSON нормализуется в слой выбранного среза
+6. JSON нормализуется во временный scoped staging
    `dumps/{dump_id}/normalized` и `dumps/{dump_id}/parquet`, после чего
-   canonical таблицы корпуса материализуются в `tables/{dump_id}`.
+   canonical таблицы корпуса материализуются в `tables/{dump_id}`, а staging
+   удаляется.
 7. Собирается расчетная таблица `author_work.csv`.
 8. Считаются `indices.csv`, `ratings.csv`, их parquet-пары и паспорта
    воспроизводимости под `runs/{run_id}`.
-9. UI обновляет рейтинг, ящик с усами, линейное сравнение индексов, плоские
-   таблицы и CSV/JSON export.
+9. Сразу после расчета строятся дефолтный report bundle и дефолтный cache
+   наукометрической аналитики, чтобы при повторном открытии интерфейс читал
+   готовые scoped artifacts.
+10. UI обновляет рейтинг, ящик с усами, линейное сравнение индексов, плоские
+    таблицы и CSV/JSON export.
 
 ## Минимальный аналитический протокол
 
@@ -152,11 +156,16 @@ OpenAlex Works API возвращает вложенные `authorships`; DSS н
 - `$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/` - неизменяемые исходные файлы локального среза;
 - `data/ref/` и `config/mappings/vak_topic_mapping.yaml` - mapping ВАК ->
   OpenAlex topics/subfields/keywords;
-- `$OPENALEX_DSS_DATA_DIR/dumps/{dump_id}/normalized/` - плоские CSV выбранного среза;
+- `$OPENALEX_DSS_DATA_DIR/dumps/{dump_id}/normalized/` - временный staging CSV на время импорта;
 - `$OPENALEX_DSS_DATA_DIR/tables/{dump_id}/` - canonical parquet-таблицы локального корпуса;
 - `$OPENALEX_DSS_DATA_DIR/runs/{run_id}/tables/` - производные расчетные таблицы `author_work`, `indices`, `ratings`;
 - `$OPENALEX_DSS_DATA_DIR/runs/{run_id}/passports/` - паспорта и checksum manifest текущего запуска;
 - `$OPENALEX_DSS_DATA_DIR/runs/{run_id}/reports/` - воспроизводимый report bundle.
+
+Временные staging-каталоги среза удаляются после успешной материализации
+canonical parquet-таблиц. Производные report/analytics artifacts ограничиваются
+по числу сохраненных файлов, чтобы хранилище не разрасталось при повторных
+расчетах и изменении настроек визуализации.
 
 Приложение читает эти артефакты только через явный `dump_id`/`run_id`; глобальные
 fallback-пути не используются как источник аналитики.

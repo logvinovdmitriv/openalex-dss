@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import json
+import os
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -493,10 +494,8 @@ class PipelineIntegrityTests(unittest.TestCase):
             dump_dir = data / "dumps" / "dump_scope"
             tables_dir = data / "tables" / "dump_scope"
 
-            self.assertTrue((dump_dir / "normalized" / "works_flat.csv").is_file())
-            self.assertTrue((dump_dir / "normalized" / "authorships_flat.csv").is_file())
-            self.assertTrue((dump_dir / "normalized" / "work_topics_flat.csv").is_file())
-            self.assertTrue((dump_dir / "parquet" / "works_flat.parquet").is_file())
+            self.assertFalse((dump_dir / "normalized").exists())
+            self.assertFalse((dump_dir / "parquet").exists())
             self.assertTrue((tables_dir / "works.parquet").is_file())
             self.assertTrue((tables_dir / "authorships.parquet").is_file())
             self.assertTrue((tables_dir / "work_topics.parquet").is_file())
@@ -516,6 +515,7 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertFalse((dump_dir / "dump_manifest.json").exists())
             self.assertEqual(result["fetch_meta"], str(dump_dir / "fetch_meta.json"))
             self.assertEqual(result["quality_report"], str(dump_dir / "quality_report.json"))
+            self.assertEqual(result["precomputed"], str(data / "runs" / "run_dump_scope" / "analytics" / "precompute_manifest.json"))
 
     def test_build_blocks_ineligible_dump_without_dev_override(self) -> None:
         dump = {
@@ -936,6 +936,50 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertEqual(events, ["compute", "summary", "archive", "report"])
 
+    def test_precompute_uses_default_ui_analysis_contract(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_report(*args: object, **kwargs: object) -> dict[str, object]:
+            captured.update(kwargs)
+            return {"schema": "report_bundle", "status": "ok", "report_scope": {"report_scope_hash": "scope_a"}}
+
+        cfg = SimpleNamespace(fraction_mode_default="integer")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline.reports, "build_report_bundle", side_effect=fake_report),
+            ):
+                result = pipeline._precompute_run_artifacts(cfg, run_id="run_a", dump_id="dump_a")
+
+            manifest = json.loads((root / "runs" / "run_a" / "analytics" / "precompute_manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(captured["run_id"], "run_a")
+        self.assertEqual(captured["dump_id"], "dump_a")
+        self.assertEqual(captured["scientometric_metrics"], pipeline.PRECOMPUTE_SCIENTOMETRIC_METRICS)
+        self.assertEqual(captured["custom_metric_defs"], list(pipeline.PRECOMPUTE_CUSTOM_METRICS))
+        self.assertEqual(captured["data_limit"], 0)
+        self.assertEqual(captured["rank_top_n"], pipeline.PRECOMPUTE_RANK_TOP_N)
+        self.assertEqual(result["manifest"], str(root / "runs" / "run_a" / "analytics" / "precompute_manifest.json"))
+        self.assertEqual(manifest["report_scope_hash"], "scope_a")
+
+    def test_prune_runs_for_dump_keeps_recent_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runs_dir = root / "runs"
+            for index in range(5):
+                run_dir = runs_dir / f"run_{index}"
+                run_dir.mkdir(parents=True)
+                (run_dir / "metric_run.json").write_text(json.dumps({"dump_id": "dump_a"}), encoding="utf-8")
+                os.utime(run_dir / "metric_run.json", (1000 + index, 1000 + index))
+            with patch.object(pipeline, "DATA", root):
+                removed = pipeline._prune_runs_for_dump("dump_a", keep=2)
+
+            self.assertEqual(removed, ["run_2", "run_1", "run_0"])
+            self.assertTrue((root / "runs" / "run_4").exists())
+            self.assertTrue((root / "runs" / "run_3").exists())
+            self.assertFalse((root / "runs" / "run_2").exists())
+
     def test_jobs_dispatch_passes_current_run_id_to_analysis_action(self) -> None:
         captured: dict[str, dict[str, object]] = {}
 
@@ -1260,6 +1304,22 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertTrue(payload["rebuilt"])
         build.assert_called_once()
+
+    def test_report_bundle_persistence_prunes_old_report_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(reports, "DATA", root):
+                for index in range(reports.REPORT_BUNDLE_KEEP + 3):
+                    path = reports._report_bundle_path("run_a", f"scope_{index}")
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(json.dumps({"schema": "report_bundle", "index": index}), encoding="utf-8")
+                    os.utime(path, (1000 + index, 1000 + index))
+                reports._prune_report_bundles("run_a")
+                remaining = sorted(path.name for path in (root / "runs" / "run_a" / "reports").glob("report_*.json"))
+
+        self.assertEqual(len(remaining), reports.REPORT_BUNDLE_KEEP)
+        self.assertNotIn("report_scope_0.json", remaining)
+        self.assertIn(f"report_scope_{reports.REPORT_BUNDLE_KEEP + 2}.json", remaining)
 
     def test_report_build_forwards_filters_to_metric_ranking_and_scopes_cache(self) -> None:
         captured: dict[str, object] = {}

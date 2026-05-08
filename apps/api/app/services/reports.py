@@ -14,6 +14,7 @@ from app.services.analysis_filters import clean_analysis_filters
 REPORT_BUNDLE_SCHEMA = "report_bundle"
 REPORT_SCOPE_SCHEMA = "report_scope"
 DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "cpp", "h", "i10", "g")
+REPORT_BUNDLE_KEEP = 12
 
 
 def build_report_bundle(
@@ -107,7 +108,7 @@ def build_report_bundle(
     missing = [name for name, value in docs.items() if not value]
     if missing:
         report = _incomplete_run_report(run_id=run_id, dump_id=dump_id, missing=missing, report_scope=report_scope)
-        _write_json(_report_bundle_path(run_id, scope_hash), report)
+        _write_report_bundle(run_id, scope_hash, report)
         return report
     state = docs["pipeline"]
     quality = docs["quality"]
@@ -306,7 +307,7 @@ def build_report_bundle(
             "polyanin_status": "f5/fm5 are operational threshold metrics until a primary source definition is confirmed.",
         },
     }
-    _write_json(_report_bundle_path(run_id, scope_hash), report)
+    _write_report_bundle(run_id, scope_hash, report)
     return report
 
 
@@ -369,6 +370,37 @@ def _report_bundle_path(run_id: str, scope_hash: str) -> Path:
     if not str(run_id or "").strip() or not str(scope_hash or "").strip():
         raise ValueError("run_id and report_scope_hash are required for report bundle persistence")
     return DATA / "runs" / _safe_id(run_id) / "reports" / f"report_{_safe_id(scope_hash)}.json"
+
+
+def _write_report_bundle(run_id: str, scope_hash: str, report: dict[str, Any]) -> Path:
+    path = _report_bundle_path(run_id, scope_hash)
+    _write_json(path, report)
+    _prune_report_bundles(run_id)
+    return path
+
+
+def _prune_report_bundles(run_id: str, *, keep: int = REPORT_BUNDLE_KEEP) -> list[str]:
+    if keep < 1:
+        return []
+    reports_dir = DATA / "runs" / _safe_id(run_id) / "reports"
+    if not reports_dir.is_dir():
+        return []
+    files = sorted(reports_dir.glob("report_*.json"), key=_path_mtime, reverse=True)
+    removed: list[str] = []
+    for path in files[keep:]:
+        try:
+            path.unlink()
+            removed.append(str(path))
+        except OSError:
+            continue
+    return removed
+
+
+def _path_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _run_report_artifacts(run_id: str) -> dict[str, dict[str, Any]]:

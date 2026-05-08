@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -24,6 +25,17 @@ from openalex_dss.passports import build_passports  # noqa: E402
 from openalex_dss.ranking import build_ratings  # noqa: E402
 
 StageProgressCallback = Callable[[int | None, str, dict[str, Any] | None], None]
+
+PRECOMPUTE_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "g", "iupv", "islv", "custom_added_rating")
+PRECOMPUTE_CUSTOM_METRICS = (
+    {
+        "id": "custom_added_rating",
+        "label": "Пример собственного рейтинга",
+        "description": "Дефолтная пользовательская формула на основе процентилей публикаций, индекса Хирша и долевых цитирований.",
+        "expression": "100 * (pr_p * pr_h * pr_c_frac) ** (1 / 3)",
+    },
+)
+PRECOMPUTE_RANK_TOP_N = 100
 
 
 def recalculate(payload: dict[str, Any], progress_callback: StageProgressCallback | None = None) -> dict[str, Any]:
@@ -48,10 +60,19 @@ def recalculate(payload: dict[str, Any], progress_callback: StageProgressCallbac
     _emit_progress(progress_callback, 91, "Обновление паспорта расчета", {"run_id": run_id, "dump_id": dump_id})
     _write_pipeline_summary("recalculate", cfg, {**payload, "run_id": run_id, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, "active_context_source": "recalculate", **compute})
-    _emit_progress(progress_callback, 96, "Сборка отчета", {"run_id": run_id, "dump_id": dump_id})
-    report = reports.build_report_bundle(metric="h", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
+    precomputed = _precompute_run_artifacts(cfg, run_id=run_id, dump_id=dump_id, progress_callback=progress_callback)
+    report = precomputed["report"]
     _emit_progress(progress_callback, 98, "Расчет индексов завершен", {"run_id": run_id, "dump_id": dump_id})
-    return {"status": "ok", "mode": "recalculate", "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
+    _prune_runs_for_dump(dump_id, keep=3)
+    return {
+        "status": "ok",
+        "mode": "recalculate",
+        "archive": archive,
+        "report": report,
+        "precomputed": precomputed["manifest"],
+        "analysis_eligibility": analysis_eligibility,
+        "input_tables": compute["input_tables"],
+    }
 
 
 def fetch_slice_dump(
@@ -164,6 +185,7 @@ def import_local_file(
     quality, dump_table_sources, quality_report = _normalize_dump_to_scope(source, dump_id)
     _emit_progress(progress_callback, max(0, compute_progress_base - 2), "Подготовка таблиц среза", {"dump_id": dump_id, "works": quality.get("raw_works")})
     input_tables = _materialize_dump_tables_from_sources(dump_id, dump_table_sources)
+    _cleanup_dump_staging(dump_id)
     source_type = "openalex_cli_dump_import" if dump_manifest else "local_file"
     fetch_meta = {
         "source_type": source_type,
@@ -218,13 +240,16 @@ def import_local_file(
             **compute,
         },
     )
-    report = reports.build_report_bundle(metric="h", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
+    precomputed = _precompute_run_artifacts(cfg, run_id=run_id, dump_id=dump_id, progress_callback=progress_callback)
+    report = precomputed["report"]
+    _prune_runs_for_dump(dump_id, keep=3)
     return {
         "status": "ok",
         "mode": "import_local_file",
         "source": profile,
         "archive": archive,
         "report": report,
+        "precomputed": precomputed["manifest"],
         "analysis_eligibility": analysis_eligibility,
         "fetch_meta": str(fetch_meta_path),
         "quality_report": str(quality_report),
@@ -333,6 +358,21 @@ def _materialize_dump_tables_from_sources(dump_id: str, sources: dict[str, Path]
     return resolve_dump_tables(safe_dump_id, required=True)
 
 
+def _cleanup_dump_staging(dump_id: str) -> list[str]:
+    safe_dump_id = _safe_id(_resolve_dump_id(str(dump_id or "")))
+    if not safe_dump_id:
+        return []
+    dump_dir = DATA / "dumps" / safe_dump_id
+    removed: list[str] = []
+    for name in ("normalized", "parquet"):
+        path = dump_dir / name
+        if not path.exists():
+            continue
+        shutil.rmtree(path)
+        removed.append(str(path))
+    return removed
+
+
 def _run_compute(
     cfg: Any,
     *,
@@ -411,6 +451,83 @@ def _run_compute(
         "run_table_outputs": {key: str(path) for key, path in run_table_outputs.items()},
         "passport_outputs": passport_outputs,
     }
+
+
+def _precompute_run_artifacts(
+    cfg: Any,
+    *,
+    run_id: str,
+    dump_id: str,
+    progress_callback: StageProgressCallback | None = None,
+) -> dict[str, Any]:
+    _emit_progress(progress_callback, 96, "Подготовка аналитики и отчета", {"run_id": run_id, "dump_id": dump_id})
+    report = reports.build_report_bundle(
+        metric="h",
+        fraction_mode=cfg.fraction_mode_default,
+        limit=100,
+        run_id=run_id,
+        dump_id=dump_id,
+        scientometric_metrics=PRECOMPUTE_SCIENTOMETRIC_METRICS,
+        baseline_metric="h",
+        rank_top_n=PRECOMPUTE_RANK_TOP_N,
+        data_limit=0,
+        custom_metric_defs=list(PRECOMPUTE_CUSTOM_METRICS),
+    )
+    manifest_path = _write_precompute_manifest(run_id=run_id, dump_id=dump_id, report=report)
+    return {"report": report, "manifest": str(manifest_path)}
+
+
+def _write_precompute_manifest(*, run_id: str, dump_id: str, report: dict[str, Any]) -> Path:
+    run_dir = DATA / "runs" / _safe_id(run_id)
+    analytics_dir = run_dir / "analytics"
+    analytics_dir.mkdir(parents=True, exist_ok=True)
+    scope = report.get("report_scope") if isinstance(report.get("report_scope"), dict) else {}
+    scope_hash = str(scope.get("report_scope_hash") or "")
+    manifest = {
+        "schema": "run_precompute_manifest",
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "scientometric_metrics": list(PRECOMPUTE_SCIENTOMETRIC_METRICS),
+        "custom_metrics": list(PRECOMPUTE_CUSTOM_METRICS),
+        "baseline_metric": "h",
+        "rank_top_n": PRECOMPUTE_RANK_TOP_N,
+        "data_limit": 0,
+        "report_scope_hash": scope_hash,
+        "report_bundle": str(DATA / "runs" / _safe_id(run_id) / "reports" / f"report_{_safe_id(scope_hash)}.json") if scope_hash else "",
+        "retention": {
+            "report_bundles_per_run": reports.REPORT_BUNDLE_KEEP,
+            "scientometric_cache_files_per_run": reports.scientometrics.ANALYSIS_CACHE_KEEP,
+            "runs_per_dump": 3,
+            "transient_dump_staging": ["normalized", "parquet"],
+        },
+    }
+    path = analytics_dir / "precompute_manifest.json"
+    write_json(path, manifest)
+    return path
+
+
+def _prune_runs_for_dump(dump_id: str, *, keep: int = 3) -> list[str]:
+    safe_dump_id = _safe_id(_resolve_dump_id(str(dump_id or "")))
+    if not safe_dump_id or keep < 1:
+        return []
+    candidates: list[tuple[float, Path]] = []
+    for metric_run in (DATA / "runs").glob("run_*/metric_run.json"):
+        manifest = _read_artifact_json(metric_run)
+        manifest_dump_id = _safe_id(str(manifest.get("dump_id") or manifest.get("input_dump_id") or ""))
+        if manifest_dump_id != safe_dump_id:
+            continue
+        try:
+            mtime = metric_run.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        candidates.append((mtime, metric_run.parent))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    removed: list[str] = []
+    for _, run_dir in candidates[keep:]:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        removed.append(run_dir.name)
+    return removed
 
 
 def _table_checksums(paths: dict[str, Path]) -> dict[str, str]:
