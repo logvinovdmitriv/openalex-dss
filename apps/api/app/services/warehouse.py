@@ -193,6 +193,7 @@ def query_table(
     direction: str = "desc",
     limit: int = 100,
     offset: int = 0,
+    select_fields: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> dict[str, Any]:
     if table not in TABLE_KINDS:
         raise ValueError(f"Unknown table: {table}")
@@ -217,6 +218,7 @@ def query_table(
             direction=direction,
             limit=limit,
             offset=offset,
+            select_fields=select_fields,
         )
         payload["run_id"] = run_id
         payload["dump_id"] = dump_id
@@ -241,6 +243,7 @@ def _query_registered_table(
     direction: str = "desc",
     limit: int = 100,
     offset: int = 0,
+    select_fields: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> dict[str, Any]:
 
     where: list[str] = []
@@ -267,24 +270,33 @@ def _query_registered_table(
     order_sql = ""
     if sort and sort in fields:
         order_sql = f"ORDER BY {sort} {'DESC' if direction == 'desc' else 'ASC'}"
+    selected_fields = _selected_table_fields(fields, select_fields)
+    select_sql = ", ".join(selected_fields) if selected_fields else "*"
     raw_limit = max(0, min(500_000, int(limit or 0)))
     offset = max(0, int(offset))
 
     total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
     if raw_limit > 0:
         rel = conn.execute(
-            f"SELECT * FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
+            f"SELECT {select_sql} FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
             [*args, raw_limit, offset],
         )
         effective_limit = raw_limit
     else:
         rel = conn.execute(
-            f"SELECT * FROM {table} {where_sql} {order_sql} OFFSET ?",
+            f"SELECT {select_sql} FROM {table} {where_sql} {order_sql} OFFSET ?",
             [*args, offset],
         )
         effective_limit = 0
     rows = _records(rel)
-    return {"table": table, "fields": fields, "rows": rows, "total": total, "limit": effective_limit, "offset": offset}
+    return {"table": table, "fields": selected_fields or fields, "rows": rows, "total": total, "limit": effective_limit, "offset": offset}
+
+
+def _selected_table_fields(fields: list[str], select_fields: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
+    if not select_fields:
+        return list(fields)
+    requested = {str(field).strip() for field in select_fields if str(field).strip()}
+    return [field for field in fields if field in requested]
 
 
 def _append_column_filter_clauses(where: list[str], args: list[Any], fields: list[str], data_filters: dict[str, Any] | None) -> None:
@@ -499,6 +511,7 @@ def selected_index_rows(
     data_direction: str = "desc",
     data_limit: int = 0,
     custom_metric_defs: list[dict[str, str]] | None = None,
+    select_fields: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return author-level rows using the fastest safe source for the current selection.
 
@@ -533,6 +546,7 @@ def selected_index_rows(
             data_direction=data_direction,
             data_limit=normalized_limit,
             custom_metric_defs=custom_metric_defs,
+            select_fields=select_fields,
         )
 
     rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
@@ -564,6 +578,7 @@ def _selected_precomputed_index_rows(
     data_direction: str,
     data_limit: int,
     custom_metric_defs: list[dict[str, str]] | None,
+    select_fields: list[str] | tuple[str, ...] | set[str] | None,
 ) -> list[dict[str, Any]]:
     fields = set(table_schema("indices", run_id=run_id, dump_id=dump_id))
     custom_ids = custom_metrics.custom_metric_ids(custom_metric_defs)
@@ -572,6 +587,13 @@ def _selected_precomputed_index_rows(
     sort_is_native = not data_sort or data_sort in fields
     sort_is_custom = data_sort in custom_ids
     needs_python_selection = bool(author_ids) or bool(python_filters) or sort_is_custom
+    required_fields = _selected_index_query_fields(
+        fields,
+        requested_fields=select_fields,
+        native_filters=native_filters,
+        data_sort=data_sort,
+        custom_metric_defs=custom_metric_defs,
+    )
     effective_data_limit = data_limit
     query_limit = data_limit
     query_sort = data_sort if sort_is_native else ""
@@ -585,6 +607,7 @@ def _selected_precomputed_index_rows(
         sort=query_sort,
         direction=data_direction,
         limit=query_limit,
+        select_fields=required_fields,
     )
     rows = list(payload.get("rows") or [])
     rows = filter_rows_by_author_ids(rows, author_ids)
@@ -600,6 +623,23 @@ def _selected_precomputed_index_rows(
             data_limit=effective_data_limit,
         )
     return rows
+
+
+def _selected_index_query_fields(
+    fields: set[str],
+    *,
+    requested_fields: list[str] | tuple[str, ...] | set[str] | None,
+    native_filters: dict[str, Any],
+    data_sort: str,
+    custom_metric_defs: list[dict[str, str]] | None,
+) -> set[str]:
+    required = {"author_id", "author_display_name"}
+    required.update(str(field).strip() for field in requested_fields or [] if str(field).strip())
+    required.update(native_filters.keys())
+    if data_sort:
+        required.add(data_sort)
+    required.update(custom_metrics.referenced_base_fields(custom_metric_defs))
+    return {field for field in required if field in fields}
 
 
 def _sort_rows_by_field(rows: list[dict[str, Any]], field: str, *, data_direction: str = "desc") -> list[dict[str, Any]]:

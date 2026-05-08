@@ -1224,6 +1224,14 @@ def _analysis_context(
     data_sort = str(data_sort or "").strip()
     data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
     data_limit = max(0, min(_int_value(data_limit, 0), 500_000))
+    required_row_fields = {
+        "author_id",
+        "author_display_name",
+        baseline_metric,
+        *selected_metrics,
+        *SCORECARD_FACTORS.values(),
+        *custom_metrics.referenced_base_fields(custom_metric_defs),
+    }
     rows = warehouse.selected_index_rows(
         fraction_mode,
         resolved_filters,
@@ -1236,6 +1244,7 @@ def _analysis_context(
         data_direction=data_direction,
         data_limit=data_limit,
         custom_metric_defs=custom_metric_defs,
+        select_fields=required_row_fields,
     )
     rank_top_n = requested_rank_top_n if requested_rank_top_n > 0 else max(1, len(rows))
     custom_ids = {item["id"] for item in custom_metric_defs or []}

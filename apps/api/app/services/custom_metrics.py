@@ -114,6 +114,17 @@ def custom_metric_ids(definitions: list[dict[str, str]] | None) -> set[str]:
     return {definition["id"] for definition in definitions or []}
 
 
+def referenced_base_fields(definitions: list[dict[str, str]] | None) -> set[str]:
+    fields: set[str] = set()
+    for definition in definitions or []:
+        expression = _compile_expression(definition["expression"])
+        for name in _expression_names(expression):
+            base_name = name[3:] if name.startswith("pr_") else name
+            if base_name in BASE_NUMERIC_FIELDS:
+                fields.add(base_name)
+    return fields
+
+
 def metric_catalog(definitions: list[dict[str, str]] | None) -> list[dict[str, str]]:
     return [
         {

@@ -75,6 +75,7 @@ class WarehouseTests(unittest.TestCase):
             sort="h",
             direction="desc",
             limit=1,
+            select_fields={"author_id", "author_display_name", "h"},
         )
 
     def test_selected_index_rows_treats_filter_mode_all_as_unfiltered(self) -> None:
@@ -98,6 +99,32 @@ class WarehouseTests(unittest.TestCase):
         filtered_indices.assert_not_called()
         query_table.assert_called_once()
         self.assertEqual(query_table.call_args.kwargs["limit"], 0)
+        self.assertEqual(query_table.call_args.kwargs["select_fields"], {"author_id"})
+
+    def test_selected_index_rows_limits_precomputed_columns_for_analytics(self) -> None:
+        with (
+            patch.object(warehouse, "table_exists", return_value=True),
+            patch.object(warehouse, "table_schema", return_value=["fraction_mode", "author_id", "author_display_name", "h", "p", "c", "unused_blob"]),
+            patch.object(
+                warehouse,
+                "query_table",
+                return_value={
+                    "rows": [{"author_id": "A1", "author_display_name": "Author One", "h": 3, "p": 2}],
+                    "total": 1,
+                    "limit": 0,
+                },
+            ) as query_table,
+        ):
+            rows = warehouse.selected_index_rows(
+                "integer",
+                {},
+                run_id="run_a",
+                select_fields={"h", "p"},
+                custom_metric_defs=[{"id": "custom_test", "label": "Test", "expression": "h + pr_c"}],
+            )
+
+        self.assertEqual(rows[0]["author_id"], "A1")
+        self.assertEqual(query_table.call_args.kwargs["select_fields"], {"author_id", "author_display_name", "h", "p", "c"})
 
     def test_selected_index_rows_recomputes_when_work_level_filters_are_present(self) -> None:
         source_rows = [{"author_id": "A1", "author_display_name": "Author One", "h": 3, "p": 1}]
