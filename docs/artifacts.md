@@ -35,7 +35,7 @@ DSS использует только артефакты выбранного с
 
 - `dump_id` владеет локальным корпусом: raw manifest плюс `works`,
   `authorships` и `work_topics`.
-- Сырые импорты нормализуются в scoped staging
+- Сырые импорты нормализуются потоковым чтением JSONL в scoped staging
   `dumps/{dump_id}/normalized` и `dumps/{dump_id}/parquet`, затем создают
   канонические parquet-таблицы в `tables/{dump_id}`. После успешной
   материализации временный staging удаляется, чтобы не хранить одну и ту же

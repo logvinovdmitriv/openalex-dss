@@ -81,7 +81,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["metric"], "h")
         self.assertEqual(
             captured["kwargs"],
-            {"limit": 25, "max_limit": 500_000, "run_id": "run_a", "dump_id": "dump_a", "author_ids": None, "custom_metric_defs": []},
+            {"limit": 25, "max_limit": analytics_routes.JSON_RESULT_MAX_ROWS, "run_id": "run_a", "dump_id": "dump_a", "author_ids": None, "custom_metric_defs": []},
         )
         self.assertEqual(filters["country_code"], "RU")
         self.assertEqual(filters["filter_mode"], "keyword")
@@ -126,6 +126,23 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["author_ids"], {"https://openalex.org/A2"})
         self.assertEqual(captured["kwargs"]["run_id"], "run_a")
         self.assertEqual(payload["cohort"]["cohort_id"], "cohort_a")
+
+    def test_ranking_csv_keeps_export_scale_limit(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_ranking(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> dict[str, object]:
+            captured["kwargs"] = kwargs
+            return {"fields": ["author_id", "score"], "rows": [{"author_id": "A1", "score": 1}], "total": 1}
+
+        with (
+            patch.object(analytics_routes.warehouse, "metric_ranking", side_effect=fake_ranking),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            response = analytics_routes.ranking_csv(run_id="run_a", dump_id="dump_a", metric="h", limit=100_000)
+
+        self.assertIn("A1", response.body.decode("utf-8"))
+        self.assertEqual(captured["kwargs"]["max_limit"], analytics_routes.EXPORT_RESULT_MAX_ROWS)
+        self.assertEqual(captured["kwargs"]["limit"], 100_000)
 
     def test_ranking_json_without_scope_requires_scope(self) -> None:
         with (

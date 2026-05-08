@@ -21,15 +21,17 @@ def ensure_dir(path: str | Path) -> Path:
 
 
 def read_jsonl(path: str | Path) -> list[dict]:
-    rows: list[dict] = []
+    return list(iter_jsonl(path))
+
+
+def iter_jsonl(path: str | Path) -> Iterable[dict]:
     p = Path(path)
     opener = gzip.open if p.suffix == ".gz" else open
     with opener(p, "rt", encoding="utf-8", newline="\n") as f:
         for line in f:
             line = line.strip()
             if line:
-                rows.append(json.loads(line))
-    return rows
+                yield json.loads(line)
 
 
 def write_json(path: str | Path, data: object) -> None:
@@ -67,7 +69,7 @@ def write_csv_dicts(path: str | Path, rows: Iterable[dict], fieldnames: list[str
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow({key: _csv_value(row.get(key)) for key in fieldnames})
+            writer.writerow({key: csv_value(row.get(key)) for key in fieldnames})
             count += 1
     return count
 
@@ -109,7 +111,7 @@ def _parquet_string_value(value: Any) -> str | None:
     return str(value)
 
 
-def _csv_value(value: object) -> object:
+def csv_value(value: object) -> object:
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -119,6 +121,9 @@ def _csv_value(value: object) -> object:
     if isinstance(value, (list, tuple, dict)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
     return value
+
+
+_csv_value = csv_value
 
 
 def sha256_file(path: str | Path) -> str:

@@ -98,7 +98,15 @@ async function safeJson(res: Response): Promise<unknown> {
 function errorMessage(data: unknown, status: number) {
   if (data && typeof data === "object") {
     const payload = data as Record<string, unknown>;
-    const detail = payload.detail ?? payload.error;
+    const envelope = payload.error;
+    if (envelope && typeof envelope === "object") {
+      const error = envelope as Record<string, unknown>;
+      const message = String(error.message ?? "").trim();
+      const action = String(error.action ?? "").trim();
+      if (message && action) return `${message} ${action}`;
+      if (message) return message;
+    }
+    const detail = payload.detail ?? envelope;
     if (typeof detail === "string" && detail.trim()) return detail;
     if (Array.isArray(detail)) {
       const message = detail

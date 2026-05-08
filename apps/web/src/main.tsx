@@ -427,7 +427,7 @@ function Workbench() {
       effectiveDumpId,
       rankingPreviewLimit,
       "",
-      { ...dataSelection, limit: rankingPreviewLimit },
+      dataSelection,
       customMetrics,
     )),
     enabled: hasLocalAnalyticsData,

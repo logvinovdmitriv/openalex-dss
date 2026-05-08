@@ -142,6 +142,34 @@ class WarehouseTests(unittest.TestCase):
         self.assertEqual(rows[0]["author_id"], "A1")
         self.assertEqual(query_table.call_args.kwargs["select_fields"], {"author_id", "author_display_name", "h", "p", "c"})
 
+    def test_selected_index_rows_sorts_custom_metric_before_limiting(self) -> None:
+        source_rows = [
+            {"author_id": "A1", "author_display_name": "Author One", "c": 1},
+            {"author_id": "A2", "author_display_name": "Author Two", "c": 9},
+        ]
+
+        def fake_query_table(*_args: object, **kwargs: object) -> dict[str, object]:
+            limit = int(kwargs.get("limit") or 0)
+            rows = source_rows[:limit] if limit > 0 else source_rows
+            return {"rows": rows, "total": len(source_rows), "limit": limit}
+
+        with (
+            patch.object(warehouse, "table_exists", return_value=True),
+            patch.object(warehouse, "table_schema", return_value=["author_id", "author_display_name", "c"]),
+            patch.object(warehouse, "query_table", side_effect=fake_query_table) as query_table,
+        ):
+            rows = warehouse.selected_index_rows(
+                "integer",
+                {},
+                run_id="run_a",
+                data_sort="custom_score",
+                data_limit=1,
+                custom_metric_defs=[{"id": "custom_score", "label": "Score", "expression": "c"}],
+            )
+
+        self.assertEqual([row["author_id"] for row in rows], ["A2"])
+        self.assertEqual(query_table.call_args.kwargs["limit"], 0)
+
     def test_selected_index_rows_recomputes_when_work_level_filters_are_present(self) -> None:
         source_rows = [{"author_id": "A1", "author_display_name": "Author One", "h": 3, "p": 1}]
         with (

@@ -13,6 +13,9 @@ from app.services.analysis_filters import build_analysis_filters
 
 router = APIRouter(tags=["analytics"])
 
+JSON_RESULT_MAX_ROWS = 5_000
+EXPORT_RESULT_MAX_ROWS = 500_000
+
 
 @router.get("/analytics")
 def analytics(
@@ -54,9 +57,9 @@ def analytics(
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
-    data_limit: int = Query(0, ge=0, le=500_000),
+    data_limit: int = Query(0, ge=0, le=EXPORT_RESULT_MAX_ROWS),
     custom_metric_defs: str = "",
-    limit: int = Query(20, ge=0, le=500_000),
+    limit: int = Query(20, ge=0, le=JSON_RESULT_MAX_ROWS),
 ) -> dict[str, Any]:
     requested_run_id = run_id
     requested_dump_id = dump_id
@@ -185,7 +188,7 @@ def distribution(
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
-    data_limit: int = Query(0, ge=0, le=500_000),
+    data_limit: int = Query(0, ge=0, le=EXPORT_RESULT_MAX_ROWS),
     custom_metric_defs: str = "",
 ) -> dict[str, Any]:
     requested_run_id = run_id
@@ -293,9 +296,9 @@ def ranking_json(
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
-    data_limit: int = Query(0, ge=0, le=500_000),
+    data_limit: int = Query(0, ge=0, le=EXPORT_RESULT_MAX_ROWS),
     custom_metric_defs: str = "",
-    limit: int = Query(100, ge=0, le=500_000),
+    limit: int = Query(100, ge=0, le=JSON_RESULT_MAX_ROWS),
 ) -> dict[str, Any]:
     requested_run_id = run_id
     requested_dump_id = dump_id
@@ -337,7 +340,7 @@ def ranking_json(
             metric,
             filters,
             limit=limit,
-            max_limit=500_000,
+            max_limit=JSON_RESULT_MAX_ROWS,
             run_id=run_id,
             dump_id=dump_id,
             author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
@@ -399,55 +402,79 @@ def ranking_csv(
     to_publication_date: str = "",
     work_type: str = "",
     q: str = "",
+    author_ids: str = "",
     data_filters: str = "",
+    data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
-    data_limit: int = Query(0, ge=0, le=500_000),
+    data_limit: int = Query(0, ge=0, le=EXPORT_RESULT_MAX_ROWS),
     custom_metric_defs: str = "",
-    limit: int = Query(100_000, ge=0, le=500_000),
+    limit: int = Query(100_000, ge=0, le=EXPORT_RESULT_MAX_ROWS),
 ) -> Response:
+    requested_run_id = run_id
+    requested_dump_id = dump_id
+    filters = _slice_filters(
+        country_code=country_code,
+        filter_mode=filter_mode,
+        subject_level=subject_level,
+        subject_id=subject_id,
+        keyword_id=keyword_id,
+        keyword_display_name=keyword_display_name or keyword_name,
+        text_search_query=text_search_query,
+        author_id=author_id,
+        author_orcid=author_orcid,
+        author_display_name=author_display_name or author_name,
+        doi=doi,
+        affiliation_mode=affiliation_mode,
+        institution_id=institution_id,
+        source_id=source_id,
+        source_display_name=source_display_name or source_name,
+        source_type=source_type,
+        language=language,
+        open_access_is_oa=open_access_is_oa,
+        has_abstract=has_abstract,
+        min_cited_by_count=min_cited_by_count,
+        from_publication_date=from_publication_date,
+        to_publication_date=to_publication_date,
+        work_type=work_type,
+        q=q,
+    )
     try:
-        payload = ranking_json(
+        cohort_ctx = _cohort_context(cohort_id, run_id=run_id, dump_id=dump_id, fraction_mode=fraction_mode, filters=filters, filter_policy=cohort_filter_policy)
+        run_id = cohort_ctx["run_id"]
+        dump_id = cohort_ctx["dump_id"]
+        _require_analysis_scope(run_id=run_id, dump_id=dump_id)
+        filters = cohort_ctx["filters"]
+        parsed_data_filters = warehouse.parse_column_filters(data_filters)
+        payload = warehouse.metric_ranking(
+            fraction_mode,
+            metric,
+            filters,
+            limit=limit,
+            max_limit=EXPORT_RESULT_MAX_ROWS,
             run_id=run_id,
             dump_id=dump_id,
-            cohort_id=cohort_id,
-            cohort_filter_policy=cohort_filter_policy,
-            fraction_mode=fraction_mode,
-            metric=metric,
-            country_code=country_code,
-            filter_mode=filter_mode,
-            subject_level=subject_level,
-            subject_id=subject_id,
-            keyword_id=keyword_id,
-            keyword_display_name=keyword_display_name,
-            keyword_name=keyword_name,
-            text_search_query=text_search_query,
-            author_id=author_id,
-            author_orcid=author_orcid,
-            author_display_name=author_display_name,
-            author_name=author_name,
-            doi=doi,
-            affiliation_mode=affiliation_mode,
-            institution_id=institution_id,
-            source_id=source_id,
-            source_display_name=source_display_name,
-            source_name=source_name,
-            source_type=source_type,
-            language=language,
-            open_access_is_oa=open_access_is_oa,
-            has_abstract=has_abstract,
-            min_cited_by_count=min_cited_by_count,
-            from_publication_date=from_publication_date,
-            to_publication_date=to_publication_date,
-            work_type=work_type,
-            q=q,
-            data_filters=data_filters,
-            data_sort=data_sort,
-            data_direction=data_direction,
-            data_limit=data_limit,
-            custom_metric_defs=custom_metric_defs,
-            limit=limit,
+            author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
+            custom_metric_defs=_custom_metric_defs(custom_metric_defs),
+            **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
         )
+        payload["cohort"] = cohort_ctx["cohort"]
+        payload["data_filters"] = parsed_data_filters
+        payload["data_search"] = data_search
+        payload["selected_author_ids"] = _author_ids_query(author_ids)
+        payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
+        _annotate_scope_payload(
+            payload,
+            requested_run_id=requested_run_id,
+            requested_dump_id=requested_dump_id,
+            resolved_run_id=str(payload.get("run_id") or run_id),
+            resolved_dump_id=str(payload.get("dump_id") or dump_id),
+            cohort_id=cohort_id,
+        )
+    except cohorts.CohortNotFound as exc:
+        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     output = StringIO()
@@ -506,7 +533,7 @@ def scientometric_analysis(
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
-    data_limit: int = Query(0, ge=0, le=500_000),
+    data_limit: int = Query(0, ge=0, le=EXPORT_RESULT_MAX_ROWS),
     custom_metric_defs: str = "",
 ) -> dict[str, Any]:
     filters = _slice_filters(
@@ -830,7 +857,7 @@ def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
         "author_ids": _author_ids_query(query.get("author_ids", "")),
         "data_sort": query.get("data_sort", ""),
         "data_direction": query.get("data_direction", "desc"),
-        "data_limit": max(0, min(_int_query(query.get("data_limit"), 0), 500_000)),
+        "data_limit": max(0, min(_int_query(query.get("data_limit"), 0), EXPORT_RESULT_MAX_ROWS)),
         "custom_metric_defs": _custom_metric_defs(query.get("custom_metric_defs", "")),
     }
 
@@ -857,7 +884,7 @@ def _data_selection_kwargs(
         out["data_direction"] = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
     limit = _int_query(data_limit, 0)
     if limit > 0:
-        out["data_limit"] = max(1, min(limit, 500_000))
+        out["data_limit"] = max(1, min(limit, EXPORT_RESULT_MAX_ROWS))
     return out
 
 

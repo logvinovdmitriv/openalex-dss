@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 import inspect
+import asyncio
+import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +12,8 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
+from starlette.requests import Request
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +23,7 @@ for path in (API, SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.main import app  # noqa: E402
+from app.main import app, http_exception_handler, validation_exception_handler  # noqa: E402
 from app.api.routes import openalex as openalex_routes  # noqa: E402
 from app.api.routes import runs as runs_routes  # noqa: E402
 from app.api.routes import slices as slices_routes  # noqa: E402
@@ -29,6 +33,31 @@ from app.services.internal_payloads import InternalPipelinePayload, normalize_in
 
 
 class PublicApiSurfaceTests(unittest.TestCase):
+    def test_public_api_returns_consistent_error_envelope(self) -> None:
+        request = Request({"type": "http", "method": "GET", "path": "/api/v1/analytics/ranking", "headers": []})
+        validation_response = asyncio.run(
+            validation_exception_handler(
+                request,
+                RequestValidationError([{"loc": ("query", "limit"), "msg": "Input should be greater than or equal to 0", "type": "greater_than_equal"}]),
+            )
+        )
+        validation_payload = json.loads(validation_response.body)
+        self.assertEqual(validation_response.status_code, 422)
+        self.assertEqual(validation_payload["error"]["title"], "Некорректные параметры запроса")
+        self.assertIn("Количество строк", validation_payload["error"]["message"])
+        self.assertIn("Проверьте", validation_payload["error"]["action"])
+
+        scoped_response = asyncio.run(
+            http_exception_handler(
+                request,
+                HTTPException(status_code=400, detail="run_id or dump_id is required for local-data access."),
+            )
+        )
+        scoped_payload = json.loads(scoped_response.body)
+        self.assertEqual(scoped_response.status_code, 400)
+        self.assertEqual(scoped_payload["error"]["title"], "Некорректное действие")
+        self.assertIn("run_id or dump_id is required", scoped_payload["error"]["message"])
+
     def test_stale_pipeline_routes_are_not_public(self) -> None:
         route_paths = {getattr(route, "path", "") for route in app.routes}
 

@@ -115,27 +115,30 @@ filter classes are documented in `configs/openalex_filter_registry.yaml`.
 
 ### Data layer
 
-The local data layout follows a lakehouse pattern under the external
-`OPENALEX_DSS_DATA_DIR` directory. The repository-local `data/` directory is
-only a small README/placeholder and is ignored by git.
+The local data layout is scoped under the external `OPENALEX_DSS_DATA_DIR`
+directory. The repository-local `data/` directory is only a small
+README/placeholder and is ignored by git.
 
 ```text
-$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/               raw JSONL.GZ local slices downloaded by the installed loader
-$OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/snapshot/  S3 snapshot manifests and downloaded partitions
-$OPENALEX_DSS_DATA_DIR/lake/bronze/openalex/files/     local user-provided OpenAlex slices
-$OPENALEX_DSS_DATA_DIR/lake/silver/openalex/           normalized works and authorships
-$OPENALEX_DSS_DATA_DIR/lake/gold/scientometrics/       indices, ratings and scientometric exports
-$OPENALEX_DSS_DATA_DIR/warehouse/openalex_dss.duckdb   query warehouse/catalog
+$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/     raw JSONL.GZ files from the installed OpenAlex downloader
+$OPENALEX_DSS_DATA_DIR/dumps/{dump_id}/                 slice manifest, fetch metadata and quality report
+$OPENALEX_DSS_DATA_DIR/tables/{dump_id}/                canonical Parquet tables: works, authorships, work_topics
+$OPENALEX_DSS_DATA_DIR/runs/{run_id}/tables/            derived author_work, indices and ratings
+$OPENALEX_DSS_DATA_DIR/runs/{run_id}/passports/         passports and checksums
+$OPENALEX_DSS_DATA_DIR/runs/{run_id}/analytics/         reusable analysis cache manifests
+$OPENALEX_DSS_DATA_DIR/runs/{run_id}/reports/           report bundles keyed by report_scope_hash
+$OPENALEX_DSS_DATA_DIR/workbench/active_context.json    UI pointer to the active run/dump
 ```
 
-The current DSS keeps CSV/JSON as primary reproducibility artifacts and
-registers them as DuckDB views for interactive querying. The production
-upgrade path is Parquet for silver/gold tables with CSV as export only.
+Canonical slice tables are Parquet. Run tables and passports stay scoped to
+`run_id`. Interactive table access, filters and sorting are executed on the
+backend with DuckDB-backed paths where possible; the frontend receives only the
+requested page or compact analytical payload. CSV is an export format, not the
+main analytical store.
 
 SQLite is used only for local metadata catalogs, entity suggestions and slice
-passports. It is not the analytical store. Analytical tables should move toward
-Parquet + DuckDB/Polars; PostgreSQL is reserved for later multi-user server
-mode with roles, durable jobs and permissions.
+metadata. It is not the analytical store. PostgreSQL is reserved for a later
+multi-user server mode with roles, durable jobs and permissions.
 
 ## Works-Based Contract
 
@@ -163,13 +166,16 @@ The primary DSS workflow is:
 2. choose filter mode: primary topic, any topic or keyword; fixed text search is estimate-only until an ID-based CLI download mode is added;
 3. optionally restrict by organization and country code;
 4. download the Works request as a fixed JSONL.GZ local slice through the installed OpenAlex downloader;
-5. import the fixed local slice, then flatten works and authorships locally;
-6. build run-scoped `author_work`;
-7. compute core indices P, C, C_frac, CPP, h, i10, g and m_local;
-8. compute ISLV as the default balanced local ranking and IUPV/LRDI/f5/fm5 as
-   diagnostic extensions;
-9. visualize distributions, multi-index line comparison, ranking tables and
-   quality diagnostics.
+5. import the fixed local slice with streaming JSONL normalization and scoped
+   staging cleanup;
+6. build canonical `tables/{dump_id}` once, then build run-scoped
+   `author_work`, `indices`, `ratings`, passports and checksums;
+7. precompute the default report bundle and analytical cache once per run so
+   reopening the same slice does not repeat the heavy work;
+8. use backend filtering, sorting, TOP-N selection and custom metric evaluation
+   for interactive tables and analysis;
+9. visualize author-level distributions, boxplots, rank/correlation matrices,
+   ranking tables and quality diagnostics.
 
 Gender and age are not implemented because OpenAlex does not provide those
 fields. City is not a primary OpenAlex filter in this DSS; it should be added
@@ -183,7 +189,7 @@ The core DSS UI remains the main working area. It should provide a small set of
 purpose-built visualizations instead of a separate BI layer:
 
 - subject-slice overview: works by year, country and source;
-- author rankings: top-N by selected index and multi-line metric comparison;
+- author rankings: top-N by selected index and author table selection;
 - relation between indicators: rank-correlation matrices and concise interpretation findings;
 - data quality: NULL/deleted authors, truncated authorships and row-count
   checks.

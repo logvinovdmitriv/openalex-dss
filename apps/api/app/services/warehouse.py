@@ -725,7 +725,10 @@ def _selected_precomputed_index_rows(
         custom_metric_defs=custom_metric_defs,
     )
     effective_data_limit = data_limit
-    query_limit = data_limit
+    # Custom metric sorting and non-native filters must be applied after the
+    # calculated fields are present, so the candidate set cannot be truncated
+    # before Python-side selection.
+    query_limit = 0 if needs_python_selection else data_limit
     query_sort = data_sort if sort_is_native else ""
     payload = query_table(
         "indices",
