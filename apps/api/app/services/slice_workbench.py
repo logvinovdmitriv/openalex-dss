@@ -5,6 +5,7 @@ import re
 import uuid
 import hashlib
 import shutil
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -292,8 +293,9 @@ def list_materialization_plans(limit: int = 50) -> dict[str, Any]:
 
 
 def list_dumps(limit: int = 50) -> dict[str, Any]:
-    dumps = metadata_store.list_slice_dumps(limit=limit)
-    return {"dumps": dumps, "total": len(dumps)}
+    requested_limit = max(1, min(limit, 250))
+    dumps = _merged_dump_records(limit=requested_limit)
+    return {"dumps": dumps[:requested_limit], "total": len(dumps)}
 
 
 def delete_dump(dump_id: str) -> dict[str, Any]:
@@ -541,12 +543,12 @@ def _workbench_workflow(
 ) -> dict[str, Any]:
     rows = {name: int((info or {}).get("rows") or 0) for name, info in tables.items()}
     active_stage = "idle"
-    if any(str(item.get("state") or "") == "materializing" for item in materializations):
-        active_stage = "materializing"
-    elif rows.get("indices", 0) > 0 or rows.get("ratings", 0) > 0:
+    if rows.get("indices", 0) > 0 or rows.get("ratings", 0) > 0:
         active_stage = "analyzed"
     elif rows.get("works", 0) > 0 and rows.get("authorships", 0) > 0:
         active_stage = "tables"
+    elif any(str(item.get("state") or "") == "materializing" for item in materializations):
+        active_stage = "materializing"
     elif dumps:
         active_stage = "ready"
     elif slices:
@@ -704,21 +706,108 @@ def _resolve_dump_record(dump_id: str) -> tuple[str, dict[str, Any] | None]:
     raw_dump_id = str(dump_id or "").strip()
     if not raw_dump_id:
         return "", None
-    exact = metadata_store.get_slice_dump_by_dump_id(raw_dump_id)
+    exact = _metadata_dump_by_id(raw_dump_id)
     if exact:
         return str(exact.get("dump_id") or raw_dump_id), exact
     prefixed = raw_dump_id if raw_dump_id.startswith("dump_") else f"dump_{_safe_id(raw_dump_id)}"
     if prefixed != raw_dump_id:
-        candidate = metadata_store.get_slice_dump_by_dump_id(prefixed)
+        candidate = _metadata_dump_by_id(prefixed)
         if candidate:
             return str(candidate.get("dump_id") or prefixed), candidate
     safe_raw = _safe_id(raw_dump_id)
-    for candidate in metadata_store.list_slice_dumps(limit=250):
+    for candidate in _merged_dump_records(limit=250):
         candidate_id = str(candidate.get("dump_id") or "")
         safe_candidate = _safe_id(candidate_id)
         if safe_candidate == safe_raw or safe_candidate == f"dump_{safe_raw}" or safe_candidate.endswith(f"_{safe_raw}"):
             return candidate_id, candidate
     return raw_dump_id, None
+
+
+def _merged_dump_records(limit: int = 250) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for dump in _metadata_dump_records(limit=limit):
+        dump_id = str(dump.get("dump_id") or "").strip()
+        if dump_id:
+            merged[dump_id] = dump
+    for dump in _filesystem_dump_records(limit=limit):
+        dump_id = str(dump.get("dump_id") or "").strip()
+        if not dump_id:
+            continue
+        merged[dump_id] = {**dump, **merged.get(dump_id, {})}
+    return sorted(
+        merged.values(),
+        key=lambda item: str(item.get("created_at_utc") or item.get("download_finished_at_utc") or ""),
+        reverse=True,
+    )
+
+
+def _metadata_dump_records(limit: int = 250) -> list[dict[str, Any]]:
+    try:
+        return metadata_store.list_slice_dumps(limit=limit)
+    except sqlite3.OperationalError:
+        return []
+
+
+def _metadata_dump_by_id(dump_id: str) -> dict[str, Any] | None:
+    try:
+        return metadata_store.get_slice_dump_by_dump_id(dump_id)
+    except sqlite3.OperationalError:
+        return None
+
+
+def _filesystem_dump_records(limit: int = 250) -> list[dict[str, Any]]:
+    dumps_dir = DATA / "dumps"
+    if not dumps_dir.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    manifests = sorted(dumps_dir.glob("*/dump_manifest.json"), key=_path_mtime, reverse=True)
+    for manifest_path in manifests[: max(1, min(limit, 250))]:
+        manifest = _read_json(manifest_path)
+        if not manifest:
+            continue
+        dump_id = str(manifest.get("dump_id") or manifest_path.parent.name).strip()
+        raw_jsonl = str(manifest.get("raw_jsonl") or "").strip()
+        files_manifest = str(manifest.get("files_manifest") or "").strip()
+        source = {
+            **manifest,
+            "dump_id": dump_id,
+            "slice_id": str(manifest.get("slice_id") or ""),
+            "raw_jsonl": raw_jsonl,
+            "records_downloaded": int(manifest.get("records_downloaded") or 0),
+            "records_expected": manifest.get("records_expected"),
+            "bytes_written": int(manifest.get("bytes_written") or _path_size(raw_jsonl)),
+            "sha256": str(manifest.get("raw_jsonl_sha256") or manifest.get("sha256") or ""),
+            "stop_reason": str(manifest.get("stop_reason") or ""),
+            "created_at_utc": str(manifest.get("created_at_utc") or manifest.get("download_finished_at_utc") or ""),
+            "source_mode": str(manifest.get("source_mode") or "openalex_cli"),
+            "scientific_completeness": str(manifest.get("scientific_completeness") or ""),
+            "allowed_for_final_analysis": bool(manifest.get("allowed_for_final_analysis")),
+            "openalex_filter": str((manifest.get("openalex_request") or {}).get("filter") or manifest.get("openalex_filter") or ""),
+            "estimate_signature": str((manifest.get("signatures") or {}).get("estimate_signature") or manifest.get("estimate_signature") or ""),
+            "download_signature": str((manifest.get("signatures") or {}).get("download_signature") or manifest.get("download_signature") or ""),
+            "files_manifest": files_manifest,
+            "dump_manifest": str(manifest_path),
+            "manifest_path": str(manifest_path),
+            "source": "filesystem",
+        }
+        records.append(source)
+    return records
+
+
+def _path_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _path_size(path: str) -> int:
+    if not path:
+        return 0
+    try:
+        return Path(path).stat().st_size
+    except OSError:
+        return 0
 
 
 def _recent_run_for_dump(dump_id: str) -> str:

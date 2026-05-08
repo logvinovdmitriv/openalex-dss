@@ -223,7 +223,7 @@ function Workbench() {
   const [filters, setFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
   const [metric, setMetric] = useState("h");
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
-  const [topN, setTopN] = useState(0);
+  const [topN, setTopN] = useState(100);
   const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
   const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "g", "iupv", "islv", "custom_added_rating"]);
   const [baselineMetric, setBaselineMetric] = useState("h");

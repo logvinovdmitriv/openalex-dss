@@ -77,7 +77,7 @@ def get_run(run_id: str) -> dict[str, Any]:
     path = _run_path(run_id)
     if not path.exists():
         raise KeyError(run_id)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _normalize_loaded_run(json.loads(path.read_text(encoding="utf-8")))
 
 
 def update_progress(run_id: str, percent: int, stage: str, extra: dict[str, Any] | None = None) -> None:
@@ -94,7 +94,7 @@ def list_runs(limit: int = 20) -> dict[str, Any]:
     docs: list[dict[str, Any]] = []
     for path in sorted(RUNS_DIR.glob("run_*/run_status.json"), reverse=True):
         try:
-            docs.append(json.loads(path.read_text(encoding="utf-8")))
+            docs.append(_normalize_loaded_run(json.loads(path.read_text(encoding="utf-8"))))
         except json.JSONDecodeError:
             continue
         if len(docs) >= limit:
@@ -151,6 +151,26 @@ def _save(doc: dict[str, Any]) -> None:
     path.write_text(payload, encoding="utf-8", newline="\n")
     with _LOCK:
         _RUNS[run_id] = dict(doc)
+
+
+def _normalize_loaded_run(doc: dict[str, Any]) -> dict[str, Any]:
+    status = str(doc.get("status") or "")
+    run_id = str(doc.get("run_id") or "")
+    with _LOCK:
+        in_memory = run_id in _RUNS or run_id in _RUN_EXECUTION_PAYLOADS
+    if status in {"queued", "running"} and not in_memory:
+        doc = dict(doc)
+        doc["status"] = "failed"
+        doc["progress_percent"] = 100
+        doc["progress_stage"] = "failed"
+        doc["finished_at"] = doc.get("finished_at") or _now()
+        doc["error"] = (
+            "Задача была прервана при остановке сервера. "
+            "Если локальный срез уже скачан, выберите его в списке срезов и запустите расчет индексов."
+        )
+        if run_id:
+            _save(doc)
+    return doc
 
 
 def _run_path(run_id: str) -> Path:

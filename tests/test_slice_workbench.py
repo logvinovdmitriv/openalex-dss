@@ -163,6 +163,74 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(write_context.call_args.kwargs["run_id"], "run_short")
         self.assertEqual(write_context.call_args.kwargs["dump_id"], "dump_abc123")
 
+    def test_list_dumps_includes_filesystem_manifests_when_metadata_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            dump_dir = data / "dumps/dump_disk"
+            dump_dir.mkdir(parents=True)
+            raw_jsonl = data / "raw/openalex_cli/slice_disk/works.jsonl.gz"
+            raw_jsonl.parent.mkdir(parents=True)
+            raw_jsonl.write_text("payload", encoding="utf-8")
+            (dump_dir / "dump_manifest.json").write_text(
+                """{
+                  "dump_id": "dump_disk",
+                  "slice_id": "slice_disk",
+                  "raw_jsonl": "%s",
+                  "records_downloaded": 42,
+                  "bytes_written": 7,
+                  "created_at_utc": "2026-05-08T08:39:23Z",
+                  "scientific_completeness": "complete",
+                  "allowed_for_final_analysis": true,
+                  "openalex_request": {"filter": "publication_year:2026"},
+                  "signatures": {"estimate_signature": "estimate", "download_signature": "download"}
+                }
+                """
+                % str(raw_jsonl),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(slice_workbench, "DATA", data),
+                patch.object(slice_workbench.metadata_store, "list_slice_dumps", return_value=[]),
+            ):
+                result = slice_workbench.list_dumps()
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["dumps"][0]["dump_id"], "dump_disk")
+        self.assertEqual(result["dumps"][0]["records_downloaded"], 42)
+        self.assertEqual(result["dumps"][0]["source"], "filesystem")
+
+    def test_select_dump_uses_filesystem_manifest_when_metadata_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            dump_dir = data / "dumps/dump_disk"
+            dump_dir.mkdir(parents=True)
+            (dump_dir / "dump_manifest.json").write_text(
+                """{
+                  "dump_id": "dump_disk",
+                  "slice_id": "slice_disk",
+                  "records_downloaded": 42,
+                  "allowed_for_final_analysis": true,
+                  "scientific_completeness": "complete"
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(slice_workbench, "DATA", data),
+                patch.object(slice_workbench.metadata_store, "get_slice_dump_by_dump_id", return_value=None),
+                patch.object(slice_workbench.metadata_store, "list_slice_dumps", return_value=[]),
+                patch.object(slice_workbench, "_recent_run_for_dump", return_value=""),
+                patch.object(slice_workbench.artifact_context, "write_active_context", return_value={"active_dump_id": "dump_disk"}) as write_context,
+            ):
+                result = slice_workbench.select_dump("dump_disk")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["dump"]["dump_id"], "dump_disk")
+        write_context.assert_called_once()
+        self.assertEqual(write_context.call_args.kwargs["dump_id"], "dump_disk")
+
     def test_workbench_summary_carries_quality_and_slice_centric_workflow(self) -> None:
         quality = {"quality_counts": {"works_without_authorships": 2, "authorships_null_author_id": 1}}
         active_context = {
@@ -277,6 +345,28 @@ class SliceWorkbenchTests(unittest.TestCase):
             summary = slice_workbench.workbench_summary()
 
         self.assertEqual(summary["workflow"]["active_stage"], "materializing")
+
+    def test_workbench_summary_prefers_ready_active_tables_over_stale_materialization(self) -> None:
+        active_context = {"active_run_id": "run_a", "active_dump_id": "dump_a"}
+        with (
+            patch.object(
+                slice_workbench.warehouse,
+                "list_tables",
+                return_value={"works": {"rows": 3}, "authorships": {"rows": 4}, "indices": {"rows": 2}},
+            ),
+            patch.object(slice_workbench.warehouse, "read_json_doc", return_value={}),
+            patch.object(slice_workbench.artifact_context, "read_active_context", return_value=active_context),
+            patch.object(slice_workbench, "list_slices", return_value={"slices": [{"slice_id": "slice_a", "state": "ready"}], "total": 1}),
+            patch.object(
+                slice_workbench,
+                "list_materialization_plans",
+                return_value={"materializations": [{"materialization_id": "mat_a", "state": "materializing"}]},
+            ),
+            patch.object(slice_workbench, "list_dumps", return_value={"dumps": [{"dump_id": "dump_a"}], "total": 1}),
+        ):
+            summary = slice_workbench.workbench_summary()
+
+        self.assertEqual(summary["workflow"]["active_stage"], "analyzed")
 
     def test_keyword_and_search_modes_do_not_require_subject(self) -> None:
         keyword_cfg = author_slice.config_from_payload(

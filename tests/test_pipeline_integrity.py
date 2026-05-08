@@ -188,6 +188,40 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(run["status"], "queued")
         self.assertEqual(run["artifacts"], {})
 
+    def test_stale_running_run_is_marked_failed_after_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp) / "runs"
+            run_dir = runs_dir / "run_stale"
+            run_dir.mkdir(parents=True)
+            (run_dir / "run_status.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run_stale",
+                        "action": "build_from_openalex",
+                        "status": "running",
+                        "progress_percent": 96,
+                        "progress_stage": "Нормализация локального среза",
+                        "created_at": "2026-05-08T07:42:25Z",
+                        "started_at": "2026-05-08T07:42:25Z",
+                        "finished_at": None,
+                        "error": None,
+                        "payload": {},
+                        "result": None,
+                        "artifacts": {},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            with jobs._LOCK:
+                jobs._RUNS.clear()
+                jobs._RUN_EXECUTION_PAYLOADS.clear()
+            with patch.object(jobs, "RUNS_DIR", runs_dir):
+                run = jobs.get_run("run_stale")
+
+        self.assertEqual(run["status"], "failed")
+        self.assertIn("Задача была прервана", run["error"])
+
     def test_local_file_import_is_not_a_job_action(self) -> None:
         self.assertEqual(materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS, {"fetch_slice_dump", "build_from_openalex"})
 

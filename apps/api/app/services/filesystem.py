@@ -60,6 +60,7 @@ def storage_overview() -> dict[str, Any]:
                 "exists": path.exists(),
                 "files_count": _count_files(path),
                 "bytes": _dir_size(path),
+                "recursive": False,
             }
         )
     return {
@@ -174,10 +175,10 @@ def _source_kind(path: Path) -> str:
 def _count_files(path: Path) -> int:
     if not path.exists():
         return 0
-    return sum(1 for item in path.rglob("*") if item.is_file())
+    return sum(1 for item in path.iterdir() if item.is_file())
 
 
 def _dir_size(path: Path) -> int:
     if not path.exists():
         return 0
-    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+    return sum(item.stat().st_size for item in path.iterdir() if item.is_file())

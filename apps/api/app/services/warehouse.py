@@ -156,8 +156,7 @@ def count_rows(table: str, *, run_id: str = "", dump_id: str = "") -> int:
         return 0
     if path.suffix.lower() == ".csv":
         return _count_csv_rows(path)
-    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
-        return int(conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+    return _count_parquet_rows(path)
 
 
 def _count_csv_rows(path: Path) -> int:
@@ -165,6 +164,12 @@ def _count_csv_rows(path: Path) -> int:
     # the UI status endpoint fast without opening DuckDB for every table.
     with path.open("rb") as handle:
         return max(0, sum(1 for _ in handle) - 1)
+
+
+def _count_parquet_rows(path: Path) -> int:
+    escaped_path = str(path).replace("'", "''")
+    with duckdb.connect(":memory:") as conn:
+        return int(conn.execute(f"SELECT count(*) FROM read_parquet('{escaped_path}')").fetchone()[0])
 
 
 def table_schema(table: str, *, run_id: str = "", dump_id: str = "") -> list[str]:
