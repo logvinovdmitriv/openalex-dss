@@ -499,7 +499,6 @@ def rank_comparisons(
             "top_overlap": top_overlap_exact,
             "jaccard_top_n_exact": jaccard_exact,
             "jaccard_top_n": jaccard_exact,
-            "rank_shift_count": len(common_author_ids),
             "largest_shifts": sorted((item[3] for item in largest_shifts_heap), key=lambda item: (-int(item["abs_rank_delta"]), str(item["author_id"]))),
         }
     return {"comparisons": comparisons, "top_overlap": top_overlap}
@@ -512,46 +511,6 @@ def _ordered_top_authors(metric_ranks: dict[str, int], limit: int) -> list[str]:
     if limit >= len(metric_ranks):
         return [author_id for author_id, _ in sorted(metric_ranks.items(), key=key)]
     return [author_id for author_id, _ in heapq.nsmallest(limit, metric_ranks.items(), key=key)]
-
-
-def build_rank_shift_export_rows(
-    *,
-    fraction_mode: str,
-    metrics: list[str] | tuple[str, ...] | None = None,
-    baseline_metric: str = "h",
-    filters: dict[str, Any] | None = None,
-    run_id: str = "",
-    dump_id: str = "",
-    cohort_id: str = "",
-    cohort_filter_policy: str = "membership",
-    top_n: int = 100,
-    data_filters: dict[str, Any] | None = None,
-    data_search: str = "",
-    author_ids: list[str] | set[str] | tuple[str, ...] | None = None,
-    data_sort: str = "",
-    data_direction: str = "desc",
-    data_limit: int = 0,
-    custom_metric_defs: list[dict[str, str]] | None = None,
-) -> list[dict[str, Any]]:
-    context = _analysis_context(
-        fraction_mode=fraction_mode,
-        metrics=metrics,
-        baseline_metric=baseline_metric,
-        filters=filters,
-        run_id=run_id,
-        dump_id=dump_id,
-        cohort_id=cohort_id,
-        cohort_filter_policy=cohort_filter_policy,
-        top_n=top_n,
-        data_filters=data_filters,
-        data_search=data_search,
-        author_ids=author_ids,
-        data_sort=data_sort,
-        data_direction=data_direction,
-        data_limit=data_limit,
-        custom_metric_defs=custom_metric_defs,
-    )
-    return rank_shift_rows(context["rows"], context["metrics"], baseline_metric=context["baseline_metric"])
 
 
 def build_outlier_export_rows(
@@ -592,45 +551,6 @@ def build_outlier_export_rows(
         custom_metric_defs=custom_metric_defs,
     )
     return outlier_rows(context["rows"], context["metrics"])
-
-
-def rank_shift_rows(
-    rows: list[dict[str, Any]],
-    metrics: list[str] | tuple[str, ...],
-    *,
-    baseline_metric: str = "h",
-    sort_output: bool = True,
-) -> list[dict[str, Any]]:
-    selected = list(metrics)
-    ranks = {metric: _competition_ranks(rows, metric) for metric in selected}
-    baseline_ranks = ranks.get(baseline_metric, {})
-    author_names = {
-        str(row.get("author_id") or ""): str(row.get("author_display_name") or row.get("display_name") or "")
-        for row in rows
-        if str(row.get("author_id") or "").strip()
-    }
-    payload: list[dict[str, Any]] = []
-    for metric in selected:
-        if metric == baseline_metric:
-            continue
-        metric_ranks = ranks.get(metric, {})
-        for author_id in sorted(set(baseline_ranks) & set(metric_ranks)):
-            rank_delta = metric_ranks[author_id] - baseline_ranks[author_id]
-            payload.append(
-                {
-                    "baseline_metric": baseline_metric,
-                    "compare_metric": metric,
-                    "author_id": author_id,
-                    "author_display_name": author_names.get(author_id, ""),
-                    "baseline_rank": baseline_ranks[author_id],
-                    "metric_rank": metric_ranks[author_id],
-                    "rank_delta": rank_delta,
-                    "abs_rank_delta": abs(rank_delta),
-                }
-            )
-    if not sort_output:
-        return payload
-    return sorted(payload, key=lambda item: (str(item["compare_metric"]), -int(item["abs_rank_delta"]), str(item["author_id"])))
 
 
 def outlier_rows(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> list[dict[str, Any]]:
@@ -1021,7 +941,7 @@ def _distribution_findings(metrics: list[str], descriptive: dict[str, Any], norm
                     severity="high" if tie_rate >= 0.60 else "medium",
                     evidence={"tie_rate": tie_rate, "threshold": FINDING_THRESHOLDS["tie_rate"]},
                     text=f"Метрика {metric} дает много одинаковых значений; она полезна как грубый показатель, но хуже подходит для тонкого ранжирования.",
-                    recommendation="Сопоставлять с более непрерывными индексами и rank-shift таблицами.",
+                    recommendation="Сопоставлять с более непрерывными индексами и матрицей связи показателей.",
                 )
             )
     return findings
@@ -1067,7 +987,7 @@ def _scorecard_findings(metrics: list[str], metric_scorecard: dict[str, Any]) ->
             finding_recommendation = recommendation
             if dependency_key == "top1_dominance_dependence" and direction == "negative":
                 finding_text = "Индекс обратно связан с top1_share; это указывает на корректирующее действие штрафа концентрации, а не на завышение авторов одной сверхцитируемой работой."
-                finding_recommendation = "Использовать как корректирующий показатель и проверять rank shifts относительно C и h."
+                finding_recommendation = "Использовать как корректирующий показатель и проверять связь мест относительно цитирований и индекса Хирша."
             findings.append(
                 _finding(
                     id=f"{finding_type}:{metric}",
@@ -1233,7 +1153,7 @@ def _rank_findings(
                         "p90_threshold": instability_delta_threshold,
                     },
                     text=f"Переход от {baseline_metric} к {metric} существенно меняет позиции части авторов; индекс отражает другой аспект публикационного профиля.",
-                    recommendation="Разобрать крупнейшие изменения в rank-shifts.csv и largest-rank-shifts.csv.",
+                    recommendation="Проверить матрицу связи показателей и решить, нужен ли этот индекс как отдельная перспектива ранжирования.",
                 )
             )
 

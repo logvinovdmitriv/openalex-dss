@@ -41,7 +41,6 @@ class ValidationScriptTests(unittest.TestCase):
             self.assertEqual(manifest["rank_top_n"], 5)
             self.assertEqual(manifest["n_authors"], 5)
             self.assertFalse(manifest["analysis_eligibility"]["allowed_for_final_analysis"])
-            self.assertIn("largest_rank_shifts_csv", manifest["artifacts"])
             self.assertIn("top_outliers_csv", manifest["artifacts"])
             for name, path in manifest["artifacts"].items():
                 self.assertTrue(Path(path).is_file(), name)

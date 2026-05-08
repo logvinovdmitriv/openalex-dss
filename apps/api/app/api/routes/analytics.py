@@ -632,31 +632,6 @@ def scientometric_correlations_csv(request: Request) -> Response:
     return _csv_response(fields, _scientometric_correlation_rows(payload), filename="openalex_dss_scientometrics_correlations.csv", headers=_scope_response_headers(payload))
 
 
-@router.get("/analytics/scientometrics/rank-shifts.csv")
-def scientometric_rank_shifts_csv(request: Request) -> Response:
-    try:
-        payload = _scientometric_export_payload_from_request(request)
-        rows = scientometrics.build_rank_shift_export_rows(**_scientometric_kwargs_from_request(request))
-    except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    fields = ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"]
-    return _csv_response(fields, rows, filename="openalex_dss_scientometrics_rank_shifts.csv", headers=_scope_response_headers(payload))
-
-
-@router.get("/analytics/scientometrics/largest-rank-shifts.csv")
-def scientometric_largest_rank_shifts_csv(request: Request) -> Response:
-    try:
-        payload = _scientometric_export_payload_from_request(request)
-    except cohorts.CohortNotFound as exc:
-        raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    fields = ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"]
-    return _csv_response(fields, _scientometric_largest_rank_shift_rows(payload), filename="openalex_dss_scientometrics_largest_rank_shifts.csv", headers=_scope_response_headers(payload))
-
-
 @router.get("/analytics/scientometrics/outliers.csv")
 def scientometric_outliers_csv(request: Request) -> Response:
     try:
@@ -917,26 +892,6 @@ def _scientometric_correlation_rows(payload: dict[str, Any]) -> list[dict[str, A
                 continue
             for right_metric, value in right_values.items():
                 rows.append({"method": method, "left_metric": left_metric, "right_metric": right_metric, "value": value})
-    return rows
-
-
-def _scientometric_largest_rank_shift_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    comparisons = payload.get("rank_comparisons") or {}
-    rows: list[dict[str, Any]] = []
-    for compare_metric, comparison in comparisons.items():
-        for row in (comparison or {}).get("largest_shifts") or []:
-            rows.append(
-                {
-                    "baseline_metric": (comparison or {}).get("baseline_metric") or (payload.get("scope") or {}).get("baseline_metric"),
-                    "compare_metric": compare_metric,
-                    "author_id": row.get("author_id"),
-                    "author_display_name": row.get("author_display_name"),
-                    "baseline_rank": row.get("baseline_rank"),
-                    "metric_rank": row.get("metric_rank"),
-                    "rank_delta": row.get("rank_delta"),
-                    "abs_rank_delta": row.get("abs_rank_delta"),
-                }
-            )
     return rows
 
 

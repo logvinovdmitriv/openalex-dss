@@ -89,8 +89,6 @@ validation/scientometric_validation_manifest.json
 validation/exports/validation_scientometric/scientometrics.json
 validation/exports/validation_scientometric/descriptive.csv
 validation/exports/validation_scientometric/correlations.csv
-validation/exports/validation_scientometric/rank-shifts.csv
-validation/exports/validation_scientometric/largest-rank-shifts.csv
 validation/exports/validation_scientometric/outliers.csv
 validation/exports/validation_scientometric/top-outliers.csv
 validation/exports/validation_scientometric/findings.csv
@@ -133,8 +131,6 @@ rank_top_n: 5
 scientometrics_json
 scientometrics_descriptive_csv
 scientometrics_correlations_csv
-scientometrics_rank_shifts_csv
-scientometrics_largest_rank_shifts_csv
 scientometrics_outliers_csv
 scientometrics_top_outliers_csv
 scientometrics_findings_csv
@@ -148,8 +144,6 @@ scientometrics_conclusion_md
 ```text
 descriptive.csv: 7 lines
 correlations.csv: 109 lines
-rank-shifts.csv: 26 lines
-largest-rank-shifts.csv: 26 lines
 outliers.csv: 2 lines
 top-outliers.csv: 2 lines
 findings.csv: 22 lines

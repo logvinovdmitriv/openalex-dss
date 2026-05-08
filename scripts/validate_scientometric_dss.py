@@ -117,16 +117,6 @@ def main() -> None:
     _write_csv(exports_dir / "descriptive.csv", _descriptive_rows(payload), _descriptive_fields())
     _write_csv(exports_dir / "correlations.csv", _correlation_rows(payload), ["method", "left_metric", "right_metric", "value"])
     _write_csv(
-        exports_dir / "rank-shifts.csv",
-        scientometrics.build_rank_shift_export_rows(**analysis_kwargs),
-        ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"],
-    )
-    _write_csv(
-        exports_dir / "largest-rank-shifts.csv",
-        _largest_rank_shift_rows(payload),
-        ["baseline_metric", "compare_metric", "author_id", "author_display_name", "baseline_rank", "metric_rank", "rank_delta", "abs_rank_delta"],
-    )
-    _write_csv(
         exports_dir / "outliers.csv",
         scientometrics.build_outlier_export_rows(**analysis_kwargs),
         ["metric", "author_id", "author_display_name", "value", "rule", "lower_fence", "upper_fence"],
@@ -144,8 +134,6 @@ def main() -> None:
         "scientometrics_json": str(exports_dir / "scientometrics.json"),
         "descriptive_csv": str(exports_dir / "descriptive.csv"),
         "correlations_csv": str(exports_dir / "correlations.csv"),
-        "rank_shifts_csv": str(exports_dir / "rank-shifts.csv"),
-        "largest_rank_shifts_csv": str(exports_dir / "largest-rank-shifts.csv"),
         "outliers_csv": str(exports_dir / "outliers.csv"),
         "top_outliers_csv": str(exports_dir / "top-outliers.csv"),
         "findings_csv": str(exports_dir / "findings.csv"),
@@ -332,26 +320,6 @@ def _correlation_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _largest_rank_shift_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for compare_metric, comparison in (payload.get("rank_comparisons") or {}).items():
-        comparison = comparison or {}
-        for row in comparison.get("largest_shifts") or []:
-            rows.append(
-                {
-                    "baseline_metric": comparison.get("baseline_metric") or (payload.get("scope") or {}).get("baseline_metric"),
-                    "compare_metric": compare_metric,
-                    "author_id": row.get("author_id"),
-                    "author_display_name": row.get("author_display_name"),
-                    "baseline_rank": row.get("baseline_rank"),
-                    "metric_rank": row.get("metric_rank"),
-                    "rank_delta": row.get("rank_delta"),
-                    "abs_rank_delta": row.get("abs_rank_delta"),
-                }
-            )
-    return rows
-
-
 def _top_outlier_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     boxplots = payload.get("boxplots") or {}
@@ -440,8 +408,6 @@ def _assert_validation_invariants(
         "scientometrics_json",
         "scientometrics_descriptive_csv",
         "scientometrics_correlations_csv",
-        "scientometrics_rank_shifts_csv",
-        "scientometrics_largest_rank_shifts_csv",
         "scientometrics_outliers_csv",
         "scientometrics_top_outliers_csv",
         "scientometrics_findings_csv",

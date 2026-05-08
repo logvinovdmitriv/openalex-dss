@@ -1619,8 +1619,6 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(bundle["report_scope"]["rank_top_n"], 25)
         self.assertIn("metrics=h%2Cg%2Cislv", bundle["exports"]["scientometrics_json"])
         self.assertIn("baseline_metric=g", bundle["exports"]["scientometrics_correlations_csv"])
-        self.assertIn("top_n=25", bundle["exports"]["scientometrics_rank_shifts_csv"])
-        self.assertIn("largest-rank-shifts.csv", bundle["exports"]["scientometrics_largest_rank_shifts_csv"])
         self.assertIn("top-outliers.csv", bundle["exports"]["scientometrics_top_outliers_csv"])
         self.assertIn("findings.csv", bundle["exports"]["scientometrics_findings_csv"])
         self.assertIn("conclusion.md", bundle["exports"]["scientometrics_conclusion_md"])
@@ -1629,7 +1627,6 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIn("kind=works", bundle["exports"]["local_works_csv"])
         self.assertIn("kind=authorships", bundle["exports"]["local_authorships_csv"])
         self.assertIn("kind=work_topics", bundle["exports"]["local_work_topics_csv"])
-        self.assertEqual(bundle["export_notes"]["scientometrics_rank_shifts_csv"], "Contains all rank deltas for every author present in both baseline and comparison metric ranks.")
         self.assertEqual(bundle["export_notes"]["scientometrics_findings_csv"], "Contains structured interpretation findings with evidence JSON for the selected scientometric analysis scope.")
         self.assertEqual(bundle["export_notes"]["scientometrics_conclusion_md"], "Contains the deterministic conclusion draft rendered as Markdown for the selected scientometric analysis scope.")
 

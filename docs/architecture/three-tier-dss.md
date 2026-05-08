@@ -182,7 +182,7 @@ purpose-built visualizations instead of a separate BI layer:
 
 - subject-slice overview: works by year, country and source;
 - author rankings: top-N by selected index and multi-line metric comparison;
-- rank stability: Spearman, Kendall tau-b, top-N overlap and sensitivity tables;
+- relation between indicators: rank-correlation matrices and concise interpretation findings;
 - data quality: NULL/deleted authors, truncated authorships and row-count
   checks.
 

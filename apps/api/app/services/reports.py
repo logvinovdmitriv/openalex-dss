@@ -238,8 +238,6 @@ def build_report_bundle(
         "scientometrics_json": f"/api/v1/analytics/scientometrics.json?{scientometric_query}",
         "scientometrics_descriptive_csv": f"/api/v1/analytics/scientometrics/descriptive.csv?{scientometric_query}",
         "scientometrics_correlations_csv": f"/api/v1/analytics/scientometrics/correlations.csv?{scientometric_query}",
-        "scientometrics_rank_shifts_csv": f"/api/v1/analytics/scientometrics/rank-shifts.csv?{scientometric_query}",
-        "scientometrics_largest_rank_shifts_csv": f"/api/v1/analytics/scientometrics/largest-rank-shifts.csv?{scientometric_query}",
         "scientometrics_outliers_csv": f"/api/v1/analytics/scientometrics/outliers.csv?{scientometric_query}",
         "scientometrics_top_outliers_csv": f"/api/v1/analytics/scientometrics/top-outliers.csv?{scientometric_query}",
         "scientometrics_findings_csv": f"/api/v1/analytics/scientometrics/findings.csv?{scientometric_query}",
@@ -291,8 +289,6 @@ def build_report_bundle(
         "checksums": checksums,
         "exports": exports,
         "export_notes": {
-            "scientometrics_rank_shifts_csv": "Contains all rank deltas for every author present in both baseline and comparison metric ranks.",
-            "scientometrics_largest_rank_shifts_csv": "Contains the compact largest-shifts table used by the UI panel.",
             "scientometrics_outliers_csv": "Contains all IQR outliers for the selected scientometric metrics.",
             "scientometrics_top_outliers_csv": "Contains the compact top outlier rows exposed in the scientometric JSON/boxplot payload.",
             "scientometrics_findings_csv": "Contains structured interpretation findings with evidence JSON for the selected scientometric analysis scope.",

@@ -403,28 +403,6 @@ class AnalyticsRouteTests(unittest.TestCase):
                 "limitations": ["Метрики не заменяют экспертную оценку."],
             },
         }
-        full_rank_shift_rows = [
-            {
-                "baseline_metric": "h",
-                "compare_metric": "g",
-                "author_id": "https://openalex.org/A1",
-                "author_display_name": "Author One",
-                "baseline_rank": 1,
-                "metric_rank": 3,
-                "rank_delta": 2,
-                "abs_rank_delta": 2,
-            },
-            {
-                "baseline_metric": "h",
-                "compare_metric": "g",
-                "author_id": "https://openalex.org/A2",
-                "author_display_name": "Author Two",
-                "baseline_rank": 2,
-                "metric_rank": 2,
-                "rank_delta": 0,
-                "abs_rank_delta": 0,
-            },
-        ]
         full_outlier_rows = [
             {
                 "metric": "c",
@@ -439,13 +417,10 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         with (
             patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload),
-            patch.object(analytics_routes.scientometrics, "build_rank_shift_export_rows", return_value=full_rank_shift_rows),
             patch.object(analytics_routes.scientometrics, "build_outlier_export_rows", return_value=full_outlier_rows),
         ):
             descriptive = analytics_routes.scientometric_descriptive_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g", baseline_metric="h", top_n=20))
             correlations = analytics_routes.scientometric_correlations_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g"))
-            rank_shifts = analytics_routes.scientometric_rank_shifts_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g"))
-            largest_rank_shifts = analytics_routes.scientometric_largest_rank_shifts_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g"))
             outliers = analytics_routes.scientometric_outliers_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,c"))
             top_outliers = analytics_routes.scientometric_top_outliers_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,c"))
             findings = analytics_routes.scientometric_findings_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,c"))
@@ -456,10 +431,6 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertIn("h,2,0", descriptive.body.decode("utf-8"))
         self.assertIn("method,left_metric,right_metric,value", correlations.body.decode("utf-8"))
         self.assertIn("kendall_tau_b,h,g,0.4", correlations.body.decode("utf-8"))
-        self.assertIn("baseline_metric,compare_metric,author_id", rank_shifts.body.decode("utf-8"))
-        self.assertIn("h,g,https://openalex.org/A1", rank_shifts.body.decode("utf-8"))
-        self.assertIn("h,g,https://openalex.org/A2", rank_shifts.body.decode("utf-8"))
-        self.assertIn("h,g,https://openalex.org/A1", largest_rank_shifts.body.decode("utf-8"))
         self.assertIn("metric,author_id,author_display_name,value,rule,lower_fence,upper_fence", outliers.body.decode("utf-8"))
         self.assertIn("c,https://openalex.org/A2,Author Two,99,iqr_1_5,0,10", outliers.body.decode("utf-8"))
         self.assertIn("c,https://openalex.org/A2,Author Two,99,iqr_1_5,0,10", top_outliers.body.decode("utf-8"))
