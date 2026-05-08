@@ -784,19 +784,24 @@ input[aria-invalid="true"] {
   background: #f1fbff;
 }
 
-.metric-option-card label {
-  display: flex;
+.metric-option-toggle {
+  display: grid;
+  justify-content: stretch;
+  justify-items: start;
   min-width: 0;
-  gap: 8px;
-  align-items: center;
-  cursor: pointer;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
 }
 
-.metric-option-card input {
-  margin: 0;
+.metric-option-toggle:hover {
+  border-color: transparent;
 }
 
-.metric-option-card label > span {
+.metric-option-toggle > span {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -889,6 +894,178 @@ input[aria-invalid="true"] {
   background: #f8fbfd;
   color: #172127;
   white-space: normal;
+}
+
+.formula-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-soft);
+}
+
+.formula-summary div,
+.formula-summary span {
+  min-width: 0;
+}
+
+.formula-summary span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.formula-modal {
+  display: grid;
+  gap: 14px;
+  width: min(980px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.modal-head {
+  align-items: start;
+}
+
+.modal-head > div {
+  min-width: 0;
+}
+
+.modal-head h2,
+.modal-head p {
+  margin-right: 8px;
+}
+
+.icon-button {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.formula-builder {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.formula-builder-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.formula-builder-head > div {
+  min-width: 0;
+}
+
+.formula-builder-head h3,
+.formula-builder-head p {
+  margin: 0;
+}
+
+.formula-builder-head p,
+.formula-example span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.formula-example {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #dfe8ef;
+  border-radius: 8px;
+  padding: 11px;
+  background: #f8fbfd;
+}
+
+.formula-example code,
+.custom-metric-row code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: #eef5f8;
+  color: #17313d;
+  white-space: nowrap;
+}
+
+.formula-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.formula-token-section {
+  display: grid;
+  gap: 8px;
+}
+
+.formula-token-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.formula-token-grid.compact .choice-pill {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.formula-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.custom-metric-list {
+  display: grid;
+  gap: 8px;
+}
+
+.custom-metric-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.custom-metric-row.active {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+}
+
+.custom-metric-row > div:first-child {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.choice-pill.danger {
+  border-color: #f0b6b0;
+  color: var(--danger);
 }
 
 .cohort-list {
@@ -2083,7 +2260,32 @@ input[aria-invalid="true"] {
   .form-grid.tight,
   .passport-grid,
   .metric-option-grid,
+  .formula-summary,
+  .formula-builder-head,
+  .formula-form-grid,
+  .custom-metric-row,
   .boxplot-simple-row {
+    grid-template-columns: 1fr;
+  }
+
+  .formula-modal {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+    padding: 12px;
+  }
+
+  .formula-actions,
+  .row-actions {
+    justify-content: stretch;
+  }
+
+  .formula-actions button,
+  .row-actions button,
+  .formula-summary button {
+    width: 100%;
+  }
+
+  .distribution-small-multiples {
     grid-template-columns: 1fr;
   }
 

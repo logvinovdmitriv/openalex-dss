@@ -4,7 +4,7 @@ import math
 from statistics import NormalDist
 from typing import Any
 
-from app.services import cohorts, warehouse
+from app.services import cohorts, custom_metrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
@@ -63,6 +63,7 @@ def build_scientometric_analysis(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     context = _analysis_context(
         fraction_mode=fraction_mode,
@@ -80,6 +81,7 @@ def build_scientometric_analysis(
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
     selected_metrics = context["metrics"]
     baseline_metric = context["baseline_metric"]
@@ -106,6 +108,7 @@ def build_scientometric_analysis(
         rank_top_n=rank_top_n,
         boxplots=boxplots,
         correlations=correlations,
+        custom_metric_catalog=context["custom_metrics"],
     )
     findings = interpretation_findings(
         metrics=selected_metrics,
@@ -138,6 +141,7 @@ def build_scientometric_analysis(
         "n_authors": len(rows),
         "metric_scope": "filtered_recomputed",
         "percentile_scope": "current filtered author set",
+        "custom_metrics": context["custom_metrics"],
     }
     conclusion = conclusion_draft(
         findings=findings,
@@ -153,6 +157,7 @@ def build_scientometric_analysis(
         "scope": analysis_scope,
         "cohort_context": cohort_context,
         "metrics": selected_metrics,
+        "custom_metrics": context["custom_metrics"],
         "n_authors": len(rows),
         "descriptive": descriptive,
         "boxplots": boxplots,
@@ -275,6 +280,7 @@ def build_rank_shift_export_rows(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     context = _analysis_context(
         fraction_mode=fraction_mode,
@@ -287,9 +293,12 @@ def build_rank_shift_export_rows(
         cohort_filter_policy=cohort_filter_policy,
         top_n=top_n,
         data_filters=data_filters,
+        data_search=data_search,
+        author_ids=author_ids,
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
     return rank_shift_rows(context["rows"], context["metrics"], baseline_metric=context["baseline_metric"])
 
@@ -311,6 +320,7 @@ def build_outlier_export_rows(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     context = _analysis_context(
         fraction_mode=fraction_mode,
@@ -323,9 +333,12 @@ def build_outlier_export_rows(
         cohort_filter_policy=cohort_filter_policy,
         top_n=top_n,
         data_filters=data_filters,
+        data_search=data_search,
+        author_ids=author_ids,
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
     return outlier_rows(context["rows"], context["metrics"])
 
@@ -869,6 +882,24 @@ def _metric_list_text(metrics: list[str]) -> str:
     return ", ".join(labels[:-1]) + f" и {labels[-1]}"
 
 
+def _metric_list_text_for_catalog(metrics: list[str], custom_metric_catalog: list[dict[str, Any]] | None = None) -> str:
+    if not metrics:
+        return "нет"
+    labels = [_metric_label_for_catalog(metric, custom_metric_catalog) for metric in metrics]
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} и {labels[1]}"
+    return ", ".join(labels[:-1]) + f" и {labels[-1]}"
+
+
+def _metric_label_for_catalog(metric: str, custom_metric_catalog: list[dict[str, Any]] | None = None) -> str:
+    for item in custom_metric_catalog or []:
+        if str(item.get("value") or item.get("id") or "") == metric:
+            return str(item.get("label") or metric)
+    return _metric_label(metric)
+
+
 def _metric_label(metric: str) -> str:
     labels = {
         "p": "Публикации",
@@ -1050,10 +1081,11 @@ def _analysis_context(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    selected_metrics = _select_metrics(metrics)
+    selected_metrics = _select_metrics(metrics, custom_metric_defs)
     baseline_metric = str(baseline_metric or "h").strip() or "h"
-    if baseline_metric not in warehouse.INDEX_NUMERIC_FIELDS:
+    if baseline_metric not in warehouse.INDEX_NUMERIC_FIELDS and baseline_metric not in {item["id"] for item in custom_metric_defs or []}:
         raise ValueError(f"Unsupported baseline_metric: {baseline_metric}")
     if baseline_metric not in selected_metrics:
         selected_metrics = [baseline_metric, *selected_metrics]
@@ -1107,8 +1139,10 @@ def _analysis_context(
         data_direction=data_direction,
         data_limit=data_limit,
     )
+    rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     rank_top_n = requested_rank_top_n if requested_rank_top_n > 0 else max(1, len(rows))
-    selected_metrics = [metric for metric in selected_metrics if _has_metric_data(rows, metric) or metric in warehouse.INDEX_NUMERIC_FIELDS]
+    custom_ids = {item["id"] for item in custom_metric_defs or []}
+    selected_metrics = [metric for metric in selected_metrics if _has_metric_data(rows, metric) or metric in warehouse.INDEX_NUMERIC_FIELDS or metric in custom_ids]
     return {
         "metrics": selected_metrics,
         "baseline_metric": baseline_metric,
@@ -1126,14 +1160,16 @@ def _analysis_context(
         "cohort_filter_policy": cohort_filter_policy,
         "rank_top_n": rank_top_n,
         "rows": rows,
+        "custom_metrics": custom_metrics.metric_catalog(custom_metric_defs),
     }
 
 
-def _select_metrics(metrics: list[str] | tuple[str, ...] | None) -> list[str]:
+def _select_metrics(metrics: list[str] | tuple[str, ...] | None, custom_metric_defs: list[dict[str, str]] | None = None) -> list[str]:
     requested = [str(metric).strip() for metric in (metrics or DEFAULT_SCIENTOMETRIC_METRICS) if str(metric).strip()]
     if not requested:
         requested = list(DEFAULT_SCIENTOMETRIC_METRICS)
-    unsupported = [metric for metric in requested if metric not in warehouse.INDEX_NUMERIC_FIELDS]
+    custom_ids = {item["id"] for item in custom_metric_defs or []}
+    unsupported = [metric for metric in requested if metric not in warehouse.INDEX_NUMERIC_FIELDS and metric not in custom_ids]
     if unsupported:
         raise ValueError(f"Unsupported scientometric metrics: {', '.join(unsupported)}")
     out: list[str] = []
@@ -1158,29 +1194,30 @@ def _analysis_warnings(
     rank_top_n: int,
     boxplots: dict[str, Any],
     correlations: dict[str, Any],
+    custom_metric_catalog: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     warnings: list[str] = []
     if not rows:
-        warnings.append("No authors matched the resolved scientometric analysis scope.")
+        warnings.append("В выбранной области анализа нет авторов.")
     elif len(rows) < 5:
-        warnings.append("The author set is very small; correlation and normality diagnostics are unstable.")
+        warnings.append("В выборке меньше 5 авторов; корреляции и проверки распределений нестабильны.")
     elif len(rows) < 20:
-        warnings.append("The author set has fewer than 20 authors; normality diagnostics should be interpreted cautiously.")
+        warnings.append("В выборке меньше 20 авторов; выводы о распределениях нужно трактовать осторожно.")
     if rows and len(rows) > rank_top_n:
-        warnings.append("rank_top_n limits rank comparisons and overlap; descriptive statistics use the current Data-page selection.")
+        warnings.append("Ограничение числа авторов влияет на сравнение мест; описательная статистика считается по текущей выборке со страницы «Данные».")
     missing_metrics = [metric for metric in metrics if not _metric_values(rows, metric)]
     if missing_metrics and rows:
-        warnings.append(f"No numeric values were available for metrics: {', '.join(missing_metrics)}.")
+        warnings.append(f"Для показателей нет числовых значений: {_metric_list_text_for_catalog(missing_metrics, custom_metric_catalog)}.")
     iqr_zero_metrics = [
         metric
         for metric, payload in boxplots.items()
         if (payload or {}).get("outlier_rule") == "iqr_zero_no_outlier_fence"
     ]
     if iqr_zero_metrics:
-        warnings.append(f"IQR is zero for metrics {', '.join(iqr_zero_metrics)}; IQR outlier fences are not informative.")
+        warnings.append(f"Для показателей {_metric_list_text_for_catalog(iqr_zero_metrics, custom_metric_catalog)} межквартильный размах равен нулю; правило выделяющихся значений по ящику с усами здесь неинформативно.")
     skipped_kendall = ((correlations.get("kendall_tau_b") or {}).get("skipped") or [])
     if skipped_kendall:
-        warnings.append(f"Kendall tau-b was skipped for {len(skipped_kendall)} metric pairs with more than {KENDALL_MAX_EXACT_N} paired observations.")
+        warnings.append(f"Расчет коэффициента Кендалла пропущен для {len(skipped_kendall)} пар показателей: слишком много наблюдений для точного расчета.")
     return warnings
 
 
@@ -1314,7 +1351,7 @@ def _boxplot_metric(rows: list[dict[str, Any]], metric: str) -> dict[str, Any]:
             "outlier_count": 0,
             "outlier_rule": "iqr_zero_no_outlier_fence",
             "outlier_rule_unstable": True,
-            "warning": "IQR is zero; IQR outlier rule is not informative for this metric.",
+            "warning": "Межквартильный размах равен нулю; правило выделяющихся значений по ящику с усами для этого показателя неинформативно.",
         }
     low = q1 - 1.5 * iqr
     high = q3 + 1.5 * iqr

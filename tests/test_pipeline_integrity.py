@@ -1114,7 +1114,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 )
 
         self.assertEqual(captured["filters"], {"country_code": "DE", "filter_mode": "keyword", "keyword_id": "https://openalex.org/K1"})
-        self.assertEqual(captured["kwargs"], {"limit": 25, "max_limit": 500, "run_id": "run_a", "dump_id": "dump_a", "author_ids": None})
+        self.assertEqual(captured["kwargs"], {"limit": 25, "max_limit": 500, "run_id": "run_a", "dump_id": "dump_a", "author_ids": None, "custom_metric_defs": []})
         self.assertNotEqual(first["report_scope"]["report_scope_hash"], second["report_scope"]["report_scope_hash"])
         self.assertIn("country_code=RU", first["exports"]["ranking_csv"])
 

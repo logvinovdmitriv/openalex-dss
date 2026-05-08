@@ -1,5 +1,5 @@
 import { DEFAULT_FILTERS, FRACTION_MODES, type ActiveFilters, countryLabel, filterParams, fmt } from "./domain";
-import type { TableColumnFilters } from "./api";
+import type { CustomMetricDefinition, TableColumnFilters } from "./api";
 
 export type View = "slices" | "data" | "rankings" | "statistics" | "reports";
 export type ResolverTab = "subject" | "organization" | "author" | "source";
@@ -55,6 +55,7 @@ export type ScientometricAnalysisPayload = {
   scope: Record<string, unknown>;
   cohort_context?: Record<string, unknown> | null;
   metrics: string[];
+  custom_metrics?: Array<{ value: string; label: string; description?: string; formula?: string }>;
   n_authors: number;
   rank_top_n?: number;
   warnings: string[];
@@ -450,12 +451,12 @@ function humanRunStage(stage: unknown, status?: string, action?: string) {
   return raw || status || "Выполнение";
 }
 
-export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", dataQuery = "", dataSelection?: DataSelectionParams) {
-  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection) }).toString()}`;
+export function analyticsUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", dataQuery = "", dataSelection?: DataSelectionParams, customMetrics?: CustomMetricDefinition[]) {
+  return `/analytics?${filterParams(filters, { fraction_mode: fractionMode, metric, limit: 60, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection), custom_metric_defs: customMetricDefsQuery(customMetrics) }).toString()}`;
 }
 
-export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, dataQuery = "", dataSelection?: DataSelectionParams) {
-  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection) }).toString()}`;
+export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, dataQuery = "", dataSelection?: DataSelectionParams, customMetrics?: CustomMetricDefinition[]) {
+  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection), custom_metric_defs: customMetricDefsQuery(customMetrics) }).toString()}`;
 }
 
 export function localDataSummaryUrl(runId = "", dumpId = "") {
@@ -504,6 +505,7 @@ export function scientometricsUrl(params: {
   dumpId?: string;
   dataQuery?: string;
   dataSelection?: DataSelectionParams;
+  customMetrics?: CustomMetricDefinition[];
 }) {
   const query = filterParams(params.filters, {
     fraction_mode: params.fractionMode,
@@ -514,8 +516,21 @@ export function scientometricsUrl(params: {
     dump_id: params.dumpId ?? "",
     q: params.dataQuery ?? "",
     ...dataSelectionQuery(params.dataSelection),
+    custom_metric_defs: customMetricDefsQuery(params.customMetrics),
   });
   return `/analytics/scientometrics?${query.toString()}`;
+}
+
+export function customMetricDefsQuery(customMetrics?: CustomMetricDefinition[]) {
+  const clean = (customMetrics ?? [])
+    .map((item) => ({
+      id: String(item.id ?? "").trim(),
+      label: String(item.label ?? "").trim(),
+      description: String(item.description ?? "").trim(),
+      expression: String(item.expression ?? "").trim(),
+    }))
+    .filter((item) => item.id && item.label && item.expression);
+  return clean.length ? JSON.stringify(clean) : "";
 }
 
 export function dataSelectionQuery(selection?: DataSelectionParams) {

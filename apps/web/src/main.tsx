@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
-import { API_BASE, deleteJson, getJson, postJson, type TableColumnFilters, type TableResponse } from "./api";
+import { API_BASE, deleteJson, getJson, postJson, type CustomMetricDefinition, type TableColumnFilters, type TableResponse } from "./api";
 import {
   DEFAULT_FILTERS,
   CORE_METRIC_OPTIONS,
@@ -59,6 +59,7 @@ import {
   progressForRun,
   scientometricsUrl,
   dataSelectionQuery,
+  customMetricDefsQuery,
   sliceSubjectTitle,
   viewFromHash,
   type EntitySuggestion,
@@ -94,7 +95,7 @@ function emitToast(payload: ToastPayload) {
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
-    onError: (error) => emitToast({ title: "Не удалось получить данные", message: mutationError(error), tone: "error" }),
+    onError: (error) => emitToast({ title: "Данные не загрузились", message: mutationError(error), tone: "error" }),
   }),
   mutationCache: new MutationCache({
     onError: (error) => emitToast({ title: "Действие не выполнено", message: mutationError(error), tone: "error" }),
@@ -117,6 +118,14 @@ const NAV: Array<{ id: View; label: string; icon: ReactNode }> = [
 ];
 
 const COMMON_RANKING_METRICS = new Set(["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "f5", "fm5", "iupv", "islv", "lrdi"]);
+const DEFAULT_CUSTOM_METRICS: CustomMetricDefinition[] = [
+  {
+    id: "custom_added_rating",
+    label: "Пример собственного рейтинга",
+    description: "Пример собственной формулы: сводный рейтинг по процентилям публикаций, индекса Хирша и долевых цитирований.",
+    expression: "100 * (pr_p * pr_h * pr_c_frac) ** (1 / 3)",
+  },
+];
 
 function App() {
   return (
@@ -134,7 +143,8 @@ function Workbench() {
   const [metric, setMetric] = useState("h");
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
   const [topN, setTopN] = useState(0);
-  const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "g", "iupv", "islv"]);
+  const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
+  const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "g", "iupv", "islv", "custom_added_rating"]);
   const [baselineMetric, setBaselineMetric] = useState("h");
   const [storageProfileId, setStorageProfileId] = useState("");
   const [downloadDir, setDownloadDir] = useState("");
@@ -255,14 +265,15 @@ function Workbench() {
   const scopeReady = Boolean(effectiveRunId || effectiveDumpId);
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
   const dataFilterKey = useMemo(() => JSON.stringify(dataColumnFilters), [dataColumnFilters]);
+  const customMetricKey = useMemo(() => JSON.stringify(customMetrics), [customMetrics]);
   const dataSelection = useMemo(() => ({
     filters: dataColumnFilters,
     search: dataSearch,
     sort: dataSort,
     direction: dataDirection,
     limit: topN,
-    authorIds: selectedAuthorIds,
-  }), [dataColumnFilters, dataSearch, dataSort, dataDirection, topN, selectedAuthorIds.join("|")]);
+    authorIds: [],
+  }), [dataColumnFilters, dataSearch, dataSort, dataDirection, topN]);
   const scientometricMetricKey = useMemo(() => scientometricMetrics.join(","), [scientometricMetrics]);
   const localDataSummary = useQuery({
     queryKey: ["local-data-summary", effectiveRunId, effectiveDumpId],
@@ -285,17 +296,17 @@ function Workbench() {
     enabled: scopeReady && localDataKindAvailable,
   });
   const analytics = useQuery({
-    queryKey: ["analytics", metric, fractionMode, effectiveRunId, effectiveDumpId, filterKey, dataSearch, dataFilterKey, dataSort, dataDirection, topN, selectedAuthorIds.join("|")],
-    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, effectiveRunId, effectiveDumpId, "", dataSelection)),
+    queryKey: ["analytics", metric, fractionMode, effectiveRunId, effectiveDumpId, filterKey, dataSearch, dataFilterKey, dataSort, dataDirection, topN, customMetricKey],
+    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, effectiveRunId, effectiveDumpId, "", dataSelection, customMetrics)),
     enabled: hasLocalAnalyticsData,
   });
   const ranking = useQuery({
-    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, filterKey, topN, dataSearch, dataFilterKey, dataSort, dataDirection, selectedAuthorIds.join("|")],
-    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, effectiveRunId, effectiveDumpId, topN, "", dataSelection)),
+    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, filterKey, topN, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
+    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, effectiveRunId, effectiveDumpId, topN, "", dataSelection, customMetrics)),
     enabled: hasLocalAnalyticsData,
   });
   const authorIndexTable = useQuery({
-    queryKey: ["author-index-table", fractionMode, effectiveRunId, effectiveDumpId, topN, dataSearch, dataFilterKey, dataSort, dataDirection, selectedAuthorIds.join("|")],
+    queryKey: ["author-index-table", fractionMode, effectiveRunId, effectiveDumpId, topN, dataSearch, dataFilterKey, dataSort, dataDirection],
     queryFn: () => getJson<TableResponse>(localDataPreviewUrl("indices", {
       q: dataSearch,
       runId: effectiveRunId,
@@ -309,7 +320,7 @@ function Workbench() {
     enabled: scopeReady && Boolean((localDataSummary.data?.tables as any)?.indices?.exists),
   });
   const scientometrics = useQuery({
-    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, topN, fractionMode, effectiveRunId, effectiveDumpId, filterKey, dataSearch, dataFilterKey, dataSort, dataDirection, selectedAuthorIds.join("|")],
+    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, topN, fractionMode, effectiveRunId, effectiveDumpId, filterKey, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
     queryFn: () => getJson<ScientometricAnalysisPayload>(scientometricsUrl({
       filters,
       fractionMode,
@@ -319,6 +330,7 @@ function Workbench() {
       runId: effectiveRunId,
       dumpId: effectiveDumpId,
       dataSelection,
+      customMetrics,
     })),
     enabled: hasLocalAnalyticsData && scientometricMetrics.length > 0,
   });
@@ -344,6 +356,15 @@ function Workbench() {
     .filter((item) => COMMON_RANKING_METRICS.has(item.value))
     .map((item) => ({ ...item, label: metricLabel(item.value), description: item.description || metricDescription(item.value) }));
   const primaryMetricOptions = configuredPrimaryMetricOptions.length ? configuredPrimaryMetricOptions : CORE_METRIC_OPTIONS;
+  const customMetricOptions: SelectOption[] = customMetrics.map((item) => ({
+    value: item.id,
+    label: item.label,
+    description: item.description || "Собственная формула по данным выбранного среза.",
+    formula: item.expression,
+    custom: true,
+  }));
+  const allMetricOptions = [...primaryMetricOptions, ...customMetricOptions];
+  const metricLabelMap = Object.fromEntries(allMetricOptions.map((item) => [item.value, item.label]));
   const fractionModeOptions = configuredOptions(catalog.data?.fraction_modes ?? []);
   const displayFractionModeOptions = fractionModeOptions.length ? fractionModeOptions : FRACTION_MODE_OPTIONS;
   const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
@@ -385,6 +406,17 @@ function Workbench() {
     setDataDirection("desc");
     setSelectedAuthorIds([]);
   }, [scopeReady, localDataKindKey, localDataKind]);
+
+  useEffect(() => {
+    const available = new Set(allMetricOptions.map((item) => item.value));
+    if (!available.has(metric)) setMetric("h");
+    setScientometricMetrics((prev) => {
+      const next = prev.filter((item) => available.has(item));
+      const normalized = next.length ? next : ["p", "c", "c_frac", "h"];
+      return normalized.length === prev.length && normalized.every((item, index) => item === prev[index]) ? prev : normalized;
+    });
+    if (!available.has(baselineMetric)) setBaselineMetric("h");
+  }, [customMetricKey, allMetricOptions.map((item) => item.value).join("|"), metric, baselineMetric]);
 
   useEffect(() => {
     setScientometricMetrics((prev) => {
@@ -486,11 +518,16 @@ function Workbench() {
   });
   const selectDownloadedDumpRemote = useMutation({
     mutationFn: (nextDumpId: string) => postJson<any>(`/dumps/${encodeURIComponent(nextDumpId)}/select`, {}),
-    onSuccess: (_result, nextDumpId) => {
-      setRunId("");
-      setDumpId(nextDumpId);
+    onSuccess: (result, nextDumpId) => {
+      const nextRunId = String(result?.associated_run_id ?? result?.active_context?.active_run_id ?? "");
+      const selectedDumpId = String(result?.dump?.dump_id ?? result?.active_context?.active_dump_id ?? nextDumpId);
+      setRunId(nextRunId);
+      setDumpId(selectedDumpId);
       qc.invalidateQueries({ queryKey: ["workbench"] });
       qc.invalidateQueries({ queryKey: ["local-data-summary"] });
+      qc.invalidateQueries({ queryKey: ["analytics"] });
+      qc.invalidateQueries({ queryKey: ["analytics-ranking"] });
+      qc.invalidateQueries({ queryKey: ["scientometrics"] });
     },
   });
   const recalculate = useMutation({
@@ -522,6 +559,7 @@ function Workbench() {
       scientometric_metrics: scientometricMetrics.join(","),
       baseline_metric: baselineMetric,
       rank_top_n: activeTopN > 0 ? activeTopN : 1000,
+      custom_metric_defs: customMetricDefsQuery(customMetrics),
       ...dataSelectionQuery({
         filters: dataColumnFilters,
         search: dataSearch,
@@ -575,16 +613,16 @@ function Workbench() {
   const running = run.data?.status === "queued" || run.data?.status === "running";
   const tables = localDataSummary.data?.tables ?? workbench.data?.tables ?? {};
   const errors = [
-    mutationError(createSlice.error),
-    mutationError(estimateSlice.error),
-    mutationError(createMaterialization.error),
-    mutationError(runMaterialization.error),
-    mutationError(downloadSlice.error),
-    mutationError(selectDownloadedDumpRemote.error),
-    mutationError(deleteSavedSlice.error),
-    mutationError(deleteDownloadedDump.error),
-    mutationError(recalculate.error),
-  ].filter(Boolean);
+    createSlice.error,
+    estimateSlice.error,
+    createMaterialization.error,
+    runMaterialization.error,
+    downloadSlice.error,
+    selectDownloadedDumpRemote.error,
+    deleteSavedSlice.error,
+    deleteDownloadedDump.error,
+    recalculate.error,
+  ].filter(Boolean).map(mutationError);
   const queryErrors = [
     registry.error,
     catalog.error,
@@ -603,7 +641,7 @@ function Workbench() {
   ].filter(Boolean);
 
   useEffect(() => {
-    queryErrors.forEach((error) => emitToast({ title: "Не удалось получить данные", message: mutationError(error), tone: "error" }));
+    queryErrors.forEach((error) => emitToast({ title: "Данные не загрузились", message: mutationError(error), tone: "error" }));
   }, [queryErrors.map((error) => mutationError(error)).join("|")]);
 
   useEffect(() => {
@@ -764,10 +802,11 @@ function Workbench() {
             authorIndexTable={authorIndexTable.data}
             selectedMetrics={scientometricMetrics}
             setSelectedMetrics={setScientometricMetrics}
+            customMetrics={customMetrics}
+            setCustomMetrics={setCustomMetrics}
             selectedAuthorIds={selectedAuthorIds}
-            scientometrics={scientometrics.data}
-            loadingScientometrics={scientometrics.isFetching}
-            metricOptions={primaryMetricOptions}
+            metricOptions={allMetricOptions}
+            metricLabels={metricLabelMap}
             fractionModeOptions={displayFractionModeOptions}
             onRecalculate={() => recalculate.mutate()}
             canRecalculate={Boolean(effectiveDumpId)}
@@ -783,6 +822,7 @@ function Workbench() {
             filters={filters}
             analytics={analytics.data}
             scientometrics={scientometrics.data}
+            authorIndexTable={authorIndexTable.data}
             loadingScientometrics={scientometrics.isFetching}
             scientometricsError={scientometrics.error}
             hasAuthorIndices={hasAuthorIndices}
@@ -794,6 +834,8 @@ function Workbench() {
             runId={effectiveRunId}
             dumpId={effectiveDumpId}
             metricOptions={primaryMetricOptions}
+            metricLabels={metricLabelMap}
+            customMetrics={customMetrics}
             scientometricMetrics={scientometricMetrics}
             setScientometricMetrics={setScientometricMetrics}
             baselineMetric={baselineMetric}
@@ -809,7 +851,7 @@ function Workbench() {
         )}
 
         {view === "reports" && (
-          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={effectiveRunId} dumpId={effectiveDumpId} topN={activeTopN} scientometricMetrics={scientometricMetrics} baselineMetric={baselineMetric} rankTopN={activeTopN} dataFilters={dataColumnFilters} dataSort={dataSort} dataDirection={dataDirection} onBuild={() => buildReport.mutate()} building={buildReport.isPending} state={workbench.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
+          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={effectiveRunId} dumpId={effectiveDumpId} topN={activeTopN} scientometricMetrics={scientometricMetrics} baselineMetric={baselineMetric} rankTopN={activeTopN} dataFilters={dataColumnFilters} dataSort={dataSort} dataDirection={dataDirection} customMetrics={customMetrics} metricLabels={metricLabelMap} onBuild={() => buildReport.mutate()} building={buildReport.isPending} state={workbench.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
         )}
         </motion.section>
       </AnimatePresence>
@@ -1272,7 +1314,13 @@ function LocalDataPage({
   const missingScope = localDataMissingScopeState({ runId: effectiveRunId, dumpId: effectiveDumpId, activeContext });
   const availableTables = Object.values(localDataSummary?.tables ?? {}).filter((entry: any) => Boolean(entry?.exists));
   const hasAvailableTables = localDataKindOptions.length > 0;
-  const hasDataRestrictions = Boolean(Object.keys(dataColumnFilters).length || dataSearch.trim() || dataSort || dataDirection !== "desc" || selectedAuthorIds.length);
+  const hasTableRestrictions = Boolean(Object.keys(dataColumnFilters).length || dataSearch.trim() || dataSort || dataDirection !== "desc");
+  const hasDataRestrictions = hasTableRestrictions || selectedAuthorIds.length > 0;
+  const visibleAuthorIds = useMemo(() => {
+    if (localDataKind !== "indices") return [];
+    return [...new Set((table?.rows ?? []).map((row) => String(row.author_id ?? "").trim()).filter(Boolean))];
+  }, [localDataKind, table?.rows]);
+  const allVisibleAuthorsSelected = visibleAuthorIds.length > 0 && visibleAuthorIds.every((id) => selectedAuthorIds.includes(id));
   const resetDataRestrictions = () => {
     setDataColumnFilters({});
     setDataSearch("");
@@ -1365,7 +1413,16 @@ function LocalDataPage({
         </div>
         <div className="action-row">
           {!missingScope.missing && hasAvailableTables && <a className="button-link" href={csvUrl}>Скачать текущую выборку</a>}
-          {hasDataRestrictions && <button type="button" className="ghost-button" onClick={resetDataRestrictions}>Сбросить ограничения</button>}
+          {localDataKind === "indices" && visibleAuthorIds.length > 0 && (
+            <button
+              type="button"
+              className={allVisibleAuthorsSelected ? "choice-pill active" : "choice-pill"}
+              onClick={() => setSelectedAuthorIds(allVisibleAuthorsSelected ? [] : visibleAuthorIds)}
+            >
+              {allVisibleAuthorsSelected ? "Снять точки с графиков" : "Показать всех авторов точками"}
+            </button>
+          )}
+          {hasDataRestrictions && <button type="button" className="ghost-button" onClick={resetDataRestrictions}>{hasTableRestrictions ? "Сбросить ограничения" : "Снять точки"}</button>}
         </div>
         <DataRestrictionChips
           filters={dataColumnFilters}
@@ -1460,7 +1517,7 @@ function DataRestrictionChips({
         </button>
       )}
       {hasSelectedAuthors && (
-        <span className="selection-chip passive">Выбрано авторов: {fmt(selectedAuthorIds.length)}</span>
+        <span className="selection-chip passive">Точки на графиках: {fmt(selectedAuthorIds.length)}</span>
       )}
       {filterEntries.map(([field, filter]) => (
         <button key={field} type="button" className="selection-chip" onClick={() => onRemoveFilter(field)}>
@@ -1482,6 +1539,15 @@ function columnFilterSummary(filter: { contains?: string; min?: string; max?: st
 
 function limitLabel(limit: number) {
   return Number(limit) > 0 ? `Берется до ${fmt(limit)} строк` : "Берутся все строки";
+}
+
+function authorCountText(count: number) {
+  const value = Math.abs(Number(count) || 0);
+  const mod10 = value % 10;
+  const mod100 = value % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${fmt(count)} автор`;
+  if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return `${fmt(count)} автора`;
+  return `${fmt(count)} авторов`;
 }
 
 function ActiveContextPanel({
@@ -1659,10 +1725,11 @@ function RankingsPage({
   authorIndexTable,
   selectedMetrics,
   setSelectedMetrics,
+  customMetrics,
+  setCustomMetrics,
   selectedAuthorIds,
-  scientometrics,
-  loadingScientometrics,
   metricOptions,
+  metricLabels,
   fractionModeOptions,
   onRecalculate,
   canRecalculate,
@@ -1680,10 +1747,11 @@ function RankingsPage({
   authorIndexTable?: TableResponse;
   selectedMetrics: string[];
   setSelectedMetrics: (value: string[]) => void;
+  customMetrics: CustomMetricDefinition[];
+  setCustomMetrics: (value: CustomMetricDefinition[]) => void;
   selectedAuthorIds: string[];
-  scientometrics?: ScientometricAnalysisPayload;
-  loadingScientometrics: boolean;
   metricOptions: SelectOption[];
+  metricLabels: Record<string, string>;
   fractionModeOptions: SelectOption[];
   onRecalculate: () => void;
   canRecalculate: boolean;
@@ -1694,11 +1762,8 @@ function RankingsPage({
 }) {
   const displayMetricOptions = ensureCurrentOptions(metricOptions, [metric, ...selectedMetrics]);
   const visibleMetrics = [...new Set([metric, ...selectedMetrics])].filter(Boolean);
-  const distributionMetrics = (scientometrics?.metrics ?? visibleMetrics).filter((item) => visibleMetrics.includes(item));
-  const [showBoxplot, setShowBoxplot] = useState(false);
-  const [distributionView, setDistributionView] = useState<"normalized" | "raw">("normalized");
+  const [formulaBuilderOpen, setFormulaBuilderOpen] = useState(false);
   const rankingTable = useMemo(() => selectedAuthorIndexTable(authorIndexTable ?? ranking, visibleMetrics, selectedAuthorIds), [authorIndexTable, ranking, visibleMetrics.join(","), selectedAuthorIds.join("|")]);
-  const highlightAuthors = selectedAuthorIds.length ? rankingTable?.rows ?? [] : [];
   const toggleMetric = (value: string) => {
     if (value === metric) return;
     if (selectedMetrics.includes(value)) {
@@ -1730,7 +1795,7 @@ function RankingsPage({
             <select value={metric} onChange={(event) => setMetric(event.target.value)}>
               {ensureCurrentOption(displayMetricOptions, metric).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
-            <small className="field-hint">По этому индексу строится рейтинг и верхний график.</small>
+            <small className="field-hint">По этому индексу сортируется рейтинг и строится основной анализ.</small>
           </Field>
           <Field label="Учет вклада соавторов">
             <select value={fractionMode} onChange={(event) => setFractionMode(event.target.value)}>
@@ -1740,11 +1805,11 @@ function RankingsPage({
           </Field>
         </div>
         <div className="metric-grid">
-          <MetricCard label="Показатель" value={metricLabel(metric)} />
+          <MetricCard label="Показатель" value={metricLabelFor(metric, metricLabels)} />
           <MetricCard label="Учет вклада" value={modeLabel(fractionMode)} />
           <MetricCard label="Лимит из “Данных”" value={topN > 0 ? fmt(topN) : "все"} />
           <MetricCard label="Авторов в таблице" value={fmt(authorIndexTable?.total ?? ranking?.total ?? 0)} />
-          <MetricCard label="Выбрано вручную" value={selectedAuthorIds.length ? fmt(selectedAuthorIds.length) : "нет"} />
+          <MetricCard label="Точек на графиках" value={selectedAuthorIds.length ? fmt(selectedAuthorIds.length) : "нет"} />
         </div>
         {usingActiveContextScope && effectiveDumpId && (
           <div className="notice">
@@ -1772,7 +1837,7 @@ function RankingsPage({
         <div className="notice">
           <div>
             <b>Какие индексы показывать</b>
-            <span>Включайте показатели чекбоксами справа. Значок i рядом с каждым названием показывает смысл показателя и формулу расчета.</span>
+            <span>Нажимайте на показатель, чтобы включить или скрыть его в таблице и аналитике. Значок i рядом с названием показывает смысл показателя и формулу расчета.</span>
           </div>
         </div>
         <div className="metric-option-grid" role="group" aria-label="Показатели в таблице индексов">
@@ -1784,62 +1849,51 @@ function RankingsPage({
                 key={item.value}
                 className={active ? "metric-option-card active" : "metric-option-card"}
               >
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={active}
-                    disabled={pinned}
-                    onChange={() => toggleMetric(item.value)}
-                  />
+                <button
+                  type="button"
+                  className="metric-option-toggle"
+                  aria-pressed={active}
+                  disabled={pinned}
+                  onClick={() => toggleMetric(item.value)}
+                >
                   <span>
                     <b>{item.label}</b>
-                    {pinned && <small>основной индекс</small>}
+                    <small>{pinned ? "основной индекс" : active ? "показан" : "скрыт"}</small>
                   </span>
-                </label>
-                <MetricInfoPopover metricName={item.value} />
+                </button>
+                <MetricInfoPopover metric={item} />
               </div>
             );
           })}
         </div>
-      </section>
-      {scientometrics && (
-        <>
-          <DistributionComparisonPanel
-            payload={scientometrics}
-            metrics={distributionMetrics.length ? distributionMetrics : visibleMetrics}
-            highlightedAuthors={highlightAuthors}
-            loading={loadingScientometrics}
-            viewMode={distributionView}
-            onViewModeChange={setDistributionView}
-          />
-          <section className="panel">
-            <div className="panel-head split">
-              <div>
-                <span className="step-badge">Дополнительно</span>
-                <h2>Диапазоны значений</h2>
-                <p>Этот слой показывает медиану и основной диапазон значений по выбранным индексам. Его можно включать только когда нужен быстрый контроль разброса.</p>
-              </div>
-              <button type="button" className={showBoxplot ? "choice-pill active" : "choice-pill"} onClick={() => setShowBoxplot(!showBoxplot)}>
-                {showBoxplot ? "Скрыть ящик с усами" : "Показать ящик с усами"}
-              </button>
-            </div>
-            {showBoxplot && <MetricBoxplotPanel payload={scientometrics} metrics={distributionMetrics.length ? distributionMetrics : visibleMetrics} />}
-          </section>
-        </>
-      )}
-      {!scientometrics && authorIndexTable && (
-        <section className="notice">
-          <b>График распределений загрузится после аналитического расчета</b>
-          <span>Он использует те же ограничения, сортировку, выбранных авторов и число строк, что и вкладка “Данные”.</span>
+        <section className="formula-summary">
+          <div>
+            <b>Собственные показатели</b>
+            <span>Можно добавить расчетный показатель по данным выбранного среза и использовать его в рейтинге, таблице и графиках.</span>
+          </div>
+          <button type="button" className="primary" onClick={() => setFormulaBuilderOpen(true)}>
+            <Sigma size={16} /> Открыть конструктор
+          </button>
         </section>
-      )}
+        {formulaBuilderOpen && (
+          <FormulaBuilderDialog
+            metrics={customMetrics}
+            setMetrics={setCustomMetrics}
+            selectedMetrics={selectedMetrics}
+            setSelectedMetrics={setSelectedMetrics}
+            activeMetric={metric}
+            setActiveMetric={setMetric}
+            onClose={() => setFormulaBuilderOpen(false)}
+          />
+        )}
+      </section>
       <section className="panel table-panel">
         <div className="panel-head">
           <span className="step-badge">Таблица индексов</span>
           <h2>Авторский уровень данных</h2>
           <p>Это таблица авторов с выбранными индексами. Она использует те же ограничения, сортировку и число строк, которые заданы на вкладке “Данные”.</p>
         </div>
-        <DataGrid data={rankingTable} onSelect={onSelect} hiddenFields={["author_id"]} />
+        <DataGrid data={rankingTable} onSelect={onSelect} hiddenFields={["author_id"]} fieldLabels={metricLabels} />
       </section>
     </div>
   );
@@ -1859,16 +1913,18 @@ function selectedAuthorIndexTable(ranking: TableResponse | undefined, metrics: s
   return { ...ranking, fields: selectedFields.length ? selectedFields : fields, rows, total: selected.size ? rows.length : ranking.total };
 }
 
-function MetricInfoPopover({ metricName }: { metricName: string }) {
-  const description = metricDescription(metricName);
-  const formula = metricFormula(metricName);
+function MetricInfoPopover({ metric }: { metric: SelectOption }) {
+  const metricName = metric.value;
+  const description = metric.description || metricDescription(metricName);
+  const formula = metric.formula || metricFormula(metricName);
+  const label = metric.label || metricLabel(metricName);
   return (
     <span className="metric-info-popover-wrap">
-      <span className="metric-info-icon" tabIndex={0} aria-label={`Описание показателя ${metricLabel(metricName)}`}>
+      <span className="metric-info-icon" tabIndex={0} aria-label={`Описание показателя ${label}`}>
         <Info size={14} />
       </span>
       <div className="metric-info-popover" role="tooltip">
-        <b>{metricLabel(metricName)}</b>
+        <b>{label}</b>
         {description && <span>{description}</span>}
         <MetricFormulaMath metricName={metricName} fallback={formula} />
         <small>Формула применяется только к текущему выбранному срезу.</small>
@@ -1881,6 +1937,275 @@ function MetricFormulaMath({ metricName, fallback }: { metricName: string; fallb
   const markup = metricFormulaMarkup(metricName);
   if (markup) return <span className="formula-math" dangerouslySetInnerHTML={{ __html: markup }} />;
   return <code className="formula-fallback">{fallback}</code>;
+}
+
+function metricLabelFor(metricName: string, labels?: Record<string, string>) {
+  return labels?.[metricName] ?? metricLabel(metricName);
+}
+
+const FORMULA_VARIABLES = [
+  { token: "p", label: "Публикации" },
+  { token: "c", label: "Цитирования" },
+  { token: "c_frac", label: "Долевые цитирования" },
+  { token: "cpp", label: "Средняя цитируемость" },
+  { token: "h", label: "Индекс Хирша" },
+  { token: "i10", label: "Работы с 10+ цитированиями" },
+  { token: "g", label: "Индекс g" },
+  { token: "m_local", label: "Индекс m" },
+  { token: "f5", label: "Индекс Полянина f5" },
+  { token: "fm5", label: "Долевой f5" },
+  { token: "lrdi", label: "Индекс устойчивости" },
+  { token: "pr_p", label: "Процентиль публикаций" },
+  { token: "pr_h", label: "Процентиль Хирша" },
+  { token: "pr_c_frac", label: "Процентиль долевых цитирований" },
+  { token: "pr_g", label: "Процентиль g-индекса" },
+];
+
+const FORMULA_FUNCTIONS = ["sqrt()", "log1p()", "log()", "exp()", "pow()", "min()", "max()", "abs()", "round()", "floor()", "ceil()"];
+const FORMULA_FUNCTION_NAMES = new Set(FORMULA_FUNCTIONS.map((item) => item.replace("()", "")));
+
+function CustomMetricBuilder({
+  metrics,
+  setMetrics,
+  selectedMetrics,
+  setSelectedMetrics,
+  activeMetric,
+  setActiveMetric,
+}: {
+  metrics: CustomMetricDefinition[];
+  setMetrics: (value: CustomMetricDefinition[]) => void;
+  selectedMetrics: string[];
+  setSelectedMetrics: (value: string[]) => void;
+  activeMetric: string;
+  setActiveMetric: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState<CustomMetricDefinition>({
+    id: "",
+    label: "",
+    description: "",
+    expression: DEFAULT_CUSTOM_METRICS[0].expression,
+  });
+  const addToken = (token: string) => {
+    const current = draft.expression.trim();
+    const suffix = token.endsWith("()") ? `${token.slice(0, -1)}` : token;
+    const needsOperator = Boolean(current) && !/[+\-*/%(,\s]$/.test(current);
+    const next = `${current}${needsOperator ? " + " : current ? " " : ""}${suffix}`.trim();
+    setDraft({ ...draft, expression: next });
+  };
+  const addMetric = () => {
+    const expression = draft.expression.trim();
+    if (!expression) {
+      emitToast({ title: "Формула не добавлена", message: "Введите математическое выражение по доступным полям.", tone: "error" });
+      return;
+    }
+    const validationError = validateFormulaExpression(expression);
+    if (validationError) {
+      emitToast({ title: "Формула не добавлена", message: validationError, tone: "error" });
+      return;
+    }
+    const label = draft.label.trim() || `Собственная формула ${metrics.length + 1}`;
+    const id = safeCustomMetricId(draft.id || label, metrics.length + 1);
+    if (metrics.some((item) => item.id === id)) {
+      emitToast({ title: "Формула не добавлена", message: "Формула с таким идентификатором уже есть. Измените короткое имя.", tone: "error" });
+      return;
+    }
+    const nextMetric = { id, label, description: draft.description?.trim() || "Собственная формула по данным выбранного среза.", expression };
+    setMetrics([...metrics, nextMetric]);
+    setSelectedMetrics([...new Set([...selectedMetrics, id])]);
+    setActiveMetric(id);
+    setDraft({ id: "", label: "", description: "", expression: "" });
+    emitToast({ title: "Формула добавлена", message: `Показатель «${label}» включен в таблицу и графики.`, tone: "success" });
+  };
+  const removeMetric = (id: string) => {
+    setMetrics(metrics.filter((item) => item.id !== id));
+    setSelectedMetrics(selectedMetrics.filter((item) => item !== id));
+    if (activeMetric === id) setActiveMetric("h");
+  };
+  const resetMetrics = () => {
+    const defaultIds = DEFAULT_CUSTOM_METRICS.map((item) => item.id);
+    setMetrics(DEFAULT_CUSTOM_METRICS);
+    setSelectedMetrics([...new Set([...selectedMetrics.filter((item) => !item.startsWith("custom_")), ...defaultIds])]);
+    if (activeMetric.startsWith("custom_")) setActiveMetric(defaultIds[0] ?? "h");
+    setDraft({ id: "", label: "", description: "", expression: DEFAULT_CUSTOM_METRICS[0].expression });
+    emitToast({ title: "Формулы сброшены", message: "Возвращен пример собственной формулы по умолчанию.", tone: "info" });
+  };
+  return (
+    <div className="formula-builder">
+      <div className="formula-builder-head">
+        <div>
+          <h3>Калькулятор наукометрического показателя</h3>
+          <p>Составьте выражение из показателей авторов. Поля `pr_...` означают процентиль 0–1 внутри текущей выборки, поэтому результат удобно сравнивать на общей шкале.</p>
+        </div>
+        <button type="button" onClick={resetMetrics}>Сбросить формулы</button>
+      </div>
+      <div className="formula-example">
+        <b>Пример:</b>
+        <code>100 * (pr_p * pr_h * pr_c_frac) ** (1 / 3)</code>
+        <span>Это интегральный рейтинг по публикациям, индексу Хирша и долевым цитированиям.</span>
+      </div>
+      <div className="formula-form-grid">
+        <Field label="Название">
+          <input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Например: Мой рейтинг" />
+        </Field>
+        <Field label="Короткое имя">
+          <input value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.target.value })} placeholder="custom_my_rating" />
+        </Field>
+      </div>
+      <Field label="Описание">
+        <input value={draft.description ?? ""} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Что показывает формула и когда ее применять" />
+      </Field>
+      <Field label="Формула">
+        <textarea value={draft.expression} onChange={(event) => setDraft({ ...draft, expression: event.target.value })} rows={3} spellCheck={false} />
+      </Field>
+      <div className="formula-token-section">
+        <b>Поля данных</b>
+        <div className="formula-token-grid">
+          {FORMULA_VARIABLES.map((item) => (
+            <button type="button" className="choice-pill" key={item.token} onClick={() => addToken(item.token)} title={item.label}>
+              {item.token}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="formula-token-section">
+        <b>Функции</b>
+        <div className="formula-token-grid compact">
+          {FORMULA_FUNCTIONS.map((item) => (
+            <button type="button" className="choice-pill" key={item} onClick={() => addToken(item)}>
+              {item}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="formula-actions">
+        <button type="button" className="primary" onClick={addMetric}><Sigma size={16} /> Добавить формулу</button>
+      </div>
+      {metrics.length > 0 && (
+        <div className="custom-metric-list">
+          {metrics.map((item) => {
+            const enabled = selectedMetrics.includes(item.id) || activeMetric === item.id;
+            return (
+              <div key={item.id} className={enabled ? "custom-metric-row active" : "custom-metric-row"}>
+                <div>
+                  <b>{item.label}</b>
+                  <code>{item.expression}</code>
+                </div>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className={enabled ? "choice-pill active" : "choice-pill"}
+                    onClick={() => {
+                      if (enabled && activeMetric !== item.id) setSelectedMetrics(selectedMetrics.filter((value) => value !== item.id));
+                      if (!enabled) setSelectedMetrics([...selectedMetrics, item.id]);
+                    }}
+                    disabled={activeMetric === item.id}
+                  >
+                    {enabled ? "Показан" : "Показать"}
+                  </button>
+                  <button type="button" className="choice-pill" onClick={() => setActiveMetric(item.id)}>Основной</button>
+                  <button type="button" className="choice-pill danger" onClick={() => removeMetric(item.id)}>Удалить</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function validateFormulaExpression(expression: string) {
+  if (expression.length > 500) return "Формула слишком длинная. Сократите выражение.";
+  if (!/^[0-9A-Za-z_+\-*/%().,\s]+$/.test(expression)) return "Формула содержит неподдерживаемые символы. Используйте поля, числа, скобки и математические операции.";
+  const allowedNames = new Set([...FORMULA_VARIABLES.map((item) => item.token), ...FORMULA_FUNCTION_NAMES, "pi", "e"]);
+  const identifiers = expression.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
+  const unknown = identifiers.find((item) => !allowedNames.has(item));
+  if (unknown) return `Неизвестное поле или функция: ${unknown}. Выберите поле из списка ниже.`;
+  let balance = 0;
+  for (const char of expression) {
+    if (char === "(") balance += 1;
+    if (char === ")") balance -= 1;
+    if (balance < 0) return "В формуле лишняя закрывающая скобка.";
+  }
+  if (balance !== 0) return "В формуле не закрыта скобка.";
+  const vars = FORMULA_VARIABLES.map((item) => item.token);
+  const funcs = [...FORMULA_FUNCTION_NAMES];
+  const args = [...vars, ...funcs, "pi", "e"];
+  const values = [
+    ...vars.map(() => 1),
+    ...funcs.map((name) => {
+      const map: Record<string, (...args: number[]) => number> = {
+        sqrt: Math.sqrt,
+        log1p: Math.log1p,
+        min: Math.min,
+        max: Math.max,
+        abs: Math.abs,
+        round: Math.round,
+        log: Math.log,
+        exp: Math.exp,
+        pow: Math.pow,
+        floor: Math.floor,
+        ceil: Math.ceil,
+      };
+      return map[name];
+    }),
+    Math.PI,
+    Math.E,
+  ];
+  try {
+    const result = Function(...args, `"use strict"; return (${expression});`)(...values);
+    if (!Number.isFinite(Number(result))) return "Формула должна возвращать конечное число.";
+  } catch {
+    return "Формула содержит синтаксическую ошибку. Проверьте операции и скобки.";
+  }
+  return "";
+}
+
+function FormulaBuilderDialog(props: {
+  metrics: CustomMetricDefinition[];
+  setMetrics: (value: CustomMetricDefinition[]) => void;
+  selectedMetrics: string[];
+  setSelectedMetrics: (value: string[]) => void;
+  activeMetric: string;
+  setActiveMetric: (value: string) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [props.onClose]);
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) props.onClose();
+    }}>
+      <section className="formula-modal" role="dialog" aria-modal="true" aria-labelledby="formula-builder-title">
+        <div className="modal-head">
+          <div>
+            <span className="step-badge">Рабочее окно</span>
+            <h2 id="formula-builder-title">Конструктор собственного показателя</h2>
+            <p>Создайте формулу из доступных полей, проверьте пример и включите показатель в рейтинг.</p>
+          </div>
+          <button type="button" className="icon-button" onClick={props.onClose} aria-label="Закрыть конструктор формул">
+            <X size={18} />
+          </button>
+        </div>
+        <CustomMetricBuilder {...props} />
+      </section>
+    </div>
+  );
+}
+
+function safeCustomMetricId(raw: string, fallbackIndex: number) {
+  const normalized = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const value = normalized || `formula_${fallbackIndex}`;
+  return (value.startsWith("custom_") ? value : `custom_${value}`).slice(0, 48);
 }
 
 function metricFormulaMarkup(metricName: string) {
@@ -1906,6 +2231,7 @@ function StatisticsPage({
   filters,
   analytics,
   scientometrics,
+  authorIndexTable,
   loadingScientometrics,
   scientometricsError,
   hasAuthorIndices,
@@ -1917,6 +2243,8 @@ function StatisticsPage({
   runId,
   dumpId,
   metricOptions,
+  metricLabels,
+  customMetrics,
   scientometricMetrics,
   setScientometricMetrics,
   baselineMetric,
@@ -1932,6 +2260,7 @@ function StatisticsPage({
   filters: ActiveFilters;
   analytics: any;
   scientometrics?: ScientometricAnalysisPayload;
+  authorIndexTable?: TableResponse;
   loadingScientometrics: boolean;
   scientometricsError: unknown;
   hasAuthorIndices: boolean;
@@ -1943,6 +2272,8 @@ function StatisticsPage({
   runId: string;
   dumpId: string;
   metricOptions: SelectOption[];
+  metricLabels: Record<string, string>;
+  customMetrics: CustomMetricDefinition[];
   scientometricMetrics: string[];
   setScientometricMetrics: (value: string[]) => void;
   baselineMetric: string;
@@ -1958,9 +2289,11 @@ function StatisticsPage({
   const metrics = (scientometrics?.metrics ?? scientometricMetrics).filter(Boolean);
   const analyticsMetrics = metrics.length ? metrics : [metric].filter(Boolean);
   const warnings = scientometrics?.warnings ?? [];
-  const [section, setSection] = useState<"overview" | "relations" | "findings">("overview");
+  const [distributionView, setDistributionView] = useState<"normalized" | "raw">("normalized");
+  const [showBoxplot, setShowBoxplot] = useState(true);
+  const selectedAuthorRows = selectedAuthorIndexTable(authorIndexTable, analyticsMetrics, selectedAuthorIds)?.rows ?? [];
   const scientometricMetricParam = scientometricMetrics.join(",");
-  const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: dataSort, direction: dataDirection, limit: topN, authorIds: selectedAuthorIds });
+  const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: dataSort, direction: dataDirection, limit: topN });
   const scientometricParams = filterParams(filters, {
     fraction_mode: fractionMode,
     metrics: scientometricMetricParam,
@@ -1968,6 +2301,7 @@ function StatisticsPage({
     top_n: topN,
     run_id: runId,
     dump_id: dumpId,
+    custom_metric_defs: customMetricDefsQuery(customMetrics),
     ...selectionQuery,
   });
   const hasAnalyticsExportScope = Boolean(runId || dumpId);
@@ -1987,7 +2321,7 @@ function StatisticsPage({
     <div className="stack">
       <section className="notice">
         <b>Аналитика построена по выборке из “Данных”</b>
-        <span>Поиск, фильтры, сортировка, выбранные авторы и число строк задаются во вкладке “Данные”. Здесь показаны только понятные графики и выводы по этой выборке.</span>
+        <span>Поиск, фильтры, сортировка и число строк задаются во вкладке “Данные”. Отмеченные авторы подсвечиваются точками на графиках.</span>
       </section>
       {!hasAuthorIndices && (
         <section className="notice warn action-notice">
@@ -2011,35 +2345,16 @@ function StatisticsPage({
           <div>
             <span className="step-badge">Аналитика</span>
             <h2>Общая картина по выбранной выборке</h2>
-            <p>На этой странице нет отдельных фильтров. Все графики ниже автоматически используют поиск, ограничения, сортировку, число строк и выбранных авторов из вкладки “Данные”.</p>
+            <p>На этой странице нет отдельных фильтров. Все графики ниже автоматически используют поиск, ограничения, сортировку и число строк из вкладки “Данные”. Отмеченные авторы показываются отдельными точками.</p>
           </div>
           {loadingScientometrics && <span className="status-chip"><Loader2 size={14} className="spin" /> Обновление</span>}
         </div>
         <div className="analytics-context-line">
           <span><b>Строк из “Данных”:</b> {topN > 0 ? fmt(topN) : "все"}</span>
-          <span><b>Основной показатель:</b> {metricLabel(baselineMetric)}</span>
-          <span><b>Показатели:</b> {analyticsMetrics.map(metricLabel).join(", ")}</span>
+          <span><b>Основной показатель:</b> {metricLabelFor(baselineMetric, metricLabels)}</span>
+          <span><b>Показатели:</b> {analyticsMetrics.map((item) => metricLabelFor(item, metricLabels)).join(", ")}</span>
         </div>
       </section>
-      <div className="analytics-section-tabs" role="tablist" aria-label="Разделы аналитики">
-        {[
-          ["overview", "Обзор", "типичные значения и заметные отклонения"],
-          ["relations", "Связь показателей", "насколько показатели дают похожий порядок"],
-          ["findings", "Выводы", "короткие итоги и текст для отчета"],
-        ].map(([id, label, detail]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={section === id}
-            className={section === id ? "analytics-tab active" : "analytics-tab"}
-            onClick={() => setSection(id as "overview" | "relations" | "findings")}
-          >
-            <b>{label}</b>
-            <span>{detail}</span>
-          </button>
-        ))}
-      </div>
       {Boolean(scientometricsError) && (
         <section className="notice error">
           <b>Не удалось построить аналитический пакет</b>
@@ -2056,14 +2371,15 @@ function StatisticsPage({
       )}
       <section className="metric-grid">
         <MetricCard label="Авторов в анализе" value={fmt(scientometrics?.n_authors ?? 0)} />
-        <MetricCard label="Основной показатель" value={metricLabel(String(scientometrics?.scope?.baseline_metric ?? baselineMetric))} />
-        <MetricCard label="Авторов в сравнении" value={selectedAuthorIds.length ? fmt(selectedAuthorIds.length) : fmt(scientometrics?.rank_top_n ?? rankTopN)} />
+        <MetricCard label="Основной показатель" value={metricLabelFor(String(scientometrics?.scope?.baseline_metric ?? baselineMetric), metricLabels)} />
+        <MetricCard label="Авторов в выборке" value={fmt(scientometrics?.rank_top_n ?? rankTopN)} />
+        <MetricCard label="Точек на графиках" value={selectedAuthorIds.length ? fmt(selectedAuthorIds.length) : "нет"} />
         <MetricCard label="Показателей на графиках" value={fmt(analyticsMetrics.length)} />
       </section>
       {selectedAuthorIds.length > 0 && (
         <section className="notice success">
-          <b>Аналитика ограничена вручную выбранными авторами</b>
-          <span>Используется {fmt(selectedAuthorIds.length)} авторов из чекбоксов во вкладке “Данные”. Чтобы вернуться к общему числу строк и фильтрам, нажмите “Сбросить ограничения” на странице “Данные”.</span>
+          <b>На графиках отмечены выбранные авторы</b>
+          <span>Красные точки показывают {authorCountText(selectedAuthorIds.length)}, отмеченных в таблице “Данные”. Распределения и матрицы продолжают считаться по всей отфильтрованной выборке.</span>
         </section>
       )}
       {dataSearch.trim() && selectedAuthorIds.length === 0 && (
@@ -2091,59 +2407,53 @@ function StatisticsPage({
           )}
         </section>
       )}
-      {scientometrics && section === "overview" && (
+      {scientometrics && Number(scientometrics.n_authors ?? 0) > 0 && (
         <>
           <section className="panel">
             <div className="panel-head split">
               <div>
                 <span className="step-badge">Скачать</span>
-                <h2>Краткая сводка</h2>
+                <h2>Сводка и выгрузки</h2>
+                <p>Все файлы строятся по тем же ограничениям, что и графики ниже.</p>
               </div>
               <div className="download-inline">
                 {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.descriptive} label="Сводная таблица" compact />}
-              </div>
-            </div>
-          </section>
-          <AnalyticsOverviewPanel payload={scientometrics} metrics={analyticsMetrics} />
-        </>
-      )}
-      {scientometrics && section === "relations" && (
-        <>
-          <section className="panel">
-            <div className="panel-head split">
-              <div>
-                <span className="step-badge">Скачать</span>
-                <h2>Связь показателей и изменение мест</h2>
-              </div>
-              <div className="download-inline">
                 {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.correlations} label="Связь показателей" compact />}
                 {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.rankShifts} label="Изменение мест" compact />}
-                {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.largestRankShifts} label="Самые большие изменения" compact />}
-              </div>
-            </div>
-          </section>
-          <section className="analytics-large-grid">
-            <CorrelationMatrixPanels payload={scientometrics} method="spearman" metrics={analyticsMetrics} />
-            <RankShiftPanel payload={scientometrics} />
-          </section>
-        </>
-      )}
-      {scientometrics && section === "findings" && (
-        <>
-          <section className="panel">
-            <div className="panel-head split">
-              <div>
-                <span className="step-badge">Скачать</span>
-                <h2>Выводы и текст для отчета</h2>
-              </div>
-              <div className="download-inline">
                 {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.findings} label="Таблица выводов" compact />}
                 {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.conclusion} label="Текст заключения" compact />}
               </div>
             </div>
           </section>
-          <FindingsPanel payload={scientometrics} />
-          <ConclusionDraftPanel payload={scientometrics} />
+          <AnalyticsOverviewPanel payload={scientometrics} metrics={analyticsMetrics} metricLabels={metricLabels} />
+          <DistributionComparisonPanel
+            payload={scientometrics}
+            metrics={analyticsMetrics}
+            metricLabels={metricLabels}
+            highlightedAuthors={selectedAuthorRows}
+            loading={loadingScientometrics}
+            viewMode={distributionView}
+            onViewModeChange={setDistributionView}
+          />
+          <section className="panel">
+            <div className="panel-head split">
+              <div>
+                <span className="step-badge">Диапазоны</span>
+                <h2>Разброс значений</h2>
+                <p>Ящик с усами показывает середину распределения, типичный диапазон и резко выделяющиеся значения по каждому индексу.</p>
+              </div>
+              <button type="button" className={showBoxplot ? "choice-pill active" : "choice-pill"} onClick={() => setShowBoxplot(!showBoxplot)}>
+                {showBoxplot ? "Скрыть ящик с усами" : "Показать ящик с усами"}
+              </button>
+            </div>
+            {showBoxplot && <MetricBoxplotPanel payload={scientometrics} metrics={analyticsMetrics} metricLabels={metricLabels} />}
+          </section>
+          <section className="analytics-large-grid">
+            <CorrelationMatrixPanels payload={scientometrics} method="spearman" metrics={analyticsMetrics} metricLabels={metricLabels} />
+            <RankShiftPanel payload={scientometrics} metricLabels={metricLabels} />
+          </section>
+          <FindingsPanel payload={scientometrics} metricLabels={metricLabels} />
+          <ConclusionDraftPanel payload={scientometrics} metricLabels={metricLabels} />
         </>
       )}
     </div>
@@ -2170,7 +2480,7 @@ function ScientometricScopePanel({ payload, fallbackN }: { payload: any; fallbac
   );
 }
 
-function AnalyticsOverviewPanel({ payload, metrics }: { payload: ScientometricAnalysisPayload; metrics: string[] }) {
+function AnalyticsOverviewPanel({ payload, metrics, metricLabels }: { payload: ScientometricAnalysisPayload; metrics: string[]; metricLabels?: Record<string, string> }) {
   const rows = metrics
     .map((metricName) => {
       const descriptive = (payload.descriptive ?? {})[metricName] ?? {};
@@ -2197,18 +2507,19 @@ function AnalyticsOverviewPanel({ payload, metrics }: { payload: ScientometricAn
       <div className="metric-grid">
         <MetricCard label="Авторов в анализе" value={fmt(payload.n_authors ?? 0)} />
         <MetricCard label="Показателей" value={fmt(metrics.length)} />
-        <MetricCard label="Медиана основного показателя" value={medianBaseline ? `${metricLabel(medianBaseline.metricName)}: ${formatAnalysisValue(medianBaseline.median)}` : "—"} />
-        <MetricCard label="Больше всего выделяющихся значений" value={topOutlier ? `${metricLabel(topOutlier.metricName)}: ${fmt(topOutlier.outliers)}` : "—"} />
+        <MetricCard label="Медиана основного показателя" value={medianBaseline ? `${metricLabelFor(medianBaseline.metricName, metricLabels)}: ${formatAnalysisValue(medianBaseline.median)}` : "—"} />
+        <MetricCard label="Больше всего выделяющихся значений" value={topOutlier ? `${metricLabelFor(topOutlier.metricName, metricLabels)}: ${fmt(topOutlier.outliers)}` : "—"} />
       </div>
     </section>
   );
 }
 
-const CHART_COLORS = ["#155e75", "#167343", "#8a5a00", "#5b5fc7", "#9a3412", "#0f766e", "#7c3aed", "#be123c"];
+const CHART_COLORS = ["#155e75", "#167343", "#5b5fc7", "#0f766e", "#7c3aed", "#8a5a00", "#2563eb", "#64748b"];
 
 function DistributionComparisonPanel({
   payload,
   metrics,
+  metricLabels,
   highlightedAuthors,
   loading = false,
   viewMode,
@@ -2216,6 +2527,7 @@ function DistributionComparisonPanel({
 }: {
   payload: ScientometricAnalysisPayload;
   metrics: string[];
+  metricLabels?: Record<string, string>;
   highlightedAuthors?: Record<string, unknown>[];
   loading?: boolean;
   viewMode: "normalized" | "raw";
@@ -2252,7 +2564,7 @@ function DistributionComparisonPanel({
         </div>
       )}
       {visibleMetrics.length === 0 || (viewMode === "normalized" ? normalizedRows.length === 0 : rows.length === 0) ? (
-        <EmptyState title="Выберите хотя бы один индекс" detail="Включите показатель в блоке “Какие индексы показывать” выше." />
+        <EmptyState title="Выберите хотя бы один индекс" detail="Включите показатель в блоке “Какие индексы показывать” во вкладке “Индексы”." />
       ) : viewMode === "normalized" ? (
         <div className="chart-box main-distribution-chart">
           <ResponsiveContainer width="100%" height="100%">
@@ -2263,8 +2575,8 @@ function DistributionComparisonPanel({
               <Tooltip
                 labelFormatter={(value) => `Общая шкала: ${fmt(value)}`}
                 formatter={(value, name, item: any) => {
-                  if (item?.payload?.author) return [`${metricLabel(String(item.payload.metricName))}: ${formatAnalysisValue(item.payload.value)}`, item.payload.author];
-                  return [fmt(value), metricLabel(String(name))];
+                  if (item?.payload?.author) return [`${metricLabelFor(String(item.payload.metricName), metricLabels)}: ${formatAnalysisValue(item.payload.value)}`, item.payload.author];
+                  return [fmt(value), metricLabelFor(String(name), metricLabels)];
                 }}
               />
               {visibleMetrics.map((metricName, index) => (
@@ -2297,7 +2609,7 @@ function DistributionComparisonPanel({
           {rows.map((item, index) => (
             <div key={item.metricName} className="distribution-multiple-card">
               <div className="distribution-multiple-head">
-                <b>{metricLabel(item.metricName)}</b>
+                <b>{metricLabelFor(item.metricName, metricLabels)}</b>
                 <span>{fmt(item.rows.reduce((sum, row) => sum + row.count, 0))} авторов</span>
               </div>
               <div className="chart-box index-distribution-chart">
@@ -2313,7 +2625,7 @@ function DistributionComparisonPanel({
                         return row ? `${formatAnalysisValue(row.lo)} – ${formatAnalysisValue(row.hi)}` : "";
                       }}
                       formatter={(value, name, item: any) => {
-                        if (item?.payload?.author) return [`${metricLabel(String(item.payload.metricName))}: ${formatAnalysisValue(item.payload.value)}`, "выбранный автор"];
+                        if (item?.payload?.author) return [`${metricLabelFor(String(item.payload.metricName), metricLabels)}: ${formatAnalysisValue(item.payload.value)}`, "выбранный автор"];
                         return [fmt(value), "авторов"];
                       }}
                     />
@@ -2439,7 +2751,7 @@ function rawDistributionRows(payload: ScientometricAnalysisPayload, metricName: 
     .filter((row) => Number.isFinite(row.center) && Number.isFinite(row.count) && row.count >= 0);
 }
 
-function MetricBoxplotPanel({ payload, metrics }: { payload: ScientometricAnalysisPayload; metrics: string[] }) {
+function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: ScientometricAnalysisPayload; metrics: string[]; metricLabels?: Record<string, string> }) {
   const rows = metrics
     .map((metricName) => {
       const boxplot = (payload.boxplots ?? {})[metricName] ?? {};
@@ -2501,7 +2813,7 @@ function MetricBoxplotPanel({ payload, metrics }: { payload: ScientometricAnalys
         return (
           <div key={row.metricName} className="boxplot-simple-row">
             <div className="boxplot-simple-label">
-              <b>{metricLabel(row.metricName)}</b>
+              <b>{metricLabelFor(row.metricName, metricLabels)}</b>
               <span>медиана {formatAnalysisValue(row.median)}{row.outliers ? ` · выделяется ${fmt(row.outliers)}` : ""}</span>
             </div>
             <div
@@ -2526,7 +2838,7 @@ function numberOrNull(value: unknown) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function rankShiftChartRows(payload: ScientometricAnalysisPayload) {
+function rankShiftChartRows(payload: ScientometricAnalysisPayload, metricLabels?: Record<string, string>) {
   const comparisons = payload.rank_comparisons ?? {};
   return Object.entries(comparisons)
     .flatMap(([compareMetric, comparison]: [string, any]) => {
@@ -2535,8 +2847,8 @@ function rankShiftChartRows(payload: ScientometricAnalysisPayload) {
         const author = String(row.author_display_name || row.author_id || "Автор");
         const value = Number(row.abs_rank_delta ?? 0);
         return {
-          label: `${author.length > 24 ? `${author.slice(0, 23)}...` : author} · ${metricShortLabel(compareMetric)}`,
-          tooltip: `${author}: ${metricLabel(String(comparison?.baseline_metric ?? payload.scope?.baseline_metric ?? ""))} → ${metricLabel(compareMetric)}`,
+          label: `${author.length > 24 ? `${author.slice(0, 23)}...` : author} · ${metricShortLabel(compareMetric, metricLabels)}`,
+          tooltip: `${author}: ${metricLabelFor(String(comparison?.baseline_metric ?? payload.scope?.baseline_metric ?? ""), metricLabels)} → ${metricLabelFor(compareMetric, metricLabels)}`,
           value,
         };
       });
@@ -2552,7 +2864,7 @@ const CORRELATION_METRIC_GROUPS = [
   { title: "Дополнительные индексы", metrics: ["f5", "fm5", "iupv", "islv", "lrdi"] },
 ];
 
-function CorrelationMatrixPanels({ payload, method, metrics }: { payload: any; method: "spearman" | "pearson_log1p" | "kendall_tau_b"; metrics: string[] }) {
+function CorrelationMatrixPanels({ payload, method, metrics, metricLabels }: { payload: any; method: "spearman" | "pearson_log1p" | "kendall_tau_b"; metrics: string[]; metricLabels?: Record<string, string> }) {
   const matrix = method === "kendall_tau_b" ? payload?.correlations?.kendall_tau_b?.matrix ?? {} : payload?.correlations?.[method] ?? {};
   const skipped = payload?.correlations?.kendall_tau_b?.skipped ?? [];
   const groups = correlationMetricGroups(metrics);
@@ -2573,10 +2885,10 @@ function CorrelationMatrixPanels({ payload, method, metrics }: { payload: any; m
               <b>{group.title}</b>
               <div className="heatmap-grid compact-heatmap" style={{ gridTemplateColumns: `minmax(96px, 1fr) repeat(${group.metrics.length}, minmax(56px, 1fr))` }}>
                 <span />
-                {group.metrics.map((metricName) => <b key={metricName}>{metricShortLabel(metricName)}</b>)}
+                {group.metrics.map((metricName) => <b key={metricName}>{metricShortLabel(metricName, metricLabels)}</b>)}
                 {group.metrics.map((left) => (
                   <div className="heatmap-row-fragment" key={left}>
-                    <b>{metricShortLabel(left)}</b>
+                    <b>{metricShortLabel(left, metricLabels)}</b>
                     {group.metrics.map((right) => {
                       const value = matrix?.[left]?.[right];
                       return <span key={`${group.title}-${left}-${right}`} style={{ background: correlationColor(value) }}>{value === null || value === undefined ? "—" : fmt(value)}</span>;
@@ -2608,8 +2920,8 @@ function correlationMetricGroups(metrics: string[]) {
   return groups;
 }
 
-function RankShiftPanel({ payload }: { payload: ScientometricAnalysisPayload }) {
-  const rows = rankShiftChartRows(payload);
+function RankShiftPanel({ payload, metricLabels }: { payload: ScientometricAnalysisPayload; metricLabels?: Record<string, string> }) {
+  const rows = rankShiftChartRows(payload, metricLabels);
   return (
     <section className="panel">
       <div className="panel-head">
@@ -2636,7 +2948,7 @@ function RankShiftPanel({ payload }: { payload: ScientometricAnalysisPayload }) 
   );
 }
 
-function FindingsPanel({ payload }: { payload: ScientometricAnalysisPayload }) {
+function FindingsPanel({ payload, metricLabels }: { payload: ScientometricAnalysisPayload; metricLabels?: Record<string, string> }) {
   const findings = payload?.findings ?? [];
   const summary = payload?.finding_summary ?? {};
   if (!findings.length) return null;
@@ -2661,7 +2973,7 @@ function FindingsPanel({ payload }: { payload: ScientometricAnalysisPayload }) {
         <MetricCard label="Выводов" value={fmt(Number(summary.n_findings ?? findings.length))} />
         <MetricCard label="Важных" value={fmt(Number(summary.high_count ?? 0))} />
         <MetricCard label="Требуют внимания" value={fmt(Number(summary.medium_count ?? 0))} />
-        <MetricCard label="Рекомендуемый показатель" value={summary.candidate_metric ? metricLabel(String(summary.candidate_metric)) : "—"} />
+        <MetricCard label="Рекомендуемый показатель" value={summary.candidate_metric ? metricLabelFor(String(summary.candidate_metric), metricLabels) : "—"} />
       </div>
       {groups.map(([severity, title]) => {
         const items = visibleFindings.filter((item) => item.severity === severity);
@@ -2694,7 +3006,7 @@ function FindingsPanel({ payload }: { payload: ScientometricAnalysisPayload }) {
   );
 }
 
-function ConclusionDraftPanel({ payload }: { payload: ScientometricAnalysisPayload }) {
+function ConclusionDraftPanel({ payload, metricLabels }: { payload: ScientometricAnalysisPayload; metricLabels?: Record<string, string> }) {
   const draft = payload?.conclusion_draft;
   const paragraphs = draft?.paragraphs ?? [];
   if (!draft || !paragraphs.length) return null;
@@ -2714,7 +3026,7 @@ function ConclusionDraftPanel({ payload }: { payload: ScientometricAnalysisPaylo
               <small>Основания: {(paragraph.evidence_finding_ids ?? []).join(", ")}</small>
             )}
             {(paragraph.evidence_metrics ?? []).length > 0 && (
-              <small>Показатели: {(paragraph.evidence_metrics ?? []).map(metricLabel).join(", ")}</small>
+              <small>Показатели: {(paragraph.evidence_metrics ?? []).map((item) => metricLabelFor(item, metricLabels)).join(", ")}</small>
             )}
           </div>
         ))}
@@ -2744,6 +3056,8 @@ function ReportsPage({
   dataFilters,
   dataSort,
   dataDirection,
+  customMetrics,
+  metricLabels,
   onBuild,
   building,
   state,
@@ -2763,6 +3077,8 @@ function ReportsPage({
   dataFilters: TableColumnFilters;
   dataSort: string;
   dataDirection: "asc" | "desc";
+  customMetrics: CustomMetricDefinition[];
+  metricLabels: Record<string, string>;
   onBuild: () => void;
   building: boolean;
   state: any;
@@ -2782,6 +3098,7 @@ function ReportsPage({
     scientometric_metrics: scientometricMetrics.join(","),
     baseline_metric: baselineMetric,
     rank_top_n: rankTopN,
+    custom_metric_defs: customMetricDefsQuery(customMetrics),
     ...selectionQuery,
   });
   const rankingUrl = `${API_BASE}/analytics/ranking.csv?${reportParams.toString()}`;
@@ -2841,7 +3158,7 @@ function ReportsPage({
         )}
         <div className="notice">
           <b>Параметры пакета</b>
-          <span>Показатели: {scientometricMetrics.map(metricLabel).join(", ")}. Основной показатель: {metricLabel(baselineMetric)}. Строк из “Данных”: {rankTopN > 0 ? fmt(rankTopN) : "все"}. Ограничений по столбцам: {activeRestrictionCount}.</span>
+          <span>Показатели: {scientometricMetrics.map((item) => metricLabelFor(item, metricLabels)).join(", ")}. Основной показатель: {metricLabelFor(baselineMetric, metricLabels)}. Строк из “Данных”: {rankTopN > 0 ? fmt(rankTopN) : "все"}. Ограничений по столбцам: {activeRestrictionCount}.</span>
         </div>
       </section>
     </div>
@@ -3811,7 +4128,8 @@ function formatEvidenceValue(value: unknown) {
   return formatAnalysisValue(value);
 }
 
-function metricShortLabel(value: string) {
+function metricShortLabel(value: string, metricLabels?: Record<string, string>) {
+  if (metricLabels?.[value]) return metricLabels[value];
   const labels: Record<string, string> = {
     p: "Публикации",
     c: "Цитирования",

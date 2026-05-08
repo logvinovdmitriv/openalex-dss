@@ -135,7 +135,7 @@ def cohort_author_metrics_json(
     to_publication_date: str = "",
     work_type: str = "",
     metric: str = "",
-    limit: int = Query(100_000, ge=1, le=500_000),
+    limit: int = Query(100_000, ge=0, le=500_000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     filters = _analysis_filters(
@@ -205,7 +205,7 @@ def cohort_author_metrics_csv(
     to_publication_date: str = "",
     work_type: str = "",
     metric: str = "",
-    limit: int = Query(100_000, ge=1, le=500_000),
+    limit: int = Query(100_000, ge=0, le=500_000),
     offset: int = Query(0, ge=0),
 ) -> Response:
     filters = _analysis_filters(

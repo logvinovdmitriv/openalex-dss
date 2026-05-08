@@ -19,6 +19,7 @@ export function DataGrid({
   enableColumnFilters = false,
   columnFilters,
   onColumnFiltersChange,
+  fieldLabels = {},
 }: {
   data?: TableResponse;
   onSelect: (v: { kind: "author" | "work"; id: string }) => void;
@@ -34,6 +35,7 @@ export function DataGrid({
   enableColumnFilters?: boolean;
   columnFilters?: TableColumnFilters;
   onColumnFiltersChange?: (value: TableColumnFilters) => void;
+  fieldLabels?: Record<string, string>;
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [localColumnFilters, setLocalColumnFilters] = useState<TableColumnFilters>({});
@@ -65,10 +67,10 @@ export function DataGrid({
   };
   const columns = useMemo(() => fields.map((field) => ({
     accessorKey: field,
-    header: columnLabel(field),
+    header: fieldLabels[field] ?? columnLabel(field),
     sortingFn: (rowA: any, rowB: any, columnId: string) => compareSortValues(rowA.original?.[columnId], rowB.original?.[columnId]),
     cell: (info: CellContext<Record<string, unknown>, unknown>) => renderCell(field, info.getValue(), onSelect, info.row.original),
-  })), [fields, hiddenFields, onSelect]);
+  })), [fields, hiddenFields, onSelect, JSON.stringify(fieldLabels)]);
   const table = useReactTable({
     data: filteredRows,
     columns,

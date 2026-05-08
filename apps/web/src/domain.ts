@@ -40,6 +40,8 @@ export type SelectOption = {
   label: string;
   description?: string;
   example?: string;
+  formula?: string;
+  custom?: boolean;
 };
 
 export type ResearchAreaPreset = {

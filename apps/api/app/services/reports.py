@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from app.core.paths import DATA
-from app.services import cohorts, scientometrics, warehouse
+from app.services import cohorts, custom_metrics, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
@@ -33,8 +33,10 @@ def build_report_bundle(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     filters = _clean_filters(filters or {})
+    custom_metric_defs = custom_metrics.parse_custom_metrics(custom_metric_defs)
     data_filters = warehouse.parse_column_filters(data_filters)
     data_sort = str(data_sort or "").strip()
     data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
@@ -76,6 +78,7 @@ def build_report_bundle(
             data_sort=data_sort,
             data_direction=data_direction,
             data_limit=data_limit,
+            custom_metric_defs=custom_metric_defs,
         )
         return _preview_report(report_scope)
     report_scope = _report_scope(
@@ -97,6 +100,7 @@ def build_report_bundle(
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
     scope_hash = report_scope["report_scope_hash"]
     docs = _run_report_artifacts(run_id)
@@ -115,8 +119,28 @@ def build_report_bundle(
     analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
 
     data_selection_kwargs = _data_selection_kwargs(data_filters=data_filters, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit)
-    top = warehouse.metric_ranking(fraction_mode, metric, filters, limit=limit, max_limit=500, run_id=run_id, dump_id=dump_id, author_ids=cohort_author_ids, **data_selection_kwargs)
-    distribution = warehouse.metric_distribution(fraction_mode, metric, filters, run_id=run_id, dump_id=dump_id, author_ids=cohort_author_ids, **data_selection_kwargs)
+    top = warehouse.metric_ranking(
+        fraction_mode,
+        metric,
+        filters,
+        limit=limit,
+        max_limit=500,
+        run_id=run_id,
+        dump_id=dump_id,
+        author_ids=cohort_author_ids,
+        custom_metric_defs=custom_metric_defs,
+        **data_selection_kwargs,
+    )
+    distribution = warehouse.metric_distribution(
+        fraction_mode,
+        metric,
+        filters,
+        run_id=run_id,
+        dump_id=dump_id,
+        author_ids=cohort_author_ids,
+        custom_metric_defs=custom_metric_defs,
+        **data_selection_kwargs,
+    )
     resolved_dump_id = dump_id or str(top.get("dump_id") or calculation_passport.get("dump_id") or "")
     report_scope["dump_id"] = resolved_dump_id
     scientometric_analysis = scientometrics.build_scientometric_analysis(
@@ -133,7 +157,9 @@ def build_report_bundle(
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
+    custom_metric_query = json.dumps(custom_metric_defs, ensure_ascii=False) if custom_metric_defs else ""
     export_query = _query_params(
         {
             **filters,
@@ -148,6 +174,7 @@ def build_report_bundle(
             "data_sort": data_sort,
             "data_direction": data_direction if data_sort else "",
             "data_limit": data_limit if data_limit else "",
+            "custom_metric_defs": custom_metric_query,
         }
     )
     statistics_query = _query_params(
@@ -161,6 +188,7 @@ def build_report_bundle(
             "data_sort": data_sort,
             "data_direction": data_direction if data_sort else "",
             "data_limit": data_limit if data_limit else "",
+            "custom_metric_defs": custom_metric_query,
         }
     )
     bundle_query = _query_params(
@@ -180,6 +208,7 @@ def build_report_bundle(
             "data_sort": data_sort,
             "data_direction": data_direction if data_sort else "",
             "data_limit": data_limit if data_limit else "",
+            "custom_metric_defs": custom_metric_query,
         }
     )
     scientometric_query = _query_params(
@@ -197,6 +226,7 @@ def build_report_bundle(
             "data_sort": data_sort,
             "data_direction": data_direction if data_sort else "",
             "data_limit": data_limit if data_limit else "",
+            "custom_metric_defs": custom_metric_query,
         }
     )
     exports = {
@@ -237,6 +267,7 @@ def build_report_bundle(
         "data_sort": data_sort,
         "data_direction": data_direction,
         "data_limit": data_limit,
+        "custom_metrics": custom_metrics.metric_catalog(custom_metric_defs),
         "cohort_id": cohort_id,
         "cohort": _cohort_summary(cohort),
         "cohort_context": cohorts.cohort_context_summary(cohort_ctx) if cohort_ctx else None,
@@ -296,6 +327,7 @@ def report_bundle_json(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     return build_report_bundle(
         metric=metric,
@@ -313,6 +345,7 @@ def report_bundle_json(
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
 
 
@@ -388,6 +421,7 @@ def _report_scope(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     membership_filters = _clean_filters(cohort_membership_filters or {})
     data_filters = warehouse.parse_column_filters(data_filters)
@@ -395,6 +429,7 @@ def _report_scope(
     data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
     data_limit = max(0, min(_int_value(data_limit, 0), 500_000))
     scientometric_metric_list = _scientometric_metrics(scientometric_metrics)
+    custom_metric_defs = custom_metrics.parse_custom_metrics(custom_metric_defs)
     canonical = {
         "schema": REPORT_SCOPE_SCHEMA,
         "run_id": run_id,
@@ -415,6 +450,7 @@ def _report_scope(
         "fraction_mode": str(fraction_mode or "").strip(),
         "limit": int(limit or 0),
         "scientometric_metrics": scientometric_metric_list,
+        "custom_metrics": custom_metrics.metric_catalog(custom_metric_defs),
         "scientometric_analysis_schema": scientometrics.SCIENTOMETRIC_ANALYSIS_SCHEMA,
         "scientometric_findings_schema": scientometrics.SCIENTOMETRIC_FINDINGS_SCHEMA,
         "scientometric_conclusion_schema": scientometrics.SCIENTOMETRIC_CONCLUSION_SCHEMA,

@@ -297,12 +297,12 @@ def list_dumps(limit: int = 50) -> dict[str, Any]:
 
 
 def delete_dump(dump_id: str) -> dict[str, Any]:
-    raw_dump_id = str(dump_id or "").strip()
-    if not raw_dump_id:
+    requested_dump_id = str(dump_id or "").strip()
+    if not requested_dump_id:
         raise ValueError("dump_id is required")
-    dump = metadata_store.get_slice_dump_by_dump_id(raw_dump_id)
+    raw_dump_id, dump = _resolve_dump_record(requested_dump_id)
     if not dump:
-        raise KeyError(raw_dump_id)
+        raise KeyError(requested_dump_id)
     deleted_paths: list[str] = []
     for path in _dump_delete_paths(raw_dump_id, dump):
         if not path.exists():
@@ -316,7 +316,7 @@ def delete_dump(dump_id: str) -> dict[str, Any]:
     deleted_materializations = _delete_materializations_for_dump(raw_dump_id)
     db_result = metadata_store.delete_slice_dump_by_dump_id(raw_dump_id)
     active_context = artifact_context.read_active_context()
-    if str(active_context.get("active_dump_id") or "") == raw_dump_id:
+    if str(active_context.get("active_dump_id") or "") == raw_dump_id or str(active_context.get("active_run_id") or "") in deleted_runs:
         artifact_context.write_active_context(run_id="", dump_id="", source="deleted_local_slice")
     return {
         "deleted": True,
@@ -329,23 +329,25 @@ def delete_dump(dump_id: str) -> dict[str, Any]:
 
 
 def select_dump(dump_id: str) -> dict[str, Any]:
-    raw_dump_id = str(dump_id or "").strip()
-    if not raw_dump_id:
+    requested_dump_id = str(dump_id or "").strip()
+    if not requested_dump_id:
         raise ValueError("dump_id is required")
-    dump = metadata_store.get_slice_dump_by_dump_id(raw_dump_id)
+    raw_dump_id, dump = _resolve_dump_record(requested_dump_id)
     if not dump:
-        raise KeyError(raw_dump_id)
+        raise KeyError(requested_dump_id)
+    associated_run_id = _recent_run_for_dump(raw_dump_id)
     active_context = artifact_context.write_active_context(
-        run_id="",
+        run_id=associated_run_id,
         dump_id=raw_dump_id,
         source="selected_local_slice",
         extra={
             "slice_id": str(dump.get("slice_id") or ""),
+            "associated_run_id": associated_run_id,
             "allowed_for_final_analysis": dump.get("allowed_for_final_analysis"),
             "scientific_completeness": str(dump.get("scientific_completeness") or ""),
         },
     )
-    return {"status": "ok", "dump": dump, "active_context": active_context}
+    return {"status": "ok", "dump": dump, "associated_run_id": associated_run_id, "active_context": active_context}
 
 
 def mark_materialization_run_completed(run_id: str, result: dict[str, Any], *, materialization_id: str = "") -> None:
@@ -698,6 +700,48 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _resolve_dump_record(dump_id: str) -> tuple[str, dict[str, Any] | None]:
+    raw_dump_id = str(dump_id or "").strip()
+    if not raw_dump_id:
+        return "", None
+    exact = metadata_store.get_slice_dump_by_dump_id(raw_dump_id)
+    if exact:
+        return str(exact.get("dump_id") or raw_dump_id), exact
+    prefixed = raw_dump_id if raw_dump_id.startswith("dump_") else f"dump_{_safe_id(raw_dump_id)}"
+    if prefixed != raw_dump_id:
+        candidate = metadata_store.get_slice_dump_by_dump_id(prefixed)
+        if candidate:
+            return str(candidate.get("dump_id") or prefixed), candidate
+    safe_raw = _safe_id(raw_dump_id)
+    for candidate in metadata_store.list_slice_dumps(limit=250):
+        candidate_id = str(candidate.get("dump_id") or "")
+        safe_candidate = _safe_id(candidate_id)
+        if safe_candidate == safe_raw or safe_candidate == f"dump_{safe_raw}" or safe_candidate.endswith(f"_{safe_raw}"):
+            return candidate_id, candidate
+    return raw_dump_id, None
+
+
+def _recent_run_for_dump(dump_id: str) -> str:
+    target = _safe_id(str(dump_id or ""))
+    if not target:
+        return ""
+    best_run_id = ""
+    best_mtime = -1.0
+    for metric_run in (DATA / "runs").glob("run_*/metric_run.json"):
+        manifest = _read_json(metric_run)
+        manifest_dump_id = _safe_id(str(manifest.get("dump_id") or manifest.get("input_dump_id") or ""))
+        if manifest_dump_id != target:
+            continue
+        try:
+            mtime = metric_run.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        if mtime >= best_mtime:
+            best_mtime = mtime
+            best_run_id = metric_run.parent.name
+    return best_run_id
+
+
 def _dump_delete_paths(dump_id: str, dump: dict[str, Any]) -> list[Path]:
     safe_dump_id = _safe_id(dump_id)
     paths = [
@@ -726,9 +770,11 @@ def _dump_delete_paths(dump_id: str, dump: dict[str, Any]) -> list[Path]:
 def _delete_runs_for_dump(dump_id: str) -> list[str]:
     deleted: list[str] = []
     runs_dir = DATA / "runs"
+    target = _safe_id(dump_id)
     for metric_run in runs_dir.glob("run_*/metric_run.json"):
         manifest = _read_json(metric_run)
-        if str(manifest.get("dump_id") or manifest.get("input_dump_id") or "") != dump_id:
+        manifest_dump_id = _safe_id(str(manifest.get("dump_id") or manifest.get("input_dump_id") or ""))
+        if manifest_dump_id != target:
             continue
         run_dir = metric_run.parent
         shutil.rmtree(run_dir, ignore_errors=True)
@@ -738,11 +784,12 @@ def _delete_runs_for_dump(dump_id: str) -> list[str]:
 
 def _delete_materializations_for_dump(dump_id: str) -> list[str]:
     deleted: list[str] = []
+    target = _safe_id(dump_id)
     for path in MATERIALIZATIONS_DIR.glob("*.json"):
         plan = _read_json(path)
         dump_manifest = plan.get("dump_manifest") if isinstance(plan.get("dump_manifest"), dict) else {}
-        plan_dump_id = str(plan.get("dump_id") or dump_manifest.get("dump_id") or "")
-        if plan_dump_id != dump_id:
+        plan_dump_id = _safe_id(str(plan.get("dump_id") or dump_manifest.get("dump_id") or ""))
+        if plan_dump_id != target:
             continue
         try:
             path.unlink()

@@ -20,6 +20,13 @@ export type TableColumnFilter = {
 
 export type TableColumnFilters = Record<string, TableColumnFilter>;
 
+export type CustomMetricDefinition = {
+  id: string;
+  label: string;
+  description?: string;
+  expression: string;
+};
+
 export async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`);
   const data = await safeJson(res);
@@ -119,6 +126,7 @@ function apiFieldLabel(field: string) {
     dump_id: "Срез",
     metrics: "Показатели",
     baseline_metric: "Основной показатель",
+    custom_metric_defs: "Собственные формулы",
   };
   return labels[field] ?? field;
 }
@@ -132,7 +140,7 @@ function httpStatusMessage(status: number) {
     409: "Действие конфликтует с текущим состоянием данных.",
     422: "Некорректные параметры запроса.",
     429: "Слишком много запросов. Повторите позже.",
-    500: "Внутренняя ошибка сервера. Подробности есть в журнале backend.",
+    500: "Сервер не смог обработать запрос. Попробуйте обновить данные или изменить параметры.",
   };
   return labels[status] ?? `Ошибка сервера: ${status}`;
 }

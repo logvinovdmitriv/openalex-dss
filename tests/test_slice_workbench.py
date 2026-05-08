@@ -119,22 +119,49 @@ class SliceWorkbenchTests(unittest.TestCase):
         }
         with (
             patch.object(slice_workbench.metadata_store, "get_slice_dump_by_dump_id", return_value=dump),
+            patch.object(slice_workbench, "_recent_run_for_dump", return_value="run_select"),
             patch.object(slice_workbench.artifact_context, "write_active_context", return_value={"active_dump_id": "dump_select"}) as write_context,
         ):
             result = slice_workbench.select_dump("dump_select")
 
         self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["associated_run_id"], "run_select")
         self.assertEqual(result["active_context"]["active_dump_id"], "dump_select")
         write_context.assert_called_once_with(
-            run_id="",
+            run_id="run_select",
             dump_id="dump_select",
             source="selected_local_slice",
             extra={
                 "slice_id": "slice_select",
+                "associated_run_id": "run_select",
                 "allowed_for_final_analysis": True,
                 "scientific_completeness": "complete",
             },
         )
+
+    def test_select_dump_accepts_short_checksum_id(self) -> None:
+        dump = {
+            "dump_id": "dump_abc123",
+            "slice_id": "slice_short",
+            "allowed_for_final_analysis": True,
+            "scientific_completeness": "complete",
+        }
+
+        def fake_get_dump(value: str) -> dict[str, object] | None:
+            return dump if value == "dump_abc123" else None
+
+        with (
+            patch.object(slice_workbench.metadata_store, "get_slice_dump_by_dump_id", side_effect=fake_get_dump),
+            patch.object(slice_workbench, "_recent_run_for_dump", return_value="run_short"),
+            patch.object(slice_workbench.artifact_context, "write_active_context", return_value={"active_dump_id": "dump_abc123"}) as write_context,
+        ):
+            result = slice_workbench.select_dump("abc123")
+
+        self.assertEqual(result["dump"]["dump_id"], "dump_abc123")
+        self.assertEqual(result["associated_run_id"], "run_short")
+        write_context.assert_called_once()
+        self.assertEqual(write_context.call_args.kwargs["run_id"], "run_short")
+        self.assertEqual(write_context.call_args.kwargs["dump_id"], "dump_abc123")
 
     def test_workbench_summary_carries_quality_and_slice_centric_workflow(self) -> None:
         quality = {"quality_counts": {"works_without_authorships": 2, "authorships_null_author_id": 1}}

@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.services.analysis_filters import build_analysis_filters
-from app.services import cohorts, reports, warehouse
+from app.services import cohorts, custom_metrics, reports, warehouse
 
 
 router = APIRouter(tags=["reports"])
@@ -46,14 +46,15 @@ def build_report(
     work_type: str = "",
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=0, le=500_000),
     scientometric_metrics: str = "p,c,cpp,h,i10,g",
     baseline_metric: str = "h",
-    rank_top_n: int = Query(100, ge=1, le=1000),
+    rank_top_n: int = Query(100, ge=0, le=500_000),
     data_filters: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = Query(0, ge=0, le=500_000),
+    custom_metric_defs: str = "",
 ) -> dict[str, Any]:
     filters = build_analysis_filters(
         country_code=country_code,
@@ -97,6 +98,7 @@ def build_report(
             data_sort=data_sort,
             data_direction=data_direction,
             data_limit=data_limit,
+            custom_metric_defs=custom_metrics.parse_custom_metrics(custom_metric_defs),
         )
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
@@ -138,14 +140,15 @@ def report_bundle(
     work_type: str = "",
     cohort_id: str = "",
     cohort_filter_policy: str = "membership",
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=0, le=500_000),
     scientometric_metrics: str = "p,c,cpp,h,i10,g",
     baseline_metric: str = "h",
-    rank_top_n: int = Query(100, ge=1, le=1000),
+    rank_top_n: int = Query(100, ge=0, le=500_000),
     data_filters: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = Query(0, ge=0, le=500_000),
+    custom_metric_defs: str = "",
 ) -> Response:
     filters = build_analysis_filters(
         country_code=country_code,
@@ -189,6 +192,7 @@ def report_bundle(
             data_sort=data_sort,
             data_direction=data_direction,
             data_limit=data_limit,
+            custom_metric_defs=custom_metrics.parse_custom_metrics(custom_metric_defs),
         )
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc

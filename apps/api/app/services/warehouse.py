@@ -11,6 +11,7 @@ from typing import Any
 import duckdb
 
 from app.core.paths import DATA, SRC, TABLE_KINDS, WAREHOUSE
+from app.services import custom_metrics
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -110,8 +111,11 @@ def resolve_scoped_table_path(
 
 def resolve_analysis_scope(*, run_id: str = "", dump_id: str = "") -> dict[str, str]:
     run_id = str(run_id or "").strip()
-    dump_id = str(dump_id or "").strip()
+    dump_id = _resolve_dump_id(str(dump_id or "").strip())
+    if not run_id and dump_id:
+        run_id = _recent_run_for_dump(dump_id)
     expected_dump_id = _dump_id_for_run(run_id) if run_id else ""
+    expected_dump_id = _resolve_dump_id(expected_dump_id)
     if run_id and dump_id and expected_dump_id and _safe_id(dump_id) != _safe_id(expected_dump_id):
         raise ValueError(f"dump_id={dump_id} is incompatible with run_id={run_id}; expected {expected_dump_id}")
     return {"run_id": run_id, "dump_id": dump_id or expected_dump_id}
@@ -461,7 +465,7 @@ def apply_data_selection(
     data_direction: str = "desc",
     data_limit: int = 0,
 ) -> list[dict[str, Any]]:
-    """Apply the Data-page author selection contract to in-memory metric rows."""
+    """Apply the Data page filter, search, sort and row limit contract to in-memory metric rows."""
     selected = filter_rows_by_column_filters(rows, data_filters, ignore_unknown_fields=True)
     search = str(data_search or "").strip().lower()
     if search:
@@ -794,8 +798,9 @@ def metric_ranking(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    if metric not in INDEX_NUMERIC_FIELDS:
+    if not _metric_supported(metric, custom_metric_defs):
         raise ValueError(f"Unsupported metric: {metric}")
     rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     rows = filter_rows_by_author_ids(rows, author_ids)
@@ -807,6 +812,7 @@ def metric_ranking(
         data_direction=data_direction,
         data_limit=data_limit,
     )
+    rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     return metric_ranking_from_rows(
         rows,
         fraction_mode,
@@ -816,6 +822,7 @@ def metric_ranking(
         max_limit=max_limit,
         run_id=run_id,
         dump_id=dump_id,
+        custom_metric_defs=custom_metric_defs,
     )
 
 
@@ -829,12 +836,13 @@ def metric_ranking_from_rows(
     max_limit: int = 200,
     run_id: str = "",
     dump_id: str = "",
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    if metric not in INDEX_NUMERIC_FIELDS:
+    if not _metric_supported(metric, custom_metric_defs, rows):
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     ranked = []
-    visible_metrics = _visible_metrics(rows)
+    visible_metrics = _visible_metrics(rows, custom_metric_defs)
     for row in sort_metric_rows(rows, metric):
         item = {
             "author_id": row["author_id"],
@@ -863,6 +871,7 @@ def metric_ranking_from_rows(
         "total": len(ranked),
         "limit": requested_limit,
         "offset": 0,
+        "custom_metrics": custom_metrics.metric_catalog(custom_metric_defs),
     }
 
 
@@ -879,8 +888,9 @@ def metric_distribution(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    if metric not in INDEX_NUMERIC_FIELDS:
+    if not _metric_supported(metric, custom_metric_defs):
         raise ValueError(f"Unsupported metric: {metric}")
     rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     rows = filter_rows_by_author_ids(rows, author_ids)
@@ -892,7 +902,8 @@ def metric_distribution(
         data_direction=data_direction,
         data_limit=data_limit,
     )
-    return metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id)
+    rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
+    return metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id, custom_metric_defs=custom_metric_defs)
 
 
 def metric_distribution_from_rows(
@@ -902,9 +913,10 @@ def metric_distribution_from_rows(
     *,
     run_id: str = "",
     dump_id: str = "",
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     del fraction_mode
-    if metric not in INDEX_NUMERIC_FIELDS:
+    if not _metric_supported(metric, custom_metric_defs, rows):
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     values = sorted(_as_float(row.get(metric)) for row in rows)
@@ -915,6 +927,7 @@ def metric_distribution_from_rows(
     summary["metric_scope"] = "filtered_recomputed"
     summary["percentile_scope"] = "current filtered author set"
     summary["metric_params"] = _run_metric_params(scope["run_id"])
+    summary["custom_metrics"] = custom_metrics.metric_catalog(custom_metric_defs)
     return summary
 
 
@@ -927,10 +940,12 @@ def metric_line_series(
     limit: int = 30,
     run_id: str = "",
     dump_id: str = "",
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    if rank_metric not in INDEX_NUMERIC_FIELDS:
+    if not _metric_supported(rank_metric, custom_metric_defs):
         raise ValueError(f"Unsupported rank metric: {rank_metric}")
     rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     return metric_line_series_from_rows(
         rows,
         fraction_mode,
@@ -939,6 +954,7 @@ def metric_line_series(
         limit=limit,
         run_id=run_id,
         dump_id=dump_id,
+        custom_metric_defs=custom_metric_defs,
     )
 
 
@@ -951,11 +967,12 @@ def metric_line_series_from_rows(
     limit: int = 30,
     run_id: str = "",
     dump_id: str = "",
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    if rank_metric not in INDEX_NUMERIC_FIELDS:
+    if not _metric_supported(rank_metric, custom_metric_defs, rows):
         raise ValueError(f"Unsupported rank metric: {rank_metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
-    selected_metrics = tuple(metric for metric in (metrics or _visible_metrics(rows)) if metric in INDEX_NUMERIC_FIELDS)
+    selected_metrics = tuple(metric for metric in (metrics or _visible_metrics(rows, custom_metric_defs)) if _metric_supported(metric, custom_metric_defs, rows))
     rows = sort_metric_rows(rows, rank_metric)
 
     ranges: dict[str, tuple[float, float]] = {}
@@ -992,6 +1009,7 @@ def metric_line_series_from_rows(
         "rows": out,
         "total": len(rows),
         "limit": limit,
+        "custom_metrics": custom_metrics.metric_catalog(custom_metric_defs),
     }
 
 
@@ -1009,8 +1027,9 @@ def metric_bundle(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    if metric not in INDEX_NUMERIC_FIELDS:
+    if not _metric_supported(metric, custom_metric_defs):
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     rows = filtered_indices(fraction_mode, filters, run_id=scope["run_id"], dump_id=scope["dump_id"])
@@ -1023,11 +1042,12 @@ def metric_bundle(
         data_direction=data_direction,
         data_limit=data_limit,
     )
+    rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     return {
         "rows": rows,
-        "distribution": metric_distribution_from_rows(rows, fraction_mode, metric, run_id=scope["run_id"], dump_id=scope["dump_id"]),
-        "ranking": metric_ranking_from_rows(rows, fraction_mode, metric, filters, limit=limit, max_limit=200, run_id=scope["run_id"], dump_id=scope["dump_id"]),
-        "line_series": metric_line_series_from_rows(rows, fraction_mode, rank_metric=metric, limit=40, run_id=scope["run_id"], dump_id=scope["dump_id"]),
+        "distribution": metric_distribution_from_rows(rows, fraction_mode, metric, run_id=scope["run_id"], dump_id=scope["dump_id"], custom_metric_defs=custom_metric_defs),
+        "ranking": metric_ranking_from_rows(rows, fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=scope["run_id"], dump_id=scope["dump_id"], custom_metric_defs=custom_metric_defs),
+        "line_series": metric_line_series_from_rows(rows, fraction_mode, rank_metric=metric, limit=40, run_id=scope["run_id"], dump_id=scope["dump_id"], custom_metric_defs=custom_metric_defs),
     }
 
 
@@ -1304,14 +1324,24 @@ def _truthy(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
-def _visible_metrics(rows: list[dict[str, Any]]) -> list[str]:
+def _metric_supported(metric: str, custom_metric_defs: list[dict[str, str]] | None = None, rows: list[dict[str, Any]] | None = None) -> bool:
+    metric = str(metric or "").strip()
+    if metric in INDEX_NUMERIC_FIELDS:
+        return True
+    if metric in custom_metrics.custom_metric_ids(custom_metric_defs):
+        return True
+    return bool(rows and any(metric in row for row in rows))
+
+
+def _visible_metrics(rows: list[dict[str, Any]], custom_metric_defs: list[dict[str, str]] | None = None) -> list[str]:
+    custom_ids = [definition["id"] for definition in custom_metric_defs or []]
     if not rows:
-        return list(LINE_CHART_METRICS)
+        return [*LINE_CHART_METRICS, *custom_ids]
     if any("two_year_mean_citedness" in row for row in rows):
         order = NATIVE_LINE_CHART_METRICS
     else:
         order = EXTENDED_LINE_CHART_METRICS
-    return [metric for metric in order if any(metric in row for row in rows)]
+    return [metric for metric in (*order, *custom_ids) if any(metric in row for row in rows)]
 
 
 def _mean(values: list[float]) -> float:
@@ -1342,7 +1372,21 @@ def _run_dir(run_id: str) -> Path:
 
 
 def _dump_table_path(dump_id: str, table: str) -> Path:
-    return DATA / "tables" / _safe_id(dump_id) / f"{table}.parquet"
+    return DATA / "tables" / _safe_id(_resolve_dump_id(dump_id)) / f"{table}.parquet"
+
+
+def _resolve_dump_id(dump_id: str) -> str:
+    raw = str(dump_id or "").strip()
+    if not raw:
+        return ""
+    safe = _safe_id(raw)
+    if (DATA / "tables" / safe).exists() or (DATA / "dumps" / safe).exists():
+        return raw
+    if not safe.startswith("dump_"):
+        candidate = f"dump_{safe}"
+        if (DATA / "tables" / candidate).exists() or (DATA / "dumps" / candidate).exists():
+            return candidate
+    return raw
 
 
 def _run_table_path(run_id: str, table: str) -> Path | None:
@@ -1404,3 +1448,27 @@ def _dump_id_for_run(run_id: str) -> str:
     except (OSError, json.JSONDecodeError):
         return ""
     return str(doc.get("input_dump_id") or doc.get("dump_id") or "")
+
+
+def _recent_run_for_dump(dump_id: str) -> str:
+    target = _safe_id(_resolve_dump_id(str(dump_id or "")))
+    if not target:
+        return ""
+    best_run_id = ""
+    best_mtime = -1.0
+    for metric_run in (DATA / "runs").glob("run_*/metric_run.json"):
+        try:
+            doc = json.loads(metric_run.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        run_dump_id = _safe_id(_resolve_dump_id(str(doc.get("input_dump_id") or doc.get("dump_id") or "")))
+        if run_dump_id != target:
+            continue
+        try:
+            mtime = metric_run.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        if mtime >= best_mtime:
+            best_mtime = mtime
+            best_run_id = metric_run.parent.name
+    return best_run_id

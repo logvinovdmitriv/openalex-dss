@@ -218,9 +218,9 @@ def cohort_author_metrics(
     rows = warehouse.filter_rows_by_author_ids(rows, ctx.get("author_ids"))
     rows = warehouse.sort_metric_rows(rows, sort_metric)
     total = len(rows)
-    limit = max(1, min(int(limit), 500_000))
+    limit = max(0, min(int(limit), 500_000))
     offset = max(0, int(offset))
-    page = rows[offset: offset + limit]
+    page = rows[offset:] if limit <= 0 else rows[offset: offset + limit]
     fields = _metric_fields(page or rows)
     return {
         "table": "cohort_author_metrics",

@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
-from app.services import cohorts, scientometrics, warehouse
+from app.services import cohorts, custom_metrics, scientometrics, warehouse
 from app.services.analysis_filters import build_analysis_filters
 
 
@@ -55,7 +55,8 @@ def analytics(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = Query(0, ge=0, le=500_000),
-    limit: int = Query(20, ge=1, le=200),
+    custom_metric_defs: str = "",
+    limit: int = Query(20, ge=0, le=500_000),
 ) -> dict[str, Any]:
     requested_run_id = run_id
     requested_dump_id = dump_id
@@ -101,6 +102,7 @@ def analytics(
             run_id=run_id,
             dump_id=dump_id,
             author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
+            custom_metric_defs=_custom_metric_defs(custom_metric_defs),
             **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
         )
         distribution = bundle["distribution"]
@@ -184,6 +186,7 @@ def distribution(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = Query(0, ge=0, le=500_000),
+    custom_metric_defs: str = "",
 ) -> dict[str, Any]:
     requested_run_id = run_id
     requested_dump_id = dump_id
@@ -227,6 +230,7 @@ def distribution(
             run_id=run_id,
             dump_id=dump_id,
             author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
+            custom_metric_defs=_custom_metric_defs(custom_metric_defs),
             **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
         )
         payload["cohort"] = cohort_ctx["cohort"]
@@ -290,6 +294,7 @@ def ranking_json(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = Query(0, ge=0, le=500_000),
+    custom_metric_defs: str = "",
     limit: int = Query(100, ge=0, le=500_000),
 ) -> dict[str, Any]:
     requested_run_id = run_id
@@ -336,6 +341,7 @@ def ranking_json(
             run_id=run_id,
             dump_id=dump_id,
             author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
+            custom_metric_defs=_custom_metric_defs(custom_metric_defs),
             **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
         )
         payload["cohort"] = cohort_ctx["cohort"]
@@ -397,6 +403,7 @@ def ranking_csv(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = Query(0, ge=0, le=500_000),
+    custom_metric_defs: str = "",
     limit: int = Query(100_000, ge=0, le=500_000),
 ) -> Response:
     try:
@@ -438,6 +445,7 @@ def ranking_csv(
             data_sort=data_sort,
             data_direction=data_direction,
             data_limit=data_limit,
+            custom_metric_defs=custom_metric_defs,
             limit=limit,
         )
     except HTTPException:
@@ -499,6 +507,7 @@ def scientometric_analysis(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = Query(0, ge=0, le=500_000),
+    custom_metric_defs: str = "",
 ) -> dict[str, Any]:
     filters = _slice_filters(
         country_code=country_code,
@@ -543,6 +552,7 @@ def scientometric_analysis(
             data_sort=data_sort,
             data_direction=data_direction,
             data_limit=data_limit,
+            custom_metric_defs=_custom_metric_defs(custom_metric_defs),
         )
         _annotate_scope_payload(
             payload,
@@ -839,14 +849,19 @@ def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
         "dump_id": query.get("dump_id", ""),
         "cohort_id": query.get("cohort_id", ""),
         "cohort_filter_policy": query.get("cohort_filter_policy", "membership"),
-        "top_n": max(1, min(_int_query(query.get("top_n"), 100), 1000)),
+        "top_n": max(0, min(_int_query(query.get("top_n"), 100), 1000)),
         "data_filters": warehouse.parse_column_filters(query.get("data_filters", "")),
         "data_search": query.get("data_search", ""),
         "author_ids": _author_ids_query(query.get("author_ids", "")),
         "data_sort": query.get("data_sort", ""),
         "data_direction": query.get("data_direction", "desc"),
         "data_limit": max(0, min(_int_query(query.get("data_limit"), 0), 500_000)),
+        "custom_metric_defs": _custom_metric_defs(query.get("custom_metric_defs", "")),
     }
+
+
+def _custom_metric_defs(raw: str) -> list[dict[str, str]]:
+    return custom_metrics.parse_custom_metrics(raw)
 
 
 def _data_selection_kwargs(

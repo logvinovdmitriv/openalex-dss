@@ -213,7 +213,7 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def resolve_dump_tables(dump_id: str, *, required: bool = True) -> dict[str, Path]:
-    safe_dump_id = _safe_id(str(dump_id or ""))
+    safe_dump_id = _safe_id(_resolve_dump_id(str(dump_id or "")))
     base = DATA / "tables" / safe_dump_id
     tables = {
         "works": base / "works.parquet",
@@ -244,7 +244,7 @@ def _normalize_dump_to_scope(source: Path, dump_id: str) -> tuple[dict[str, Any]
 
 
 def _dump_scoped_parquet_sources(dump_id: str) -> dict[str, Path]:
-    base = DATA / "dumps" / _safe_id(str(dump_id or "")) / "parquet"
+    base = DATA / "dumps" / _safe_id(_resolve_dump_id(str(dump_id or ""))) / "parquet"
     return {
         "works": base / "works_flat.parquet",
         "authorships": base / "authorships_flat.parquet",
@@ -271,7 +271,7 @@ def _write_dump_manifest_if_present(dump_id: str, dump_manifest: dict[str, Any])
 
 
 def _clear_stale_dump_manifest(dump_id: str) -> None:
-    raw_dump_id = str(dump_id or "").strip()
+    raw_dump_id = _resolve_dump_id(str(dump_id or "").strip())
     if not raw_dump_id:
         return
     path = DATA / "dumps" / _safe_id(raw_dump_id) / "dump_manifest.json"
@@ -280,7 +280,7 @@ def _clear_stale_dump_manifest(dump_id: str) -> None:
 
 
 def _dump_provenance_primary_artifacts(dump_id: str) -> dict[str, Path]:
-    raw_dump_id = str(dump_id or "").strip()
+    raw_dump_id = _resolve_dump_id(str(dump_id or "").strip())
     if not raw_dump_id:
         return {}
     dump_dir = DATA / "dumps" / _safe_id(raw_dump_id)
@@ -605,6 +605,7 @@ def analysis_eligibility_from_dump(dump: dict[str, Any], *, dev_override: bool =
 def _recover_analysis_eligibility(payload: dict[str, Any], *, dump_id: str = "", run_id: str = "") -> dict[str, Any]:
     if isinstance(payload.get("analysis_eligibility"), dict):
         return payload["analysis_eligibility"]
+    dump_id = _resolve_dump_id(dump_id)
     if dump_id:
         manifest = _read_artifact_json(DATA / "dumps" / _safe_id(dump_id) / "dump_manifest.json")
         recovered = _analysis_eligibility_from_manifest(manifest)
@@ -638,6 +639,20 @@ def _read_artifact_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _resolve_dump_id(dump_id: str) -> str:
+    raw = str(dump_id or "").strip()
+    if not raw:
+        return ""
+    safe = _safe_id(raw)
+    if (DATA / "tables" / safe).exists() or (DATA / "dumps" / safe).exists():
+        return raw
+    if not safe.startswith("dump_"):
+        candidate = f"dump_{safe}"
+        if (DATA / "tables" / candidate).exists() or (DATA / "dumps" / candidate).exists():
+            return candidate
+    return raw
 
 
 def _allow_unchecked_download() -> bool:

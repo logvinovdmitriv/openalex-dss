@@ -79,7 +79,10 @@ class AnalyticsRouteTests(unittest.TestCase):
         filters = captured["filters"]
         self.assertEqual(captured["fraction_mode"], "integer")
         self.assertEqual(captured["metric"], "h")
-        self.assertEqual(captured["kwargs"], {"limit": 25, "max_limit": 500_000, "run_id": "run_a", "dump_id": "dump_a", "author_ids": None})
+        self.assertEqual(
+            captured["kwargs"],
+            {"limit": 25, "max_limit": 500_000, "run_id": "run_a", "dump_id": "dump_a", "author_ids": None, "custom_metric_defs": []},
+        )
         self.assertEqual(filters["country_code"], "RU")
         self.assertEqual(filters["filter_mode"], "keyword")
         self.assertEqual(filters["keyword_id"], "https://openalex.org/K1")
@@ -198,6 +201,24 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["data_sort"], "h")
         self.assertEqual(captured["data_direction"], "asc")
         self.assertEqual(captured["data_limit"], 25)
+
+    def test_analytics_accepts_zero_limit_for_all_rows(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_bundle(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> dict[str, object]:
+            del fraction_mode, metric, filters
+            captured.update(kwargs)
+            table = {"fields": ["author_id", "score"], "rows": [], "total": 0, "run_id": "run_a", "dump_id": "dump_a"}
+            return {"distribution": {"run_id": "run_a", "dump_id": "dump_a"}, "ranking": table, "line_series": {"rows": []}}
+
+        with (
+            patch.object(analytics_routes.warehouse, "metric_bundle", side_effect=fake_bundle),
+            patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
+        ):
+            payload = analytics_routes.analytics(run_id="run_a", dump_id="dump_a", fraction_mode="integer", metric="h", limit=0)
+
+        self.assertEqual(captured["limit"], 0)
+        self.assertEqual(payload["scope_status"], "explicit_scope")
 
     def test_distribution_without_scope_requires_scope(self) -> None:
         with (
