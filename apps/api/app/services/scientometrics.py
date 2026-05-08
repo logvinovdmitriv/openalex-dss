@@ -49,6 +49,7 @@ FINDING_THRESHOLDS = {
 }
 DEFAULT_OVERLAP_CUTS = (10, 20, 50)
 KENDALL_MAX_EXACT_N = 1000
+ANALYSIS_CACHE_KEEP = 24
 SCORECARD_FACTORS = {
     "publication_volume_dependence": "p",
     "citation_volume_dependence": "c",
@@ -314,8 +315,24 @@ def _write_analysis_cache(path: Path, payload: dict[str, Any]) -> None:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
         os.replace(tmp, path)
+        _prune_analysis_cache(path.parent)
     except OSError:
         return
+
+
+def _prune_analysis_cache(cache_dir: Path, keep: int = ANALYSIS_CACHE_KEEP) -> None:
+    if keep <= 0:
+        return
+    try:
+        files = [path for path in cache_dir.glob("scientometrics_*.json") if path.is_file()]
+        files.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    except OSError:
+        return
+    for stale in files[keep:]:
+        try:
+            stale.unlink()
+        except OSError:
+            continue
 
 
 def describe_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, Any]:

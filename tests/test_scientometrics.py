@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -526,6 +527,22 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(first["n_authors"], 3)
         self.assertEqual(second["n_authors"], 3)
         self.assertEqual(selected.call_count, 1)
+
+    def test_scientometric_analysis_cache_prunes_old_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp)
+            for index in range(30):
+                path = cache_dir / f"scientometrics_{index:02d}.json"
+                path.write_text("{}\n", encoding="utf-8")
+                os.utime(path, (index, index))
+            target = cache_dir / "scientometrics_new.json"
+            scientometrics._write_analysis_cache(target, {"schema": scientometrics.SCIENTOMETRIC_ANALYSIS_SCHEMA})
+
+            files = sorted(path.name for path in cache_dir.glob("scientometrics_*.json"))
+
+        self.assertIn("scientometrics_new.json", files)
+        self.assertLessEqual(len(files), scientometrics.ANALYSIS_CACHE_KEEP)
+        self.assertNotIn("scientometrics_00.json", files)
 
 
 if __name__ == "__main__":
