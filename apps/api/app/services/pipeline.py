@@ -23,7 +23,7 @@ from openalex_dss.normalize import normalize_raw  # noqa: E402
 from openalex_dss.passports import build_passports  # noqa: E402
 from openalex_dss.ranking import build_ratings  # noqa: E402
 
-StageProgressCallback = Callable[[int, str, dict[str, Any] | None], None]
+StageProgressCallback = Callable[[int | None, str, dict[str, Any] | None], None]
 
 
 def recalculate(payload: dict[str, Any], progress_callback: StageProgressCallback | None = None) -> dict[str, Any]:
@@ -430,12 +430,15 @@ def _table_manifest(paths: dict[str, Path], checksums: dict[str, str]) -> dict[s
 
 def _emit_progress(
     progress_callback: StageProgressCallback | None,
-    percent: int,
+    percent: int | None,
     stage: str,
     extra: dict[str, Any] | None = None,
 ) -> None:
     if progress_callback:
-        progress_callback(max(0, min(99, int(percent))), stage, extra)
+        # Pipeline stages have predictable order but not a reliable duration or
+        # row-level denominator, so they are reported as named stages without a
+        # synthetic percentage.
+        progress_callback(None, stage, extra)
 
 
 def _cfg(payload: dict[str, Any]) -> Any:

@@ -1510,8 +1510,23 @@ input[aria-invalid="true"] {
   transition: width 220ms ease;
 }
 
+.progress-track span.indeterminate {
+  width: 36% !important;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: progress-indeterminate 1.15s ease-in-out infinite;
+}
+
 .progress-track.error span {
   background: #dc2626;
+}
+
+@keyframes progress-indeterminate {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(280%);
+  }
 }
 
 .run-id-line {
@@ -2114,6 +2129,22 @@ input[aria-invalid="true"] {
   display: inline-flex;
   align-items: center;
   background: #e3f1ff;
+}
+
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding: 12px 0 0;
+  color: #52677d;
+  font-size: 13px;
+}
+
+.action-row.compact {
+  margin-top: 0;
+  gap: 6px;
 }
 
 .column-menu {

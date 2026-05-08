@@ -46,6 +46,72 @@ class WarehouseTests(unittest.TestCase):
 
         self.assertEqual([row["author_id"] for row in selected], ["A3"])
 
+    def test_selected_index_rows_reads_precomputed_indices_without_slice_filters(self) -> None:
+        with (
+            patch.object(warehouse, "table_exists", return_value=True),
+            patch.object(warehouse, "table_schema", return_value=["fraction_mode", "author_id", "author_display_name", "h"]),
+            patch.object(
+                warehouse,
+                "query_table",
+                return_value={
+                    "rows": [{"fraction_mode": "integer", "author_id": "A1", "author_display_name": "Author One", "h": 3}],
+                    "total": 1,
+                    "limit": 1,
+                },
+            ) as query_table,
+            patch.object(warehouse, "filtered_indices", return_value=[]) as filtered_indices,
+        ):
+            rows = warehouse.selected_index_rows("integer", {}, run_id="run_a", data_sort="h", data_limit=1)
+
+        self.assertEqual(rows[0]["author_id"], "A1")
+        filtered_indices.assert_not_called()
+        query_table.assert_called_once_with(
+            "indices",
+            run_id="run_a",
+            dump_id="",
+            q="",
+            fraction_mode="integer",
+            data_filters={},
+            sort="h",
+            direction="desc",
+            limit=1,
+        )
+
+    def test_selected_index_rows_treats_filter_mode_all_as_unfiltered(self) -> None:
+        with (
+            patch.object(warehouse, "table_exists", return_value=True),
+            patch.object(warehouse, "table_schema", return_value=["fraction_mode", "author_id", "h"]),
+            patch.object(
+                warehouse,
+                "query_table",
+                return_value={
+                    "rows": [{"fraction_mode": "integer", "author_id": "A1", "h": 3}],
+                    "total": 1,
+                    "limit": 0,
+                },
+            ) as query_table,
+            patch.object(warehouse, "filtered_indices", return_value=[]) as filtered_indices,
+        ):
+            rows = warehouse.selected_index_rows("integer", {"filter_mode": "all", "affiliation_mode": "historical"}, run_id="run_a")
+
+        self.assertEqual(rows[0]["author_id"], "A1")
+        filtered_indices.assert_not_called()
+        query_table.assert_called_once()
+        self.assertEqual(query_table.call_args.kwargs["limit"], 0)
+
+    def test_selected_index_rows_recomputes_when_work_level_filters_are_present(self) -> None:
+        source_rows = [{"author_id": "A1", "author_display_name": "Author One", "h": 3, "p": 1}]
+        with (
+            patch.object(warehouse, "table_exists", return_value=True),
+            patch.object(warehouse, "query_table") as query_table,
+            patch.object(warehouse, "filtered_indices", return_value=source_rows) as filtered_indices,
+        ):
+            rows = warehouse.selected_index_rows("integer", {"country_code": "RU"}, run_id="run_a")
+
+        self.assertEqual(rows, source_rows)
+        query_table.assert_not_called()
+        filtered_indices.assert_called_once()
+
     def test_metric_ranking_with_empty_author_id_filter_returns_no_rows(self) -> None:
         rows = [
             {"author_id": "https://openalex.org/A1", "author_display_name": "Author One", "h": 3, "p": 4, "c": 10},

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import math
 from statistics import NormalDist
 from typing import Any
@@ -43,6 +44,13 @@ FINDING_THRESHOLDS = {
 }
 DEFAULT_OVERLAP_CUTS = (10, 20, 50)
 KENDALL_MAX_EXACT_N = 1000
+SCORECARD_FACTORS = {
+    "publication_volume_dependence": "p",
+    "citation_volume_dependence": "c",
+    "fractional_citation_dependence": "c_frac",
+    "top1_dominance_dependence": "top1_share",
+    "collaboration_size_dependence": "mean_authors_per_work",
+}
 _NORMAL = NormalDist()
 
 
@@ -94,18 +102,20 @@ def build_scientometric_analysis(
     rank_top_n = context["rank_top_n"]
     rows = context["rows"]
 
-    descriptive = describe_metrics(rows, selected_metrics)
-    boxplots = boxplot_metrics(rows, selected_metrics)
-    histograms = histogram_metrics(rows, selected_metrics)
-    normality = normality_metrics(rows, selected_metrics)
-    correlations = correlation_matrices(rows, selected_metrics)
-    rank_comparison_payload = rank_comparisons(rows, selected_metrics, baseline_metric=baseline_metric, rank_top_n=rank_top_n)
-    scorecard = metric_scorecard(rows, selected_metrics, descriptive=descriptive)
+    value_vectors = _metric_value_vectors(rows, _unique_preserve_order([*selected_metrics, *SCORECARD_FACTORS.values()]))
+    descriptive = _describe_metrics_from_vectors(len(rows), selected_metrics, value_vectors)
+    boxplots = _boxplot_metrics_from_vectors(rows, selected_metrics, value_vectors)
+    histograms = _histogram_metrics_from_vectors(selected_metrics, value_vectors)
+    normality = _normality_metrics_from_vectors(selected_metrics, value_vectors)
+    correlations = correlation_matrices(rows, selected_metrics, value_vectors=value_vectors)
+    rank_comparison_payload = rank_comparisons(rows, selected_metrics, baseline_metric=baseline_metric, rank_top_n=min(rank_top_n, len(rows) or rank_top_n))
+    scorecard = metric_scorecard(rows, selected_metrics, descriptive=descriptive, value_vectors=value_vectors)
     warnings = _analysis_warnings(
         rows,
         selected_metrics,
         cohort_filter_policy=cohort_filter_policy,
         rank_top_n=rank_top_n,
+        descriptive=descriptive,
         boxplots=boxplots,
         correlations=correlations,
         custom_metric_catalog=context["custom_metrics"],
@@ -179,17 +189,45 @@ def build_scientometric_analysis(
 
 
 def describe_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, Any]:
-    return {metric: _describe_metric(rows, metric) for metric in metrics}
+    return _describe_metrics_from_vectors(len(rows), metrics, _metric_value_vectors(rows, metrics))
+
+
+def _describe_metrics_from_vectors(
+    n_total: int,
+    metrics: list[str] | tuple[str, ...],
+    value_vectors: dict[str, list[float | None]],
+) -> dict[str, Any]:
+    return {
+        metric: _describe_values([value for value in value_vectors.get(metric, []) if value is not None], n_total)
+        for metric in metrics
+    }
 
 
 def boxplot_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, Any]:
-    return {metric: _boxplot_metric(rows, metric) for metric in metrics}
+    return _boxplot_metrics_from_vectors(rows, metrics, _metric_value_vectors(rows, metrics))
+
+
+def _boxplot_metrics_from_vectors(
+    rows: list[dict[str, Any]],
+    metrics: list[str] | tuple[str, ...],
+    value_vectors: dict[str, list[float | None]],
+) -> dict[str, Any]:
+    return {metric: _boxplot_values(rows, value_vectors.get(metric, [])) for metric in metrics}
 
 
 def histogram_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...], *, bins: int = 12) -> dict[str, Any]:
+    return _histogram_metrics_from_vectors(metrics, _metric_value_vectors(rows, metrics), bins=bins)
+
+
+def _histogram_metrics_from_vectors(
+    metrics: list[str] | tuple[str, ...],
+    value_vectors: dict[str, list[float | None]],
+    *,
+    bins: int = 12,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     for metric in metrics:
-        values = _metric_values(rows, metric)
+        values = [value for value in value_vectors.get(metric, []) if value is not None]
         payload[metric] = {
             "raw": _histogram(values, bins=bins),
             "log1p": _histogram([math.log1p(max(0.0, value)) for value in values], bins=bins),
@@ -198,9 +236,16 @@ def histogram_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str
 
 
 def normality_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, Any]:
+    return _normality_metrics_from_vectors(metrics, _metric_value_vectors(rows, metrics))
+
+
+def _normality_metrics_from_vectors(
+    metrics: list[str] | tuple[str, ...],
+    value_vectors: dict[str, list[float | None]],
+) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     for metric in metrics:
-        values = _metric_values(rows, metric)
+        values = [value for value in value_vectors.get(metric, []) if value is not None]
         log_values = [math.log1p(max(0.0, value)) for value in values]
         payload[metric] = {
             "raw": _normality_for_values(values),
@@ -209,12 +254,25 @@ def normality_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str
     return payload
 
 
-def correlation_matrices(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, Any]:
+def correlation_matrices(
+    rows: list[dict[str, Any]],
+    metrics: list[str] | tuple[str, ...],
+    *,
+    value_vectors: dict[str, list[float | None]] | None = None,
+) -> dict[str, Any]:
     selected = list(metrics)
+    if value_vectors is None or any(metric not in value_vectors for metric in selected):
+        value_vectors = _metric_value_vectors(rows, selected)
+    log_vectors = {
+        metric: [math.log1p(max(0.0, value)) if value is not None else None for value in values]
+        for metric, values in value_vectors.items()
+        if metric in selected
+    }
+    rank_vectors = _rank_vectors({metric: value_vectors.get(metric, []) for metric in selected})
     return {
-        "pearson_log1p": _correlation_matrix(rows, selected, method="pearson_log1p"),
-        "spearman": _correlation_matrix(rows, selected, method="spearman"),
-        "kendall_tau_b": _kendall_tau_b_matrix(rows, selected),
+        "pearson_log1p": _correlation_matrix_from_vectors(selected, log_vectors),
+        "spearman": _correlation_matrix_from_vectors(selected, rank_vectors),
+        "kendall_tau_b": _kendall_tau_b_matrix_from_vectors(selected, value_vectors),
     }
 
 
@@ -232,33 +290,58 @@ def rank_comparisons(
     ranks = {metric: _competition_ranks(rows, metric) for metric in selected}
     overlap_cuts = _overlap_cuts(rank_top_n)
     top_overlap = _top_overlap_matrix(ranks, overlap_cuts)
-    full_shift_rows = rank_shift_rows(rows, selected, baseline_metric=baseline_metric)
+    author_names = {
+        str(row.get("author_id") or ""): str(row.get("author_display_name") or row.get("display_name") or "")
+        for row in rows
+        if str(row.get("author_id") or "").strip()
+    }
     comparisons: dict[str, Any] = {}
+    baseline_ranks = ranks.get(baseline_metric, {})
+    top_base = _top_exact_set(baseline_ranks, rank_top_n)
     for metric in selected:
         if metric == baseline_metric:
             continue
-        deltas = [row for row in full_shift_rows if row["compare_metric"] == metric]
-        abs_values = [float(item["abs_rank_delta"]) for item in deltas]
-        baseline_ranks = ranks.get(baseline_metric, {})
         metric_ranks = ranks.get(metric, {})
-        top_base = _top_exact_set(baseline_ranks, rank_top_n)
+        common_author_ids = sorted(set(baseline_ranks) & set(metric_ranks))
+        abs_values: list[float] = []
+        largest_shifts_heap: list[tuple[int, str, int, dict[str, Any]]] = []
+        for candidate_index, author_id in enumerate(common_author_ids):
+            rank_delta = metric_ranks[author_id] - baseline_ranks[author_id]
+            abs_delta = abs(rank_delta)
+            abs_values.append(float(abs_delta))
+            candidate = {
+                "baseline_metric": baseline_metric,
+                "compare_metric": metric,
+                "author_id": author_id,
+                "author_display_name": author_names.get(author_id, ""),
+                "baseline_rank": baseline_ranks[author_id],
+                "metric_rank": metric_ranks[author_id],
+                "rank_delta": rank_delta,
+                "abs_rank_delta": abs_delta,
+            }
+            heap_item = (int(abs_delta), str(author_id), candidate_index, candidate)
+            if len(largest_shifts_heap) < 20:
+                heapq.heappush(largest_shifts_heap, heap_item)
+            elif heap_item[:2] > largest_shifts_heap[0][:2]:
+                heapq.heapreplace(largest_shifts_heap, heap_item)
         top_metric = _top_exact_set(metric_ranks, rank_top_n)
         top_overlap_exact = len(top_base & top_metric)
         jaccard_exact = _jaccard(top_base, top_metric)
+        ordered_abs_values = sorted(abs_values)
         comparisons[metric] = {
             "baseline_metric": baseline_metric,
             "metric": metric,
-            "n_common_authors": len(deltas),
-            "median_abs_delta": _quantile(abs_values, 0.5) if abs_values else None,
-            "p90_abs_delta": _quantile(abs_values, 0.9) if abs_values else None,
+            "n_common_authors": len(common_author_ids),
+            "median_abs_delta": _quantile_sorted(ordered_abs_values, 0.5) if ordered_abs_values else None,
+            "p90_abs_delta": _quantile_sorted(ordered_abs_values, 0.9) if ordered_abs_values else None,
             "max_abs_delta": max(abs_values) if abs_values else None,
             "share_abs_delta_le_5": _share(abs_values, lambda value: value <= 5.0),
             "top_overlap_exact": top_overlap_exact,
             "top_overlap": top_overlap_exact,
             "jaccard_top_n_exact": jaccard_exact,
             "jaccard_top_n": jaccard_exact,
-            "rank_shift_count": len(deltas),
-            "largest_shifts": sorted(deltas, key=lambda item: (-item["abs_rank_delta"], item["author_id"]))[:20],
+            "rank_shift_count": len(common_author_ids),
+            "largest_shifts": sorted((item[3] for item in largest_shifts_heap), key=lambda item: (-int(item["abs_rank_delta"]), str(item["author_id"]))),
         }
     return {"comparisons": comparisons, "top_overlap": top_overlap}
 
@@ -343,10 +426,21 @@ def build_outlier_export_rows(
     return outlier_rows(context["rows"], context["metrics"])
 
 
-def rank_shift_rows(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...], *, baseline_metric: str = "h") -> list[dict[str, Any]]:
+def rank_shift_rows(
+    rows: list[dict[str, Any]],
+    metrics: list[str] | tuple[str, ...],
+    *,
+    baseline_metric: str = "h",
+    sort_output: bool = True,
+) -> list[dict[str, Any]]:
     selected = list(metrics)
     ranks = {metric: _competition_ranks(rows, metric) for metric in selected}
     baseline_ranks = ranks.get(baseline_metric, {})
+    author_names = {
+        str(row.get("author_id") or ""): str(row.get("author_display_name") or row.get("display_name") or "")
+        for row in rows
+        if str(row.get("author_id") or "").strip()
+    }
     payload: list[dict[str, Any]] = []
     for metric in selected:
         if metric == baseline_metric:
@@ -359,13 +453,15 @@ def rank_shift_rows(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, 
                     "baseline_metric": baseline_metric,
                     "compare_metric": metric,
                     "author_id": author_id,
-                    "author_display_name": _author_name(rows, author_id),
+                    "author_display_name": author_names.get(author_id, ""),
                     "baseline_rank": baseline_ranks[author_id],
                     "metric_rank": metric_ranks[author_id],
                     "rank_delta": rank_delta,
                     "abs_rank_delta": abs(rank_delta),
                 }
             )
+    if not sort_output:
+        return payload
     return sorted(payload, key=lambda item: (str(item["compare_metric"]), -int(item["abs_rank_delta"]), str(item["author_id"])))
 
 
@@ -381,19 +477,18 @@ def metric_scorecard(
     metrics: list[str] | tuple[str, ...],
     *,
     descriptive: dict[str, Any] | None = None,
+    value_vectors: dict[str, list[float | None]] | None = None,
 ) -> dict[str, Any]:
     descriptive = descriptive or describe_metrics(rows, metrics)
-    factors = {
-        "publication_volume_dependence": "p",
-        "citation_volume_dependence": "c",
-        "fractional_citation_dependence": "c_frac",
-        "top1_dominance_dependence": "top1_share",
-        "collaboration_size_dependence": "mean_authors_per_work",
-    }
+    factors = SCORECARD_FACTORS
+    vector_metrics = _unique_preserve_order([*metrics, *factors.values()])
+    if value_vectors is None or any(metric not in value_vectors for metric in vector_metrics):
+        value_vectors = _metric_value_vectors(rows, vector_metrics)
+    rank_vectors = _rank_vectors({metric: value_vectors.get(metric, []) for metric in vector_metrics})
     payload: dict[str, Any] = {}
     for metric in metrics:
         metric_payload = {
-            label: _dependence_payload(_spearman_for_metrics(rows, metric, factor))
+            label: _dependence_payload(_pearson_paired_vectors(rank_vectors.get(metric, []), rank_vectors.get(factor, [])))
             for label, factor in factors.items()
             if metric != factor
         }
@@ -1124,25 +1219,27 @@ def _analysis_context(
     if explicit_author_ids is not None:
         scoped_author_ids = explicit_author_ids if scoped_author_ids is None else set(scoped_author_ids).intersection(explicit_author_ids)
 
-    rows = warehouse.filtered_indices(fraction_mode, resolved_filters, run_id=run_id, dump_id=dump_id)
-    rows = warehouse.filter_rows_by_author_ids(rows, scoped_author_ids)
     parsed_data_filters = warehouse.parse_column_filters(data_filters)
     data_search = str(data_search or "").strip()
     data_sort = str(data_sort or "").strip()
     data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
     data_limit = max(0, min(_int_value(data_limit, 0), 500_000))
-    rows = warehouse.apply_data_selection(
-        rows,
+    rows = warehouse.selected_index_rows(
+        fraction_mode,
+        resolved_filters,
+        run_id=run_id,
+        dump_id=dump_id,
+        author_ids=scoped_author_ids,
         data_filters=parsed_data_filters,
         data_search=data_search,
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
-    rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     rank_top_n = requested_rank_top_n if requested_rank_top_n > 0 else max(1, len(rows))
     custom_ids = {item["id"] for item in custom_metric_defs or []}
-    selected_metrics = [metric for metric in selected_metrics if _has_metric_data(rows, metric) or metric in warehouse.INDEX_NUMERIC_FIELDS or metric in custom_ids]
+    selected_metrics = [metric for metric in selected_metrics if metric in warehouse.INDEX_NUMERIC_FIELDS or metric in custom_ids]
     return {
         "metrics": selected_metrics,
         "baseline_metric": baseline_metric,
@@ -1192,6 +1289,7 @@ def _analysis_warnings(
     *,
     cohort_filter_policy: str,
     rank_top_n: int,
+    descriptive: dict[str, Any],
     boxplots: dict[str, Any],
     correlations: dict[str, Any],
     custom_metric_catalog: list[dict[str, Any]] | None = None,
@@ -1205,7 +1303,7 @@ def _analysis_warnings(
         warnings.append("В выборке меньше 20 авторов; выводы о распределениях нужно трактовать осторожно.")
     if rows and len(rows) > rank_top_n:
         warnings.append("Ограничение числа авторов влияет на сравнение мест; описательная статистика считается по текущей выборке со страницы «Данные».")
-    missing_metrics = [metric for metric in metrics if not _metric_values(rows, metric)]
+    missing_metrics = [metric for metric in metrics if int((descriptive.get(metric) or {}).get("n") or 0) <= 0]
     if missing_metrics and rows:
         warnings.append(f"Для показателей нет числовых значений: {_metric_list_text_for_catalog(missing_metrics, custom_metric_catalog)}.")
     iqr_zero_metrics = [
@@ -1230,7 +1328,7 @@ def _interpretation(
 ) -> dict[str, Any]:
     notes = [
         "Все диагностики считаются внутри выбранного локального среза и группы авторов.",
-        "Rank and correlation diagnostics are descriptive; they do not replace expert assessment.",
+        "Ранговые и корреляционные диагностики являются описательными и не заменяют экспертную оценку.",
     ]
     candidate_basis: list[str] = []
     if "islv" in metrics:
@@ -1239,12 +1337,12 @@ def _interpretation(
             "использует процентильные компоненты внутри локального среза",
             "учитывает долевой вклад цитирований",
             "использует штраф за концентрацию цитирований в одной работе",
-            "is a candidate indicator, not an automatically proven best metric",
+            "является кандидатным показателем, а не автоматически доказанным лучшим индексом",
         ]
     if "c" in metrics:
         top1_dependence = ((scorecard.get("c") or {}).get("top1_dominance_dependence") or {}).get("abs_spearman_rho")
         if top1_dependence is not None and top1_dependence > 0.5:
-            notes.append("Total citations show elevated association with top1_share, so one highly cited work may strongly affect rank positions.")
+            notes.append("Суммарные цитирования заметно связаны с долей самой цитируемой работы, поэтому одна очень цитируемая публикация может сильно влиять на места.")
     return {
         "candidate_balanced_metric": "islv" if rows and "islv" in metrics else None,
         "candidate_balanced_metric_basis": candidate_basis if rows and "islv" in metrics else [],
@@ -1255,8 +1353,11 @@ def _interpretation(
 
 
 def _describe_metric(rows: list[dict[str, Any]], metric: str) -> dict[str, Any]:
-    values = sorted(_metric_values(rows, metric))
-    n_total = len(rows)
+    return _describe_values(_metric_values(rows, metric), len(rows))
+
+
+def _describe_values(values: list[float], n_total: int) -> dict[str, Any]:
+    values = sorted(value for value in values if math.isfinite(value))
     n = len(values)
     missing_count = n_total - n
     if not values:
@@ -1287,13 +1388,17 @@ def _describe_metric(rows: list[dict[str, Any]], metric: str) -> dict[str, Any]:
     mean = sum(values) / n
     variance = sum((value - mean) ** 2 for value in values) / n
     stddev = math.sqrt(variance)
-    q1 = _quantile(values, 0.25)
-    median = _quantile(values, 0.5)
-    q3 = _quantile(values, 0.75)
+    q1 = _quantile_sorted(values, 0.25)
+    median = _quantile_sorted(values, 0.5)
+    q3 = _quantile_sorted(values, 0.75)
     iqr = q3 - q1
     zero_count = sum(1 for value in values if value == 0.0)
     unique_count = len(set(values))
-    outliers = _iqr_outlier_values(values)
+    outlier_count = 0
+    if iqr != 0.0:
+        low = q1 - 1.5 * iqr
+        high = q3 + 1.5 * iqr
+        outlier_count = sum(1 for value in values if value < low or value > high)
     return {
         "n": n,
         "missing_count": missing_count,
@@ -1308,20 +1413,24 @@ def _describe_metric(rows: list[dict[str, Any]], metric: str) -> dict[str, Any]:
         "stddev": stddev,
         "coefficient_of_variation": (stddev / mean) if mean else None,
         "iqr": iqr,
-        "p90": _quantile(values, 0.9),
-        "p95": _quantile(values, 0.95),
-        "p99": _quantile(values, 0.99),
+        "p90": _quantile_sorted(values, 0.9),
+        "p95": _quantile_sorted(values, 0.95),
+        "p99": _quantile_sorted(values, 0.99),
         "skewness": _skewness(values, mean, stddev),
         "excess_kurtosis": _excess_kurtosis(values, mean, stddev),
         "tie_rate": (n - unique_count) / n if n else None,
         "unique_count": unique_count,
-        "outlier_count_iqr": len(outliers),
-        "outlier_share_iqr": len(outliers) / n if n else None,
+        "outlier_count_iqr": outlier_count,
+        "outlier_share_iqr": outlier_count / n if n else None,
     }
 
 
 def _boxplot_metric(rows: list[dict[str, Any]], metric: str) -> dict[str, Any]:
-    pairs = _metric_pairs(rows, metric)
+    return _boxplot_values(rows, [_number(row.get(metric)) for row in rows])
+
+
+def _boxplot_values(rows: list[dict[str, Any]], raw_values: list[float | None]) -> dict[str, Any]:
+    pairs = [(row, value) for row, value in zip(rows, raw_values) if value is not None and math.isfinite(value)]
     values = sorted(value for _, value in pairs)
     if not values:
         return {
@@ -1333,9 +1442,9 @@ def _boxplot_metric(rows: list[dict[str, Any]], metric: str) -> dict[str, Any]:
             "iqr": None,
             "outliers": [],
         }
-    q1 = _quantile(values, 0.25)
-    median = _quantile(values, 0.5)
-    q3 = _quantile(values, 0.75)
+    q1 = _quantile_sorted(values, 0.25)
+    median = _quantile_sorted(values, 0.5)
+    q3 = _quantile_sorted(values, 0.75)
     iqr = q3 - q1
     if iqr == 0.0:
         return {
@@ -1410,8 +1519,8 @@ def _normality_for_values(values: list[float]) -> dict[str, Any]:
             "excess_kurtosis": None,
             "jarque_bera": None,
             "jarque_bera_p_approx": None,
-            "qq": _qq_points(values),
-            "note": "At least 3 observations are required for skewness and Jarque-Bera diagnostics.",
+            "qq": _qq_points(values, presorted=True),
+            "note": "Для оценки асимметрии и критерия Жарка-Бера нужны как минимум 3 наблюдения.",
         }
     mean = sum(values) / n
     stddev = math.sqrt(sum((value - mean) ** 2 for value in values) / n)
@@ -1429,13 +1538,14 @@ def _normality_for_values(values: list[float]) -> dict[str, Any]:
         "excess_kurtosis": kurtosis,
         "jarque_bera": jb,
         "jarque_bera_p_approx": p_value,
-        "qq": _qq_points(values),
-        "note": "Jarque-Bera p-value uses the chi-square df=2 survival approximation exp(-JB/2).",
+        "qq": _qq_points(values, presorted=True),
+        "note": "p-значение критерия Жарка-Бера рассчитано по приближению хи-квадрат с 2 степенями свободы.",
     }
 
 
-def _qq_points(values: list[float], *, max_points: int = 101) -> list[dict[str, float]]:
-    values = sorted(value for value in values if math.isfinite(value))
+def _qq_points(values: list[float], *, max_points: int = 101, presorted: bool = False) -> list[dict[str, float]]:
+    if not presorted:
+        values = sorted(value for value in values if math.isfinite(value))
     n = len(values)
     if not values:
         return []
@@ -1453,41 +1563,53 @@ def _qq_points(values: list[float], *, max_points: int = 101) -> list[dict[str, 
 
 
 def _correlation_matrix(rows: list[dict[str, Any]], metrics: list[str], *, method: str) -> dict[str, dict[str, float | None]]:
+    value_vectors = _metric_value_vectors(rows, metrics)
+    if method == "pearson_log1p":
+        vectors = {
+            metric: [math.log1p(max(0.0, value)) if value is not None else None for value in values]
+            for metric, values in value_vectors.items()
+        }
+    else:
+        vectors = _rank_vectors(value_vectors)
+    return _correlation_matrix_from_vectors(metrics, vectors)
+
+
+def _correlation_matrix_from_vectors(metrics: list[str], vectors: dict[str, list[float | None]]) -> dict[str, dict[str, float | None]]:
     matrix: dict[str, dict[str, float | None]] = {metric: {} for metric in metrics}
     for left in metrics:
+        left_values = vectors.get(left, [])
         for right in metrics:
-            pairs = _paired_values(rows, left, right)
-            if method == "pearson_log1p":
-                x_values = [math.log1p(max(0.0, pair[0])) for pair in pairs]
-                y_values = [math.log1p(max(0.0, pair[1])) for pair in pairs]
-                value = _pearson(x_values, y_values)
-            else:
-                value = _spearman_pairs(pairs)
-            matrix[left][right] = value
+            matrix[left][right] = _pearson_paired_vectors(left_values, vectors.get(right, []))
     return matrix
 
 
 def _kendall_tau_b_matrix(rows: list[dict[str, Any]], metrics: list[str]) -> dict[str, Any]:
+    return _kendall_tau_b_matrix_from_vectors(metrics, _metric_value_vectors(rows, metrics))
+
+
+def _kendall_tau_b_matrix_from_vectors(metrics: list[str], value_vectors: dict[str, list[float | None]]) -> dict[str, Any]:
     matrix: dict[str, dict[str, float | None]] = {metric: {} for metric in metrics}
     skipped: list[dict[str, Any]] = []
     for left in metrics:
+        left_values = value_vectors.get(left, [])
         for right in metrics:
-            pairs = _paired_values(rows, left, right)
+            right_values = value_vectors.get(right, [])
+            paired_count = _paired_count_vectors(left_values, right_values)
             if left == right:
-                matrix[left][right] = 1.0 if len(pairs) >= 2 else None
+                matrix[left][right] = 1.0 if paired_count >= 2 else None
                 continue
-            if len(pairs) > KENDALL_MAX_EXACT_N:
+            if paired_count > KENDALL_MAX_EXACT_N:
                 matrix[left][right] = None
                 skipped.append(
                     {
                         "left": left,
                         "right": right,
-                        "n": len(pairs),
-                        "reason": f"exact Kendall tau-b skipped above {KENDALL_MAX_EXACT_N} paired observations",
+                        "n": paired_count,
+                        "reason": f"Точный коэффициент Кендалла не рассчитывается при числе пар больше {KENDALL_MAX_EXACT_N}.",
                     }
                 )
             else:
-                matrix[left][right] = _kendall_tau_b(pairs)
+                matrix[left][right] = _kendall_tau_b(_paired_values_from_vectors(left_values, right_values))
     return {
         "matrix": matrix,
         "method": "exact_tau_b_skipped_above_limit",
@@ -1498,6 +1620,71 @@ def _kendall_tau_b_matrix(rows: list[dict[str, Any]], metrics: list[str]) -> dic
 
 def _spearman_for_metrics(rows: list[dict[str, Any]], left: str, right: str) -> float | None:
     return _spearman_pairs(_paired_values(rows, left, right))
+
+
+def _metric_value_vectors(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, list[float | None]]:
+    vectors = {metric: [] for metric in metrics}
+    for row in rows:
+        for metric in metrics:
+            vectors[metric].append(_number(row.get(metric)))
+    return vectors
+
+
+def _rank_vectors(vectors: dict[str, list[float | None]]) -> dict[str, list[float | None]]:
+    return {metric: _average_rank_vector(values) for metric, values in vectors.items()}
+
+
+def _average_rank_vector(values: list[float | None]) -> list[float | None]:
+    valid = sorted((value, index) for index, value in enumerate(values) if value is not None)
+    ranks: list[float | None] = [None for _ in values]
+    position = 0
+    while position < len(valid):
+        end = position
+        while end + 1 < len(valid) and valid[end + 1][0] == valid[position][0]:
+            end += 1
+        average_rank = (position + 1 + end + 1) / 2.0
+        for offset in range(position, end + 1):
+            ranks[valid[offset][1]] = average_rank
+        position = end + 1
+    return ranks
+
+
+def _pearson_paired_vectors(left_values: list[float | None], right_values: list[float | None]) -> float | None:
+    n = 0
+    sum_x = 0.0
+    sum_y = 0.0
+    sum_x2 = 0.0
+    sum_y2 = 0.0
+    sum_xy = 0.0
+    for left, right in zip(left_values, right_values):
+        if left is None or right is None:
+            continue
+        n += 1
+        sum_x += left
+        sum_y += right
+        sum_x2 += left * left
+        sum_y2 += right * right
+        sum_xy += left * right
+    if n < 2:
+        return None
+    numerator = n * sum_xy - sum_x * sum_y
+    x_denominator = n * sum_x2 - sum_x * sum_x
+    y_denominator = n * sum_y2 - sum_y * sum_y
+    if x_denominator <= 0.0 or y_denominator <= 0.0:
+        return None
+    return numerator / math.sqrt(x_denominator * y_denominator)
+
+
+def _paired_count_vectors(left_values: list[float | None], right_values: list[float | None]) -> int:
+    return sum(1 for left, right in zip(left_values, right_values) if left is not None and right is not None)
+
+
+def _paired_values_from_vectors(left_values: list[float | None], right_values: list[float | None]) -> list[tuple[float, float]]:
+    return [
+        (left, right)
+        for left, right in zip(left_values, right_values)
+        if left is not None and right is not None
+    ]
 
 
 def _paired_values(rows: list[dict[str, Any]], left: str, right: str) -> list[tuple[float, float]]:
@@ -1581,14 +1768,15 @@ def _competition_ranks(rows: list[dict[str, Any]], metric: str) -> dict[str, int
 
 def _top_overlap_matrix(ranks: dict[str, dict[str, int]], cuts: list[int]) -> dict[str, Any]:
     metrics = list(ranks.keys())
+    top_sets = {metric: _top_exact_sets(ranks[metric], cuts) for metric in metrics}
     payload: dict[str, Any] = {}
     for left in metrics:
         payload[left] = {}
         for right in metrics:
             by_cut = {}
             for cut in cuts:
-                left_top = _top_exact_set(ranks[left], cut)
-                right_top = _top_exact_set(ranks[right], cut)
+                left_top = top_sets[left].get(cut, set())
+                right_top = top_sets[right].get(cut, set())
                 by_cut[str(cut)] = {
                     "overlap": len(left_top & right_top),
                     "jaccard": _jaccard(left_top, right_top),
@@ -1605,6 +1793,13 @@ def _top_overlap_matrix(ranks: dict[str, dict[str, int]], cuts: list[int]) -> di
 
 def _top_exact_set(ranks: dict[str, int], n: int) -> set[str]:
     return {author_id for author_id, _ in sorted(ranks.items(), key=lambda item: (item[1], item[0]))[:n]}
+
+
+def _top_exact_sets(ranks: dict[str, int], cuts: list[int]) -> dict[int, set[str]]:
+    if not cuts:
+        return {}
+    ordered = [author_id for author_id, _ in sorted(ranks.items(), key=lambda item: (item[1], item[0]))]
+    return {cut: set(ordered[:cut]) for cut in cuts}
 
 
 def _overlap_cuts(top_n: int) -> list[int]:
@@ -1682,6 +1877,12 @@ def _quantile(values: list[float], q: float) -> float:
     if not values:
         return 0.0
     ordered = sorted(values)
+    return _quantile_sorted(ordered, q)
+
+
+def _quantile_sorted(ordered: list[float], q: float) -> float:
+    if not ordered:
+        return 0.0
     if len(ordered) == 1:
         return ordered[0]
     pos = (len(ordered) - 1) * q

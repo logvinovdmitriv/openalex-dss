@@ -587,7 +587,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIn("download_progress_callback", dispatch.call_args.kwargs)
         self.assertIn("update_progress_callback", dispatch.call_args.kwargs)
 
-    def test_build_download_progress_keeps_room_for_table_and_index_phases(self) -> None:
+    def test_build_download_progress_keeps_global_percent_unknown_until_terminal_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runs_dir = Path(tmp) / "runs"
             with jobs._LOCK:
@@ -599,18 +599,18 @@ class PipelineIntegrityTests(unittest.TestCase):
                     {"accepted_estimate_signature": "estimate", "accepted_download_signature": "download"},
                     autostart=False,
                 )
-                jobs._download_progress(run["run_id"], {"percent": 95, "stage": "Загрузка среза", "files_seen": 10, "bytes_written": 1024})
+                jobs._download_progress(run["run_id"], {"percent": 60, "stage": "Загрузка среза", "files_seen": 10, "bytes_written": 1024})
                 updated = jobs.get_run(run["run_id"])
 
-        self.assertLessEqual(updated["progress_percent"], 85)
-        self.assertEqual(updated["progress"]["download_percent"], 95)
+        self.assertIsNone(updated["progress_percent"])
+        self.assertEqual(updated["progress"]["download_percent"], 60)
         self.assertEqual(updated["progress"]["files_seen"], 10)
 
     def test_repair_dump_progress_hands_off_to_compute_phase(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             raw = Path(tmp) / "works.jsonl.gz"
             raw.write_bytes(b"not-empty")
-            progress: list[tuple[int, str]] = []
+            progress: list[tuple[int | None, str]] = []
             with (
                 patch.object(materialization_jobs.pipeline, "analysis_eligibility_from_dump", return_value={"allowed_for_final_analysis": True, "status": "allowed"}),
                 patch.object(materialization_jobs.pipeline, "import_local_file", return_value={"status": "ok", "archive": {}}) as import_local_file,
@@ -623,7 +623,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 )
 
         self.assertEqual(result["mode"], "repair_dump")
-        self.assertEqual(progress[0], (25, "Проверка локальных файлов среза"))
+        self.assertEqual(progress[0], (None, "Проверка локальных файлов среза"))
         self.assertEqual(import_local_file.call_args.kwargs["compute_progress_base"], 40)
 
     def test_internal_plan_job_action_is_not_supported(self) -> None:

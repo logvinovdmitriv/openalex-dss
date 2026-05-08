@@ -4,6 +4,7 @@ import ast
 import json
 import math
 import re
+from bisect import bisect_right
 from collections import defaultdict
 from typing import Any
 
@@ -91,10 +92,11 @@ def apply_custom_metrics(rows: list[dict[str, Any]], definitions: list[dict[str,
         if field in BASE_NUMERIC_FIELDS
     }
     compiled = [(definition, _compile_expression(definition["expression"])) for definition in definitions]
+    context_names = sorted({name for _, expression in compiled for name in _expression_names(expression)})
     out: list[dict[str, Any]] = []
     for row in rows:
         next_row = dict(row)
-        context = _row_context(next_row, percentile_maps)
+        context = _row_context(next_row, percentile_maps, context_names)
         for definition, expression in compiled:
             metric_id = definition["id"]
             try:
@@ -179,6 +181,14 @@ def _validate_node(node: ast.AST) -> None:
         _validate_node(child)
 
 
+def _expression_names(node: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id not in {"pi", "e"} and child.id not in ALLOWED_FUNCTIONS:
+            names.add(child.id)
+    return names
+
+
 def _eval_expression(node: ast.AST, context: dict[str, float]) -> float:
     if isinstance(node, ast.Expression):
         return _eval_expression(node.body, context)
@@ -219,12 +229,14 @@ def _eval_expression(node: ast.AST, context: dict[str, float]) -> float:
     raise ValueError("Формула содержит неподдерживаемое выражение.")
 
 
-def _row_context(row: dict[str, Any], percentile_maps: dict[str, dict[int, float]]) -> dict[str, float]:
+def _row_context(row: dict[str, Any], percentile_maps: dict[str, dict[int, float]], names: list[str]) -> dict[str, float]:
     context: dict[str, float] = {}
-    for field in BASE_NUMERIC_FIELDS:
-        context[field] = _as_float(row.get(field))
-        if field in percentile_maps:
-            context[f"pr_{field}"] = percentile_maps[field].get(id(row), 0.0)
+    row_id = id(row)
+    for name in names:
+        if name.startswith("pr_"):
+            context[name] = percentile_maps.get(name[3:], {}).get(row_id, 0.0)
+        elif name in BASE_NUMERIC_FIELDS:
+            context[name] = _as_float(row.get(name))
     return context
 
 
@@ -250,7 +262,7 @@ def _percentile_rank_map(rows: list[dict[str, Any]], field: str) -> dict[int, fl
             continue
         for row in group:
             value = _as_float(row.get(field))
-            rank = sum(1 for item in values if item <= value)
+            rank = bisect_right(values, value)
             out[id(row)] = max(0.0, min(1.0, (rank - 1) / (n - 1)))
     return out
 

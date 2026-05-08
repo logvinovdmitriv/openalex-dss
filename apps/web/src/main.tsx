@@ -139,6 +139,14 @@ type WorkflowNavItem = {
 };
 
 const COMMON_RANKING_METRICS = new Set(["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "f5", "fm5", "iupv", "islv", "lrdi"]);
+const DATA_PREVIEW_PAGE_SIZE = 100;
+const DATA_ONLY_ANALYSIS_FILTERS: ActiveFilters = {
+  ...DEFAULT_FILTERS,
+  filter_mode: "",
+  from_publication_date: "",
+  to_publication_date: "",
+  affiliation_mode: "",
+};
 const DEFAULT_CUSTOM_METRICS: CustomMetricDefinition[] = [
   {
     id: "custom_added_rating",
@@ -224,7 +232,8 @@ function Workbench() {
   const [filters, setFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
   const [metric, setMetric] = useState("h");
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
-  const [topN, setTopN] = useState(100);
+  const [topN, setTopN] = useState(0);
+  const [dataOffset, setDataOffset] = useState(0);
   const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
   const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "g", "iupv", "islv", "custom_added_rating"]);
   const [baselineMetric, setBaselineMetric] = useState("h");
@@ -335,6 +344,7 @@ function Workbench() {
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
   const dataFilterKey = useMemo(() => JSON.stringify(dataColumnFilters), [dataColumnFilters]);
   const customMetricKey = useMemo(() => JSON.stringify(customMetrics), [customMetrics]);
+  const analysisFilters = useMemo(() => DATA_ONLY_ANALYSIS_FILTERS, []);
   const dataSelection = useMemo(() => ({
     filters: dataColumnFilters,
     search: dataSearch,
@@ -391,28 +401,50 @@ function Workbench() {
     const current = workflowNav.find((item) => item.id === view);
     if (current && !current.unlocked) navigate(current.fallback);
   }, [workbench.isFetched, workbench.isError, workflowNav.map((item) => `${item.id}:${item.unlocked}`).join("|"), view]);
+  useEffect(() => {
+    setDataOffset(0);
+  }, [localDataKind, dataSearch, dataFilterKey, dataSort, dataDirection, topN, fractionMode, effectiveRunId, effectiveDumpId]);
+  const selectedRowLimit = Math.max(0, Number(topN) || 0);
+  const effectiveDataOffset = selectedRowLimit > 0 ? Math.min(dataOffset, Math.max(0, selectedRowLimit - 1)) : dataOffset;
+  const dataPreviewLimit = selectedRowLimit > 0
+    ? Math.max(1, Math.min(DATA_PREVIEW_PAGE_SIZE, selectedRowLimit - effectiveDataOffset))
+    : DATA_PREVIEW_PAGE_SIZE;
+  const previewPageKey = `${effectiveDataOffset}:${dataPreviewLimit}`;
+  const rankingPreviewLimit = selectedRowLimit > 0 ? Math.min(selectedRowLimit, DATA_PREVIEW_PAGE_SIZE) : DATA_PREVIEW_PAGE_SIZE;
+  const analysisRankTopN = selectedRowLimit > 0 ? Math.min(selectedRowLimit, 1000) : 100;
   const table = useQuery({
-    queryKey: ["local-data-preview", localDataKind, dataSearch, dataFilterKey, topN, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId],
-    queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: topN, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })),
+    queryKey: ["local-data-preview", localDataKind, dataSearch, dataFilterKey, topN, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId, previewPageKey],
+    queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: dataPreviewLimit, offset: effectiveDataOffset, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })),
     enabled: scopeReady && localDataKindAvailable,
   });
   const analytics = useQuery({
-    queryKey: ["analytics", metric, fractionMode, effectiveRunId, effectiveDumpId, filterKey, dataSearch, dataFilterKey, dataSort, dataDirection, topN, customMetricKey],
-    queryFn: () => getJson<any>(analyticsUrl(filters, fractionMode, metric, effectiveRunId, effectiveDumpId, "", dataSelection, customMetrics)),
-    enabled: hasLocalAnalyticsData,
+    queryKey: ["analytics", metric, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, topN, customMetricKey],
+    queryFn: () => getJson<any>(analyticsUrl(analysisFilters, fractionMode, metric, effectiveRunId, effectiveDumpId, "", dataSelection, customMetrics)),
+    enabled: false,
   });
   const ranking = useQuery({
-    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, filterKey, topN, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
-    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(filters, fractionMode, metric, effectiveRunId, effectiveDumpId, topN, "", dataSelection, customMetrics)),
+    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, topN, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
+    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(
+      analysisFilters,
+      fractionMode,
+      metric,
+      effectiveRunId,
+      effectiveDumpId,
+      rankingPreviewLimit,
+      "",
+      { ...dataSelection, limit: rankingPreviewLimit },
+      customMetrics,
+    )),
     enabled: hasLocalAnalyticsData,
   });
   const authorIndexTable = useQuery({
-    queryKey: ["author-index-table", fractionMode, effectiveRunId, effectiveDumpId, topN, dataSearch, dataFilterKey, dataSort, dataDirection],
+    queryKey: ["author-index-table", fractionMode, effectiveRunId, effectiveDumpId, topN, dataSearch, dataFilterKey, dataSort, dataDirection, previewPageKey],
     queryFn: () => getJson<TableResponse>(localDataPreviewUrl("indices", {
       q: dataSearch,
       runId: effectiveRunId,
       dumpId: effectiveDumpId,
-      limit: topN,
+      limit: dataPreviewLimit,
+      offset: effectiveDataOffset,
       sort: dataSort,
       direction: dataDirection,
       fractionMode,
@@ -421,13 +453,13 @@ function Workbench() {
     enabled: scopeReady && Boolean((localDataSummary.data?.tables as any)?.indices?.exists),
   });
   const scientometrics = useQuery({
-    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, topN, fractionMode, effectiveRunId, effectiveDumpId, filterKey, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
+    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, topN, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
     queryFn: () => getJson<ScientometricAnalysisPayload>(scientometricsUrl({
-      filters,
+      filters: analysisFilters,
       fractionMode,
       metrics: scientometricMetrics,
       baselineMetric,
-      rankTopN: topN,
+      rankTopN: analysisRankTopN,
       runId: effectiveRunId,
       dumpId: effectiveDumpId,
       dataSelection,
@@ -671,7 +703,7 @@ function Workbench() {
     },
   });
   const buildReport = useMutation({
-    mutationFn: () => postJson<any>(`/reports/build?${filterParams(filters, {
+    mutationFn: () => postJson<any>(`/reports/build?${filterParams(analysisFilters, {
       metric,
       fraction_mode: fractionMode,
       run_id: runId,
@@ -679,7 +711,7 @@ function Workbench() {
       limit: activeTopN > 0 ? Math.min(activeTopN, 500) : 50,
       scientometric_metrics: scientometricMetrics.join(","),
       baseline_metric: baselineMetric,
-      rank_top_n: activeTopN > 0 ? activeTopN : 1000,
+      rank_top_n: analysisRankTopN,
       custom_metric_defs: customMetricDefsQuery(customMetrics),
       ...dataSelectionQuery({
         filters: dataColumnFilters,
@@ -920,8 +952,11 @@ function Workbench() {
             topN={activeTopN}
             setTopN={setTopN}
             topNOptions={topNOptions}
+            dataOffset={effectiveDataOffset}
+            setDataOffset={setDataOffset}
+            pageSize={DATA_PREVIEW_PAGE_SIZE}
             table={table.data}
-            csvUrl={`${API_BASE}${localDataPreviewCsvUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: 100_000, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })}`}
+            csvUrl={`${API_BASE}${localDataPreviewCsvUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: activeTopN > 0 ? activeTopN : 100_000, offset: 0, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })}`}
             run={run.data}
             running={running}
             activeContext={workbench.data?.active_context}
@@ -961,7 +996,7 @@ function Workbench() {
 
         {view === "statistics" && (
           <StatisticsPage
-            filters={filters}
+            filters={analysisFilters}
             analytics={analytics.data}
             scientometrics={scientometrics.data}
             authorIndexTable={authorIndexTable.data}
@@ -982,7 +1017,7 @@ function Workbench() {
             setScientometricMetrics={setScientometricMetrics}
             baselineMetric={baselineMetric}
             setBaselineMetric={setBaselineMetric}
-            rankTopN={activeTopN}
+            rankTopN={analysisRankTopN}
             topN={activeTopN}
             dataFilters={dataColumnFilters}
             dataSearch={dataSearch}
@@ -993,7 +1028,7 @@ function Workbench() {
         )}
 
         {view === "reports" && (
-          <ReportsPage filters={filters} metric={metric} fractionMode={fractionMode} runId={effectiveRunId} dumpId={effectiveDumpId} topN={activeTopN} scientometricMetrics={scientometricMetrics} baselineMetric={baselineMetric} rankTopN={activeTopN} dataFilters={dataColumnFilters} dataSort={dataSort} dataDirection={dataDirection} customMetrics={customMetrics} metricLabels={metricLabelMap} onBuild={() => buildReport.mutate()} building={buildReport.isPending} state={workbench.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
+          <ReportsPage filters={analysisFilters} metric={metric} fractionMode={fractionMode} runId={effectiveRunId} dumpId={effectiveDumpId} topN={activeTopN} scientometricMetrics={scientometricMetrics} baselineMetric={baselineMetric} rankTopN={analysisRankTopN} dataFilters={dataColumnFilters} dataSort={dataSort} dataDirection={dataDirection} customMetrics={customMetrics} metricLabels={metricLabelMap} onBuild={() => buildReport.mutate()} building={buildReport.isPending} state={workbench.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
         )}
         </motion.section>
       </AnimatePresence>
@@ -1239,10 +1274,10 @@ function SlicesPage({
           </div>
           {!filters.subject_id && !filters.keyword_id && !filters.text_search_query && <div className="notice"><b>Все направления</b><span>Тематический фильтр не применяется. Перед скачиванием система покажет прогноз объема, а решение о загрузке остается за пользователем.</span></div>}
           {dateInvalid && <div className="notice error"><b>Проверьте период</b><span>Дата начала не должна быть позже даты окончания.</span></div>}
-          <div className="action-row">
-            <button onClick={onOpenResolver}><Settings2 size={16} /> Тонкая настройка</button>
-            <button className="primary" onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} Оценить объем</button>
-          </div>
+        <div className="action-row">
+          <button onClick={onOpenResolver}><Settings2 size={16} /> Тонкая настройка</button>
+          <button className="primary" onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} {estimating ? "Оцениваем..." : "Оценить объем"}</button>
+        </div>
         </section>
 
         <aside className="panel context-panel">
@@ -1264,7 +1299,7 @@ function SlicesPage({
             <h2>План локального среза</h2>
             <p>Система оценивает объем через OpenAlex API, а уже скачанные срезы выбираются без API. Новый срез скачивается отдельным действием через установленный загрузчик; если ему нужен ключ, система покажет это до запуска.</p>
           </div>
-          <button onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} Обновить оценку</button>
+          <button onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} {estimating ? "Оцениваем..." : "Обновить оценку"}</button>
         </div>
         <div className="metric-grid">
           <MetricCard label="Работ найдено" value={hasEstimate ? fmt(rawEstimate.estimate_count ?? 0) : "—"} />
@@ -1300,7 +1335,7 @@ function SlicesPage({
               <div className="lookup-row">
                 <input value={downloadDir} onChange={(event) => setDownloadDir(event.target.value)} placeholder="стандартная папка" />
                 <button type="button" onClick={onPickDownloadDir} disabled={pickingDownloadDir}>
-                  {pickingDownloadDir ? <Loader2 size={16} className="spin" /> : <Database size={16} />} Выбрать папку
+                  {pickingDownloadDir ? <Loader2 size={16} className="spin" /> : <Database size={16} />} {pickingDownloadDir ? "Открываем..." : "Выбрать папку"}
                 </button>
               </div>
               <small className="field-hint">
@@ -1334,7 +1369,7 @@ function SlicesPage({
           </div>
         )}
         <div className="action-row">
-          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !hasEstimate || !downloadConfigReady || decision.can_execute === false}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} Скачать срез</button>
+          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !hasEstimate || !downloadConfigReady || decision.can_execute === false}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} {materializing ? "Выполняется..." : "Скачать срез"}</button>
           {run && ["queued", "running", "cancelling"].includes(String(run.status ?? "")) && (
             <button type="button" className="danger-button" onClick={onCancelRun} disabled={String(run.status ?? "") === "cancelling"}>
               {String(run.status ?? "") === "cancelling" ? "Останавливаем..." : "Остановить и сохранить частичный срез"}
@@ -1602,6 +1637,9 @@ function LocalDataPage({
   topN,
   setTopN,
   topNOptions,
+  dataOffset,
+  setDataOffset,
+  pageSize,
   table,
   csvUrl,
   run,
@@ -1630,6 +1668,9 @@ function LocalDataPage({
   topN: number;
   setTopN: (value: number) => void;
   topNOptions: SelectOption[];
+  dataOffset: number;
+  setDataOffset: (value: number) => void;
+  pageSize: number;
   table?: TableResponse;
   csvUrl: string;
   run: any;
@@ -1646,6 +1687,11 @@ function LocalDataPage({
   const hasAvailableTables = localDataKindOptions.length > 0;
   const hasTableRestrictions = Boolean(Object.keys(dataColumnFilters).length || dataSearch.trim() || dataSort || dataDirection !== "desc");
   const hasDataRestrictions = hasTableRestrictions || selectedAuthorIds.length > 0;
+  const selectedTotal = topN > 0 ? Math.min(Number(table?.total ?? 0), topN) : Number(table?.total ?? 0);
+  const pageStart = selectedTotal && table?.rows?.length ? dataOffset + 1 : 0;
+  const pageEnd = selectedTotal && table?.rows?.length ? Math.min(dataOffset + (table.rows?.length ?? 0), selectedTotal) : 0;
+  const canPrevPage = dataOffset > 0;
+  const canNextPage = selectedTotal > 0 && pageEnd < selectedTotal;
   const visibleAuthorIds = useMemo(() => {
     if (localDataKind !== "indices") return [];
     return [...new Set((table?.rows ?? []).map((row) => String(row.author_id ?? "").trim()).filter(Boolean))];
@@ -1777,24 +1823,40 @@ function LocalDataPage({
         ) : !hasAvailableTables ? (
           <EmptyState title="Нет локальных таблиц" detail="В выбранном срезе пока нет скачанных таблиц или результатов расчета, которые можно показать." />
         ) : (
-          <DataGrid
-            data={table}
-            onSelect={onSelect}
-            hiddenFields={["slice_id"]}
-            sortField={dataSort}
-            sortDirection={dataDirection}
-            onSortChange={(field, direction) => {
-              setDataSort(field);
-              setDataDirection(direction);
-            }}
-            enableColumnFilters
-            columnFilters={dataColumnFilters}
-            onColumnFiltersChange={setDataColumnFilters}
-            selectableRows={localDataKind === "indices"}
-            selectedIds={selectedAuthorIds}
-            selectionField="author_id"
-            onSelectedIdsChange={setSelectedAuthorIds}
-          />
+          <>
+            <DataGrid
+              data={table}
+              onSelect={onSelect}
+              hiddenFields={["slice_id"]}
+              sortField={dataSort}
+              sortDirection={dataDirection}
+              onSortChange={(field, direction) => {
+                setDataSort(field);
+                setDataDirection(direction);
+              }}
+              enableColumnFilters
+              columnFilters={dataColumnFilters}
+              onColumnFiltersChange={setDataColumnFilters}
+              selectableRows={localDataKind === "indices"}
+              selectedIds={selectedAuthorIds}
+              selectionField="author_id"
+              onSelectedIdsChange={setSelectedAuthorIds}
+            />
+            <div className="table-pagination">
+              <span>
+                Показаны строки {fmt(pageStart)}-{fmt(pageEnd)} из {fmt(selectedTotal)}
+                {topN > 0 && Number(table?.total ?? 0) > topN ? ` (ограничено до ${fmt(topN)})` : ""}
+              </span>
+              <div className="action-row compact">
+                <button type="button" className="ghost-button" disabled={!canPrevPage} onClick={() => setDataOffset(Math.max(0, dataOffset - pageSize))}>
+                  Назад
+                </button>
+                <button type="button" className="ghost-button" disabled={!canNextPage} onClick={() => setDataOffset(dataOffset + pageSize)}>
+                  Вперед
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </section>
     </div>
@@ -2725,7 +2787,7 @@ function StatisticsPage({
     fraction_mode: fractionMode,
     metrics: scientometricMetricParam,
     baseline_metric: baselineMetric,
-    top_n: topN,
+    top_n: rankTopN,
     run_id: runId,
     dump_id: dumpId,
     custom_metric_defs: customMetricDefsQuery(customMetrics),
@@ -2799,7 +2861,7 @@ function StatisticsPage({
       <section className="metric-grid">
         <MetricCard label="Авторов в анализе" value={fmt(scientometrics?.n_authors ?? 0)} />
         <MetricCard label="Основной показатель" value={metricLabelFor(String(scientometrics?.scope?.baseline_metric ?? baselineMetric), metricLabels)} />
-        <MetricCard label="Авторов в выборке" value={fmt(scientometrics?.rank_top_n ?? rankTopN)} />
+        <MetricCard label="Авторов в сравнении мест" value={fmt(scientometrics?.rank_top_n ?? rankTopN)} />
         <MetricCard label="Точек на графиках" value={selectedAuthorIds.length ? fmt(selectedAuthorIds.length) : "нет"} />
         <MetricCard label="Показателей на графиках" value={fmt(analyticsMetrics.length)} />
       </section>
@@ -3870,7 +3932,7 @@ function StatusRail({ state, run, running }: { state: any; run: any; running: bo
     <div className="status-rail">
       <span><Database size={15} /> Работы: {fmt(tables?.works?.rows ?? 0)}</span>
       <span><Sigma size={15} /> Авторы: {fmt(tables?.indices?.rows ?? 0)}</span>
-      <span><Gauge size={15} /> {running ? `${progress.label} · ${progress.percent}%` : run?.status ?? state?.workflow?.active_stage ?? "idle"}</span>
+      <span><Gauge size={15} /> {running ? (progress.percent === null ? progress.label : `${progress.label} · ${progress.percent}%`) : run?.status ?? state?.workflow?.active_stage ?? "idle"}</span>
     </div>
   );
 }
@@ -3968,33 +4030,38 @@ function runLiveState(run: WorkbenchRun) {
 type RunPhase = {
   id: string;
   label: string;
-  percent: number;
+  percent: number | null;
   state: "pending" | "active" | "done" | "error";
 };
 
 function runProgressPhases(run: WorkbenchRun, details: Record<string, any>): RunPhase[] {
   const action = String(run.action ?? "");
   const status = String(run.status ?? "");
-  const percent = typeof run.progress_percent === "number" ? run.progress_percent : progressForRun(run).percent;
   const failed = status === "failed";
   const completed = status === "completed";
   const queued = status === "queued";
-  const phase = (id: string, label: string, rangeStart: number, rangeEnd: number): RunPhase => ({
+  const currentStage = String(run.progress_stage ?? details.stage ?? "");
+  const phasePercent = (value: unknown) => {
+    if (typeof value !== "number") return null;
+    return Math.max(0, Math.min(100, Math.round(value)));
+  };
+  const phase = (id: string, label: string, percentValue: unknown = null): RunPhase => ({
     id,
     label,
-    percent: completed ? 100 : phasePercent(percent, rangeStart, rangeEnd),
-    state: failed ? "error" : completed || percent >= rangeEnd ? "done" : percent >= rangeStart ? "active" : "pending",
+    percent: completed ? 100 : phasePercent(percentValue),
+    state: failed ? "error" : completed ? "done" : currentStage.includes(label) ? "active" : "pending",
   });
   if (action === "build_from_openalex") {
     return [
       {
         id: "download",
         label: "Скачивание файлов",
-        percent: completed ? 100 : Math.max(0, Math.min(100, Number(details.download_percent ?? phasePercent(percent, 20, 85)))),
-        state: failed ? "error" : completed || percent >= 85 ? "done" : queued ? "pending" : "active",
+        percent: completed ? 100 : phasePercent(details.download_percent),
+        state: failed ? "error" : completed ? "done" : queued ? "pending" : (currentStage.includes("Загрузка") ? "active" : "pending"),
       },
-      phase("normalize", "Подготовка таблиц", 86, 90),
-      phase("compute", "Расчет индексов", 90, 98),
+      phase("pack", "Упаковка среза", details.pack_percent),
+      phase("normalize", "Подготовка таблиц"),
+      phase("compute", "Расчет индексов"),
     ];
   }
   if (action === "fetch_slice_dump") {
@@ -4002,34 +4069,28 @@ function runProgressPhases(run: WorkbenchRun, details: Record<string, any>): Run
       {
         id: "download",
         label: "Скачивание файлов",
-        percent: completed ? 100 : Math.max(0, Math.min(100, Number(details.download_percent ?? percent))),
+        percent: completed ? 100 : phasePercent(details.download_percent),
         state: failed ? "error" : completed ? "done" : queued ? "pending" : "active",
       },
-      phase("pack", "Упаковка среза", 82, 95),
+      phase("pack", "Упаковка среза", details.pack_percent),
     ];
   }
   if (action === "repair_dump") {
     return [
-      phase("check", "Проверка файлов", 20, 28),
-      phase("pack", "Упаковка", 28, 35),
-      phase("normalize", "Подготовка таблиц", 36, 40),
-      phase("compute", "Расчет индексов", 40, 98),
+      phase("check", "Проверка файлов"),
+      phase("pack", "Упаковка", details.pack_percent),
+      phase("normalize", "Подготовка таблиц"),
+      phase("compute", "Расчет индексов"),
     ];
   }
   if (action === "recalculate") {
     return [
-      phase("check", "Проверка таблиц", 45, 50),
-      phase("compute", "Расчет индексов", 50, 91),
-      phase("report", "Паспорт и отчет", 91, 98),
+      phase("check", "Проверка таблиц"),
+      phase("compute", "Расчет индексов"),
+      phase("report", "Паспорт и отчет"),
     ];
   }
   return [];
-}
-
-function phasePercent(value: number, start: number, end: number) {
-  if (value <= start) return 0;
-  if (value >= end) return 100;
-  return Math.max(0, Math.min(100, Math.round(((value - start) / Math.max(1, end - start)) * 100)));
 }
 
 function PhaseBar({ phase }: { phase: RunPhase }) {
@@ -4037,24 +4098,31 @@ function PhaseBar({ phase }: { phase: RunPhase }) {
     <div className={`run-phase ${phase.state}`}>
       <div className="progress-meta">
         <span>{phase.label}</span>
-        <b>{phase.percent}%</b>
+        <b>{phase.percent === null ? phaseStateLabel(phase.state) : `${phase.percent}%`}</b>
       </div>
       <div className={`progress-track ${phase.state === "error" ? "error" : ""}`}>
-        <span style={{ width: `${phase.percent}%` }} />
+        <span className={phase.percent === null && phase.state === "active" ? "indeterminate" : ""} style={{ width: phase.percent === null ? (phase.state === "done" ? "100%" : "0%") : `${phase.percent}%` }} />
       </div>
     </div>
   );
 }
 
-function ProgressBar({ percent, label, tone = "normal" }: { percent: number; label: string; tone?: "normal" | "error" }) {
+function phaseStateLabel(state: RunPhase["state"]) {
+  if (state === "done") return "готово";
+  if (state === "active") return "выполняется";
+  if (state === "error") return "ошибка";
+  return "ожидает";
+}
+
+function ProgressBar({ percent, label, tone = "normal" }: { percent: number | null; label: string; tone?: "normal" | "error" }) {
   return (
-    <div className="progress-group" aria-label={`${label}: ${percent}%`}>
+    <div className="progress-group" aria-label={percent === null ? label : `${label}: ${percent}%`}>
       <div className="progress-meta">
         <span>{label}</span>
-        <b>{percent}%</b>
+        <b>{percent === null ? "выполняется" : `${percent}%`}</b>
       </div>
       <div className={`progress-track ${tone}`}>
-        <span style={{ width: `${percent}%` }} />
+        <span className={percent === null ? "indeterminate" : ""} style={{ width: percent === null ? "0%" : `${percent}%` }} />
       </div>
     </div>
   );

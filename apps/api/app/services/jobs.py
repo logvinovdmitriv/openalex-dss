@@ -42,7 +42,7 @@ def create_run(action: str, payload: dict[str, Any], *, autostart: bool = True) 
         "run_id": run_id,
         "action": action,
         "status": "queued",
-        "progress_percent": 0,
+        "progress_percent": None,
         "progress_stage": "queued",
         "created_at": _now(),
         "started_at": None,
@@ -128,9 +128,9 @@ def get_run(run_id: str) -> dict[str, Any]:
     return _normalize_loaded_run(json.loads(path.read_text(encoding="utf-8")))
 
 
-def update_progress(run_id: str, percent: int, stage: str, extra: dict[str, Any] | None = None) -> None:
+def update_progress(run_id: str, percent: int | None, stage: str, extra: dict[str, Any] | None = None) -> None:
     doc = get_run(run_id)
-    doc["progress_percent"] = max(0, min(100, int(percent)))
+    doc["progress_percent"] = None if percent is None else max(0, min(100, int(percent)))
     doc["progress_stage"] = stage
     doc["worker_heartbeat_at"] = _now()
     if extra:
@@ -157,11 +157,11 @@ def list_runs(limit: int = 20) -> dict[str, Any]:
 
 def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
     doc = get_run(run_id)
-    doc.update({"status": "running", "progress_percent": 10, "progress_stage": "preparing", "started_at": _now(), "worker_heartbeat_at": _now(), "error": None})
+    doc.update({"status": "running", "progress_percent": None, "progress_stage": "preparing", "started_at": _now(), "worker_heartbeat_at": _now(), "error": None})
     _save(doc)
     try:
         doc = _current_doc(run_id, fallback=doc)
-        doc.update({"progress_percent": _progress_before_dispatch(action), "progress_stage": _stage_for_action(action), "worker_heartbeat_at": _now()})
+        doc.update({"progress_percent": None, "progress_stage": _stage_for_action(action), "worker_heartbeat_at": _now()})
         _save(doc)
         result = _dispatch(run_id, action, payload)
         materialization_jobs.mark_completed(run_id, action, result, payload)
@@ -563,15 +563,6 @@ def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
-def _progress_before_dispatch(action: str) -> int:
-    return {
-        "fetch_slice_dump": 25,
-        "build_from_openalex": 20,
-        "repair_dump": 20,
-        "recalculate": 45,
-    }.get(action, 20)
-
-
 def _stage_for_action(action: str) -> str:
     return {
         "fetch_slice_dump": "Загрузка локального среза",
@@ -582,14 +573,15 @@ def _stage_for_action(action: str) -> str:
 
 
 def _download_progress(run_id: str, progress: dict[str, Any]) -> None:
-    percent = max(0, min(100, int(progress.get("percent") or 0)))
     action = str(get_run(run_id).get("action") or "")
-    if action == "build_from_openalex":
-        # Download is only the first phase of this action. Keep the global
-        # progress monotonic and leave room for table preparation and indices.
-        bounded = min(85, max(20, 20 + round(percent * 0.65)))
-    else:
-        bounded = min(99, max(25, percent))
+    raw_percent = progress.get("percent")
+    phase_percent = None
+    if raw_percent is not None:
+        try:
+            phase_percent = max(0, min(100, int(raw_percent)))
+        except (TypeError, ValueError):
+            phase_percent = None
+    scope = str(progress.get("progress_scope") or ("download" if action in {"build_from_openalex", "fetch_slice_dump"} else "")).strip()
     fetched = int(progress.get("fetched") or 0)
     total = progress.get("total_available")
     files_seen = int(progress.get("files_seen") or 0)
@@ -601,8 +593,16 @@ def _download_progress(run_id: str, progress: dict[str, Any]) -> None:
     elif files_seen or bytes_written:
         stage = str(progress.get("stage") or f"Загрузчик OpenAlex скачал файлов: {files_seen}")
     else:
-        stage = str(progress.get("stage") or "Загрузчик OpenAlex запущен; точный процент появится после упаковки локальных файлов")
-    update_progress(run_id, bounded, stage, {**progress, "download_percent": percent})
+        stage = str(progress.get("stage") or "Загрузчик OpenAlex запущен; ожидаем первые локальные файлы")
+    extra = {key: value for key, value in progress.items() if key != "percent"}
+    if phase_percent is not None:
+        if scope == "pack":
+            extra["pack_percent"] = phase_percent
+        elif scope == "download":
+            extra["download_percent"] = phase_percent
+        else:
+            extra["phase_percent"] = phase_percent
+    update_progress(run_id, None, stage, extra)
 
 
 def _allow_unchecked_download() -> bool:

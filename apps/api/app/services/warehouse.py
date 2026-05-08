@@ -43,7 +43,6 @@ CORE_LINE_CHART_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"
 EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "iupv", "islv", "lrdi")
 LINE_CHART_METRICS = EXTENDED_LINE_CHART_METRICS
 
-
 FilterSet = dict[str, Any]
 
 DUMP_TABLES = {"works", "authorships", "work_topics"}
@@ -487,6 +486,122 @@ def apply_data_selection(
     return selected
 
 
+def selected_index_rows(
+    fraction_mode: str,
+    filters: FilterSet | None = None,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return author-level rows using the fastest safe source for the current selection.
+
+    If the request does not apply work-level slice filters, the run-scoped
+    ``indices`` table is already the correct author-level source. Reading it
+    directly keeps large local slices responsive because DuckDB can filter,
+    sort and limit the table before rows reach Python. Work-level filters still
+    use the recomputation path because those filters must rebuild author
+    aggregates from matching works.
+    """
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
+    parsed_filters = parse_column_filters(data_filters)
+    data_search = str(data_search or "").strip()
+    data_sort = str(data_sort or "").strip()
+    data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
+    try:
+        normalized_limit = max(0, min(int(data_limit or 0), 500_000))
+    except (TypeError, ValueError):
+        normalized_limit = 0
+
+    if _can_use_precomputed_indices(filters, run_id=run_id, dump_id=dump_id):
+        return _selected_precomputed_index_rows(
+            fraction_mode,
+            run_id=run_id,
+            dump_id=dump_id,
+            author_ids=author_ids,
+            data_filters=parsed_filters,
+            data_search=data_search,
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=normalized_limit,
+            custom_metric_defs=custom_metric_defs,
+        )
+
+    rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    rows = filter_rows_by_author_ids(rows, author_ids)
+    rows = apply_data_selection(
+        rows,
+        data_filters=parsed_filters,
+        data_search=data_search,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=normalized_limit,
+    )
+    return custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
+
+
+def _can_use_precomputed_indices(filters: FilterSet | None, *, run_id: str = "", dump_id: str = "") -> bool:
+    return not _clean_filters(filters or {}) and table_exists("indices", run_id=run_id, dump_id=dump_id)
+
+
+def _selected_precomputed_index_rows(
+    fraction_mode: str,
+    *,
+    run_id: str,
+    dump_id: str,
+    author_ids: set[str] | list[str] | tuple[str, ...] | None,
+    data_filters: dict[str, Any],
+    data_search: str,
+    data_sort: str,
+    data_direction: str,
+    data_limit: int,
+    custom_metric_defs: list[dict[str, str]] | None,
+) -> list[dict[str, Any]]:
+    fields = set(table_schema("indices", run_id=run_id, dump_id=dump_id))
+    custom_ids = custom_metrics.custom_metric_ids(custom_metric_defs)
+    native_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field in fields}
+    python_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field not in fields}
+    sort_is_native = not data_sort or data_sort in fields
+    sort_is_custom = data_sort in custom_ids
+    needs_python_selection = bool(author_ids) or bool(python_filters) or sort_is_custom
+    effective_data_limit = data_limit
+    query_limit = data_limit
+    query_sort = data_sort if sort_is_native else ""
+    payload = query_table(
+        "indices",
+        run_id=run_id,
+        dump_id=dump_id,
+        q=data_search,
+        fraction_mode=fraction_mode,
+        data_filters=native_filters,
+        sort=query_sort,
+        direction=data_direction,
+        limit=query_limit,
+    )
+    rows = list(payload.get("rows") or [])
+    rows = filter_rows_by_author_ids(rows, author_ids)
+    if custom_metric_defs:
+        rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
+    if needs_python_selection:
+        rows = apply_data_selection(
+            rows,
+            data_filters=python_filters,
+            data_search="",
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=effective_data_limit,
+        )
+    return rows
+
+
 def _sort_rows_by_field(rows: list[dict[str, Any]], field: str, *, data_direction: str = "desc") -> list[dict[str, Any]]:
     present = [row for row in rows if field in row and row.get(field) not in (None, "")]
     missing = [row for row in rows if field not in row or row.get(field) in (None, "")]
@@ -807,17 +922,19 @@ def metric_ranking(
 ) -> dict[str, Any]:
     if not _metric_supported(metric, custom_metric_defs):
         raise ValueError(f"Unsupported metric: {metric}")
-    rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
-    rows = filter_rows_by_author_ids(rows, author_ids)
-    rows = apply_data_selection(
-        rows,
+    rows = selected_index_rows(
+        fraction_mode,
+        filters,
+        run_id=run_id,
+        dump_id=dump_id,
+        author_ids=author_ids,
         data_filters=data_filters,
         data_search=data_search,
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
-    rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     return metric_ranking_from_rows(
         rows,
         fraction_mode,
@@ -897,17 +1014,19 @@ def metric_distribution(
 ) -> dict[str, Any]:
     if not _metric_supported(metric, custom_metric_defs):
         raise ValueError(f"Unsupported metric: {metric}")
-    rows = filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
-    rows = filter_rows_by_author_ids(rows, author_ids)
-    rows = apply_data_selection(
-        rows,
+    rows = selected_index_rows(
+        fraction_mode,
+        filters,
+        run_id=run_id,
+        dump_id=dump_id,
+        author_ids=author_ids,
         data_filters=data_filters,
         data_search=data_search,
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
-    rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     return metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id, custom_metric_defs=custom_metric_defs)
 
 
@@ -1037,17 +1156,19 @@ def metric_bundle(
     if not _metric_supported(metric, custom_metric_defs):
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
-    rows = filtered_indices(fraction_mode, filters, run_id=scope["run_id"], dump_id=scope["dump_id"])
-    rows = filter_rows_by_author_ids(rows, author_ids)
-    rows = apply_data_selection(
-        rows,
+    rows = selected_index_rows(
+        fraction_mode,
+        filters,
+        run_id=scope["run_id"],
+        dump_id=scope["dump_id"],
+        author_ids=author_ids,
         data_filters=data_filters,
         data_search=data_search,
         data_sort=data_sort,
         data_direction=data_direction,
         data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
     )
-    rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     return {
         "rows": rows,
         "distribution": metric_distribution_from_rows(rows, fraction_mode, metric, run_id=scope["run_id"], dump_id=scope["dump_id"], custom_metric_defs=custom_metric_defs),
@@ -1156,6 +1277,10 @@ def _clean_filters(filters: FilterSet) -> FilterSet:
             continue
         text = str(value).strip()
         if not text:
+            continue
+        if key == "filter_mode" and text == "all":
+            continue
+        if key == "affiliation_mode" and text == "historical" and not (filters.get("country_code") or filters.get("institution_id")):
             continue
         if key == "country_code":
             text = text.upper()[:2]

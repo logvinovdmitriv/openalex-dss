@@ -152,7 +152,7 @@ export type WorkbenchRun = {
   run_id?: string;
   action?: string;
   status?: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed" | string;
-  progress_percent?: number;
+  progress_percent?: number | null;
   progress_stage?: string;
   error?: string | null;
   result?: Record<string, unknown> | null;
@@ -419,17 +419,17 @@ export function pageLead(view: View) {
 }
 
 export function progressForRun(run?: WorkbenchRun | null) {
-  if (!run) return { percent: 0, label: "Ожидание запуска" };
+  if (!run) return { percent: null as number | null, label: "Ожидание запуска" };
   if (typeof run.progress_percent === "number") {
     return { percent: clampProgress(run.progress_percent), label: humanRunStage(run.progress_stage, run.status, run.action) };
   }
-  if (run.status === "queued") return { percent: 8, label: "В очереди" };
-  if (run.status === "running") return { percent: 55, label: "Выполнение" };
-  if (run.status === "cancelling") return { percent: 95, label: "Остановка" };
+  if (run.status === "queued") return { percent: null as number | null, label: "В очереди" };
+  if (run.status === "running") return { percent: null as number | null, label: humanRunStage(run.progress_stage, run.status, run.action) };
+  if (run.status === "cancelling") return { percent: null as number | null, label: "Остановка" };
   if (run.status === "completed") return { percent: 100, label: "Готово" };
   if (run.status === "cancelled") return { percent: 100, label: "Остановлено" };
   if (run.status === "failed") return { percent: 100, label: "Ошибка" };
-  return { percent: 0, label: run.status || "Ожидание" };
+  return { percent: null as number | null, label: run.status || "Ожидание" };
 }
 
 function humanRunStage(stage: unknown, status?: string, action?: string) {
@@ -483,12 +483,13 @@ export function localDataSummaryUrl(runId = "", dumpId = "") {
   return `/local-data/summary${query ? `?${query}` : ""}`;
 }
 
-export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number; sort?: string; direction?: string; fractionMode?: string; dataFilters?: TableColumnFilters } = {}) {
+export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number; offset?: number; sort?: string; direction?: string; fractionMode?: string; dataFilters?: TableColumnFilters } = {}) {
   const query = new URLSearchParams({ kind });
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.runId) query.set("run_id", params.runId);
   if (params.dumpId) query.set("dump_id", params.dumpId);
   if (params.limit !== undefined) query.set("limit", String(Math.max(0, Number(params.limit) || 0)));
+  if (params.offset !== undefined) query.set("offset", String(Math.max(0, Number(params.offset) || 0)));
   if (params.sort) query.set("sort", params.sort);
   if (params.direction) query.set("direction", params.direction);
   if (params.fractionMode) query.set("fraction_mode", params.fractionMode);
@@ -497,12 +498,13 @@ export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; r
   return `/local-data/preview?${query.toString()}`;
 }
 
-export function localDataPreviewCsvUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number; sort?: string; direction?: string; fractionMode?: string; dataFilters?: TableColumnFilters } = {}) {
+export function localDataPreviewCsvUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number; offset?: number; sort?: string; direction?: string; fractionMode?: string; dataFilters?: TableColumnFilters } = {}) {
   const query = new URLSearchParams({ kind });
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.runId) query.set("run_id", params.runId);
   if (params.dumpId) query.set("dump_id", params.dumpId);
   if (params.limit !== undefined) query.set("limit", String(Math.max(0, Number(params.limit) || 0)));
+  if (params.offset !== undefined) query.set("offset", String(Math.max(0, Number(params.offset) || 0)));
   if (params.sort) query.set("sort", params.sort);
   if (params.direction) query.set("direction", params.direction);
   if (params.fractionMode) query.set("fraction_mode", params.fractionMode);
@@ -560,7 +562,7 @@ export function dataSelectionQuery(selection?: DataSelectionParams) {
     data_search: search,
     data_sort: sort,
     data_direction: sort ? selection?.direction ?? "desc" : "",
-    data_limit: Number.isFinite(limit) && limit > 0 ? String(limit) : "",
+    data_limit: Number.isFinite(limit) ? String(Math.max(0, limit)) : "0",
     author_ids: authorIds.join(","),
   };
 }

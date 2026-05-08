@@ -18,6 +18,9 @@ LOCAL_DATA_KINDS: dict[str, str] = {
     "author_work": "Автор-работа",
 }
 
+PREVIEW_DEFAULT_ROWS = 100
+PREVIEW_MAX_ROWS = 1_000
+
 
 @router.get("/local-data/summary")
 def local_data_summary(run_id: str = "", dump_id: str = "") -> dict[str, Any]:
@@ -63,6 +66,7 @@ def local_data_preview(
     _require_existing_table(table, run_id=run_id, dump_id=dump_id)
     try:
         parsed_data_filters = warehouse.parse_column_filters(data_filters)
+        effective_limit = _preview_limit(limit)
         payload = warehouse.query_table(
             table,
             run_id=run_id,
@@ -75,13 +79,16 @@ def local_data_preview(
             **({"data_filters": parsed_data_filters} if parsed_data_filters else {}),
             sort=sort,
             direction=direction,
-            limit=limit,
+            limit=effective_limit,
             offset=offset,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     payload["kind"] = table
     payload["label"] = LOCAL_DATA_KINDS[table]
+    payload["requested_limit"] = limit
+    payload["preview_limit"] = payload.get("limit", effective_limit)
+    payload["truncated_for_preview"] = bool(limit <= 0 or limit > effective_limit)
     return _annotate_local_data_payload(payload, run_id=run_id, dump_id=dump_id)
 
 
@@ -141,6 +148,12 @@ def _local_data_kind(kind: str) -> str:
         allowed = ", ".join(LOCAL_DATA_KINDS)
         raise HTTPException(status_code=400, detail=f"Unsupported local data kind: {value or '<empty>'}. Allowed kinds: {allowed}")
     return value
+
+
+def _preview_limit(limit: int) -> int:
+    if int(limit or 0) <= 0:
+        return PREVIEW_DEFAULT_ROWS
+    return max(1, min(int(limit), PREVIEW_MAX_ROWS))
 
 
 def _require_existing_table(kind: str, *, run_id: str = "", dump_id: str = "") -> None:

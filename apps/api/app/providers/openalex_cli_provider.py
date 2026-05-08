@@ -91,10 +91,10 @@ def download_works_metadata(
 
     if progress_callback:
         progress_callback({
-            "percent": 25,
             "stage": "Загрузка среза началась; ожидаем первые файлы",
             "target_records": planned_records or None,
             "estimated_raw_bytes": planned_raw_bytes or None,
+            "progress_scope": "download",
             "external_progress": True,
         })
 
@@ -122,7 +122,7 @@ def download_works_metadata(
         raise RuntimeError((stderr_text or stdout_text or "Загрузка OpenAlex завершилась ошибкой").strip())
 
     if progress_callback:
-        progress_callback({"percent": 82, "stage": "Упаковка файлов OpenAlex", "fetched": 0})
+        progress_callback({"percent": 0, "stage": "Упаковка файлов OpenAlex", "fetched": 0, "progress_scope": "pack"})
 
     try:
         records, files_manifest = _pack_work_json_files(files_dir, raw_path, strict=not partial_stop, progress_callback=progress_callback, manifest_path=manifest_path)
@@ -252,7 +252,7 @@ def download_works_metadata(
 
     if progress_callback:
         stage = "Частичный локальный срез упакован" if completeness == "partial" else "Локальный срез упакован"
-        progress_callback({"percent": 95, "stage": stage, "fetched": records, "stop_reason": stop_reason})
+        progress_callback({"percent": 100, "stage": stage, "fetched": records, "stop_reason": stop_reason, "progress_scope": "pack"})
 
     return dump_manifest
 
@@ -294,7 +294,8 @@ def _pack_work_json_files(
                 item["parse_error"] = error
             manifest.append(item)
             if progress_callback and (index == len(candidates) or records % 500 == 0):
-                progress_callback({"percent": 82, "stage": f"Упаковано {records} работ", "fetched": records, "files_seen": index})
+                percent = 100 if not candidates else round((index / len(candidates)) * 100)
+                progress_callback({"percent": percent, "stage": f"Упаковано {records} работ", "fetched": records, "files_seen": index, "progress_scope": "pack"})
     if manifest_path:
         write_json(manifest_path, {"files": manifest, "records": records, "errors": errors, "status": "failed" if errors else "ok"})
     if strict and errors:
@@ -347,14 +348,13 @@ def _run_cli_download(
                 stop_reason = "size_limit_reached"
                 _terminate_process_group(process)
             if progress_callback:
-                percent = _cli_download_percent(snapshot["bytes_written"], planned_raw_bytes, elapsed)
+                percent = _cli_download_percent(snapshot["bytes_written"], max_download_bytes)
                 stage = _cli_download_stage(snapshot["files_seen"], snapshot["bytes_written"], elapsed)
                 if stop_reason == "user_cancelled":
                     stage = "Остановка по запросу пользователя; готовим частичный срез"
                 elif stop_reason == "size_limit_reached":
                     stage = "Достигнут лимит загрузки; готовим частичный срез"
                 progress_callback({
-                    "percent": percent,
                     "stage": stage,
                     "fetched": 0,
                     "files_seen": snapshot["files_seen"],
@@ -364,7 +364,9 @@ def _run_cli_download(
                     "estimated_raw_bytes": planned_raw_bytes or None,
                     "max_download_bytes": max_download_bytes or None,
                     "stop_reason": stop_reason,
+                    "progress_scope": "download",
                     "external_progress": True,
+                    **({"percent": percent} if percent is not None else {}),
                 })
         return_code = process.wait()
     return subprocess.CompletedProcess(command, return_code), stop_reason
@@ -454,10 +456,10 @@ def _directory_size_bytes(path: Path) -> int:
     return bytes_written
 
 
-def _cli_download_percent(bytes_written: int, planned_raw_bytes: int, elapsed_seconds: int) -> int:
-    if planned_raw_bytes > 0 and bytes_written > 0:
-        return min(80, max(30, 30 + int((bytes_written / planned_raw_bytes) * 45)))
-    return min(75, 25 + elapsed_seconds // 15)
+def _cli_download_percent(bytes_written: int, max_download_bytes: int) -> int | None:
+    if max_download_bytes > 0 and bytes_written >= 0:
+        return min(100, max(0, round((bytes_written / max_download_bytes) * 100)))
+    return None
 
 
 def _cli_download_stage(files_seen: int, bytes_written: int, elapsed_seconds: int) -> str:

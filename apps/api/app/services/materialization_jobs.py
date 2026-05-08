@@ -16,7 +16,7 @@ REQUIRES_ACCEPTED_SIGNATURE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"
 MATERIALIZATION_LIFECYCLE_ACTIONS = {"build_from_openalex", "fetch_slice_dump", "repair_dump"}
 
 DownloadProgressCallback = Callable[[dict[str, Any]], None]
-StageProgressCallback = Callable[[int, str, dict[str, Any] | None], None]
+StageProgressCallback = Callable[[int | None, str, dict[str, Any] | None], None]
 CancelCallback = Callable[[], bool]
 
 
@@ -76,7 +76,7 @@ def _build_from_openalex(
     if not analysis_eligibility["allowed_for_final_analysis"] and not (allow_unchecked_download or partial_ok):
         raise ValueError("Срез не допущен к анализу: скачивание не завершилось и нет пригодной частичной выборки.")
     if update_progress_callback:
-        update_progress_callback(86, "Нормализация локального среза", {"source_path": raw_jsonl})
+        update_progress_callback(None, "Нормализация локального среза", {"source_path": raw_jsonl})
     built = pipeline.import_local_file(
         normalize_internal_pipeline_payload(
             {
@@ -106,7 +106,7 @@ def _repair_dump(
     dump = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
     raw_jsonl = str(payload.get("source_path") or dump.get("raw_jsonl") or "").strip()
     if update_progress_callback:
-        update_progress_callback(25, "Проверка локальных файлов среза", {"source_path": raw_jsonl})
+        update_progress_callback(None, "Проверка локальных файлов среза", {"source_path": raw_jsonl})
     raw_jsonl, dump = _ensure_repair_raw_file(dump, raw_jsonl, update_progress_callback)
     analysis_eligibility = pipeline.analysis_eligibility_from_dump(dump, dev_override=True)
     built = pipeline.import_local_file(
@@ -147,16 +147,19 @@ def _ensure_repair_raw_file(
     raw_path = Path(raw_jsonl).expanduser() if raw_jsonl else base_dir / "works.jsonl.gz"
     files_manifest_path = Path(str(dump.get("files_manifest") or base_dir / "files_manifest.json"))
     if update_progress_callback:
-        update_progress_callback(28, "Упаковка уже скачанных файлов OpenAlex", {"source_path": str(raw_path), "files_dir": str(files_dir)})
+        update_progress_callback(None, "Упаковка уже скачанных файлов OpenAlex", {"source_path": str(raw_path), "files_dir": str(files_dir)})
     records, _ = openalex_cli_provider.pack_existing_cli_files(
         files_dir,
         raw_path,
         manifest_path=files_manifest_path,
         progress_callback=(
             lambda progress: update_progress_callback(
-                min(34, max(29, int(progress.get("percent") or 29))),
+                None,
                 str(progress.get("stage") or "Упаковка уже скачанных файлов OpenAlex"),
-                {key: value for key, value in progress.items() if key != "percent"},
+                {
+                    **{key: value for key, value in progress.items() if key != "percent"},
+                    **({"pack_percent": int(progress.get("percent"))} if progress.get("percent") is not None else {}),
+                },
             )
             if update_progress_callback
             else None

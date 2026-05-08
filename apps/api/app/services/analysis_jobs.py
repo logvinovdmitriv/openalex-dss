@@ -10,7 +10,7 @@ from app.services.internal_payloads import normalize_internal_pipeline_payload
 ANALYSIS_ACTIONS = {"recalculate"}
 
 
-StageProgressCallback = Callable[[int, str, dict[str, Any] | None], None]
+StageProgressCallback = Callable[[int | None, str, dict[str, Any] | None], None]
 
 
 def recalculate(

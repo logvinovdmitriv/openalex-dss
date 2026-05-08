@@ -80,6 +80,23 @@ class LocalDataRouteTests(unittest.TestCase):
             offset=0,
         )
 
+    def test_local_data_preview_zero_limit_uses_safe_preview_page(self) -> None:
+        with (
+            patch.object(local_data.warehouse, "table_exists", return_value=True),
+            patch.object(
+                local_data.warehouse,
+                "query_table",
+                return_value={"table": "indices", "fields": ["author_id"], "rows": [], "total": 10_000, "limit": 100, "offset": 0},
+            ) as query_table,
+        ):
+            payload = local_data.local_data_preview(kind="indices", run_id="run_a", limit=0, offset=0)
+
+        query_table.assert_called_once()
+        self.assertEqual(query_table.call_args.kwargs["limit"], local_data.PREVIEW_DEFAULT_ROWS)
+        self.assertEqual(payload["requested_limit"], 0)
+        self.assertEqual(payload["preview_limit"], local_data.PREVIEW_DEFAULT_ROWS)
+        self.assertEqual(payload["truncated_for_preview"], True)
+
     def test_local_data_preview_without_scope_requires_scope(self) -> None:
         with patch.object(
             local_data.warehouse,
