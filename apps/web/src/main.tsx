@@ -20,7 +20,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, Brush, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { API_BASE, deleteJson, getJson, postJson, type CustomMetricDefinition, type TableColumnFilters, type TableResponse } from "./api";
 import {
   DEFAULT_FILTERS,
@@ -44,7 +44,6 @@ import {
 import { DataGrid, DetailDrawer, EmptyState } from "./components/ui";
 import {
   analyticsRankingUrl,
-  analyticsUrl,
   buildAnalysisRunPayload,
   buildDownloadPolicy,
   buildSliceDefinitionPayload,
@@ -411,18 +410,13 @@ function Workbench() {
     : DATA_PREVIEW_PAGE_SIZE;
   const previewPageKey = `${effectiveDataOffset}:${dataPreviewLimit}`;
   const rankingPreviewLimit = selectedRowLimit > 0 ? Math.min(selectedRowLimit, DATA_PREVIEW_PAGE_SIZE) : DATA_PREVIEW_PAGE_SIZE;
-  const analysisRankTopN = selectedRowLimit > 0 ? Math.min(selectedRowLimit, 1000) : 100;
+  const analysisRankTopN = selectedRowLimit > 0 ? Math.min(selectedRowLimit, 1000) : 0;
   const table = useQuery({
     queryKey: ["local-data-preview", localDataKind, dataSearch, dataFilterKey, topN, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId, previewPageKey],
     queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: dataPreviewLimit, offset: effectiveDataOffset, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })),
     enabled: scopeReady && localDataKindAvailable,
     placeholderData: (previous) => previous,
     staleTime: 60_000,
-  });
-  const analytics = useQuery({
-    queryKey: ["analytics", metric, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, topN, customMetricKey],
-    queryFn: () => getJson<any>(analyticsUrl(analysisFilters, fractionMode, metric, effectiveRunId, effectiveDumpId, "", dataSelection, customMetrics)),
-    enabled: false,
   });
   const ranking = useQuery({
     queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, topN, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
@@ -798,7 +792,6 @@ function Workbench() {
     run.error,
     localDataSummary.error,
     table.error,
-    analytics.error,
     ranking.error,
     scientometrics.error,
     detail.error,
@@ -1008,7 +1001,6 @@ function Workbench() {
         {view === "statistics" && (
           <StatisticsPage
             filters={analysisFilters}
-            analytics={analytics.data}
             scientometrics={scientometrics.data}
             authorIndexTable={authorIndexTable.data}
             loadingScientometrics={scientometrics.isFetching}
@@ -1030,11 +1022,18 @@ function Workbench() {
             setBaselineMetric={setBaselineMetric}
             rankTopN={analysisRankTopN}
             topN={activeTopN}
+            setTopN={setTopN}
             dataFilters={dataColumnFilters}
+            setDataFilters={setDataColumnFilters}
             dataSearch={dataSearch}
+            setDataSearch={setDataSearch}
             selectedAuthorIds={selectedAuthorIds}
+            setSelectedAuthorIds={setSelectedAuthorIds}
             dataSort={dataSort}
+            setDataSort={setDataSort}
             dataDirection={dataDirection}
+            setDataDirection={setDataDirection}
+            onSelect={setSelected}
           />
         )}
 
@@ -2315,17 +2314,23 @@ function RankingsPage({
 }
 
 function selectedAuthorIndexTable(ranking: TableResponse | undefined, metrics: string[], selectedAuthorIds: string[] = []): TableResponse | undefined {
+  const projected = projectAuthorIndexTable(ranking, metrics);
+  if (!projected) return undefined;
+  const selected = new Set(selectedAuthorIds.map(String));
+  const rows = selected.size
+    ? (projected.rows ?? []).filter((row) => selected.has(String(row.author_id ?? "")))
+    : projected.rows;
+  return { ...projected, rows, total: selected.size ? rows.length : projected.total };
+}
+
+function projectAuthorIndexTable(ranking: TableResponse | undefined, metrics: string[]): TableResponse | undefined {
   if (!ranking) return undefined;
   const fields = ranking.fields ?? [];
   const identityFields = ["author_display_name", "author_id"].filter((field) => fields.includes(field));
   const metricFields = metrics.filter((field) => fields.includes(field));
   const contextFields = ["country_code", "subject_name", "n_flagged_works", "n_truncated_works"].filter((field) => fields.includes(field));
   const selectedFields = [...new Set([...identityFields, ...metricFields, ...contextFields])];
-  const selected = new Set(selectedAuthorIds.map(String));
-  const rows = selected.size
-    ? (ranking.rows ?? []).filter((row) => selected.has(String(row.author_id ?? "")))
-    : ranking.rows;
-  return { ...ranking, fields: selectedFields.length ? selectedFields : fields, rows, total: selected.size ? rows.length : ranking.total };
+  return { ...ranking, fields: selectedFields.length ? selectedFields : fields };
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -2741,7 +2746,6 @@ function metricFormulaMarkup(metricName: string) {
 
 function StatisticsPage({
   filters,
-  analytics,
   scientometrics,
   authorIndexTable,
   loadingScientometrics,
@@ -2763,14 +2767,20 @@ function StatisticsPage({
   setBaselineMetric,
   rankTopN,
   topN,
+  setTopN,
   dataFilters,
+  setDataFilters,
   dataSearch,
+  setDataSearch,
   selectedAuthorIds,
+  setSelectedAuthorIds,
   dataSort,
+  setDataSort,
   dataDirection,
+  setDataDirection,
+  onSelect,
 }: {
   filters: ActiveFilters;
-  analytics: any;
   scientometrics?: ScientometricAnalysisPayload;
   authorIndexTable?: TableResponse;
   loadingScientometrics: boolean;
@@ -2792,17 +2802,24 @@ function StatisticsPage({
   setBaselineMetric: (value: string) => void;
   rankTopN: number;
   topN: number;
+  setTopN: (value: number) => void;
   dataFilters: TableColumnFilters;
+  setDataFilters: (value: TableColumnFilters) => void;
   dataSearch: string;
+  setDataSearch: (value: string) => void;
   selectedAuthorIds: string[];
+  setSelectedAuthorIds: (value: string[]) => void;
   dataSort: string;
+  setDataSort: (value: string) => void;
   dataDirection: "asc" | "desc";
+  setDataDirection: (value: "asc" | "desc") => void;
+  onSelect: (value: { kind: "author" | "work"; id: string }) => void;
 }) {
   const metrics = (scientometrics?.metrics ?? scientometricMetrics).filter(Boolean);
   const analyticsMetrics = metrics.length ? metrics : [metric].filter(Boolean);
-  const warnings = scientometrics?.warnings ?? [];
-  const [distributionView, setDistributionView] = useState<"normalized" | "raw">("normalized");
+  const warnings = (scientometrics?.warnings ?? []).filter((warning) => !/Кендалл|Kendall/i.test(String(warning)));
   const [showBoxplot, setShowBoxplot] = useState(true);
+  const analyticsAuthorTable = useMemo(() => projectAuthorIndexTable(authorIndexTable, analyticsMetrics), [authorIndexTable, analyticsMetrics.join("|")]);
   const selectedAuthorRows = selectedAuthorIndexTable(authorIndexTable, analyticsMetrics, selectedAuthorIds)?.rows ?? [];
   const scientometricMetricParam = scientometricMetrics.join(",");
   const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: dataSort, direction: dataDirection, limit: topN });
@@ -2818,13 +2835,8 @@ function StatisticsPage({
   });
   const hasAnalyticsExportScope = Boolean(runId || dumpId);
   const analyticsDownloads = {
-    json: `${API_BASE}/analytics/scientometrics.json?${scientometricParams.toString()}`,
     descriptive: `${API_BASE}/analytics/scientometrics/descriptive.csv?${scientometricParams.toString()}`,
     correlations: `${API_BASE}/analytics/scientometrics/correlations.csv?${scientometricParams.toString()}`,
-    rankShifts: `${API_BASE}/analytics/scientometrics/rank-shifts.csv?${scientometricParams.toString()}`,
-    largestRankShifts: `${API_BASE}/analytics/scientometrics/largest-rank-shifts.csv?${scientometricParams.toString()}`,
-    outliers: `${API_BASE}/analytics/scientometrics/outliers.csv?${scientometricParams.toString()}`,
-    topOutliers: `${API_BASE}/analytics/scientometrics/top-outliers.csv?${scientometricParams.toString()}`,
     findings: `${API_BASE}/analytics/scientometrics/findings.csv?${scientometricParams.toString()}`,
     conclusion: `${API_BASE}/analytics/scientometrics/conclusion.md?${scientometricParams.toString()}`,
   };
@@ -2856,7 +2868,7 @@ function StatisticsPage({
         <div className="panel-head split">
           <div>
             <span className="step-badge">Аналитика</span>
-            <h2>Общая картина по выбранной выборке</h2>
+            <h2>Аналитика выбранной выборки</h2>
             <p>На этой странице нет отдельных фильтров. Все графики ниже автоматически используют поиск, ограничения, сортировку и число строк из вкладки “Данные”. Отмеченные авторы показываются отдельными точками.</p>
           </div>
           {loadingScientometrics && <span className="status-chip"><Loader2 size={14} className="spin" /> Обновление</span>}
@@ -2877,17 +2889,10 @@ function StatisticsPage({
         <section className="notice warn">
           <b>Ограничения интерпретации</b>
           <ul className="plain-list">
-            {warnings.map((warning: string) => <li key={warning}>{warning}</li>)}
+            {warnings.map((warning: string) => <li key={warning}>{analysisWarningLabel(warning, metricLabels)}</li>)}
           </ul>
         </section>
       )}
-      <section className="metric-grid">
-        <MetricCard label="Авторов в анализе" value={fmt(scientometrics?.n_authors ?? 0)} />
-        <MetricCard label="Основной показатель" value={metricLabelFor(String(scientometrics?.scope?.baseline_metric ?? baselineMetric), metricLabels)} />
-        <MetricCard label="Авторов в сравнении мест" value={fmt(scientometrics?.rank_top_n ?? rankTopN)} />
-        <MetricCard label="Точек на графиках" value={selectedAuthorIds.length ? fmt(selectedAuthorIds.length) : "нет"} />
-        <MetricCard label="Показателей на графиках" value={fmt(analyticsMetrics.length)} />
-      </section>
       {selectedAuthorIds.length > 0 && (
         <section className="notice success">
           <b>На графиках отмечены выбранные авторы</b>
@@ -2921,31 +2926,37 @@ function StatisticsPage({
       )}
       {scientometrics && Number(scientometrics.n_authors ?? 0) > 0 && (
         <>
-          <section className="panel">
-            <div className="panel-head split">
-              <div>
-                <span className="step-badge">Скачать</span>
-                <h2>Сводка и выгрузки</h2>
-                <p>Все файлы строятся по тем же ограничениям, что и графики ниже.</p>
-              </div>
-              <div className="download-inline">
-                {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.descriptive} label="Сводная таблица" compact />}
-                {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.correlations} label="Связь показателей" compact />}
-                {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.rankShifts} label="Изменение мест" compact />}
-                {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.findings} label="Таблица выводов" compact />}
-                {hasAnalyticsExportScope && <DownloadLink href={analyticsDownloads.conclusion} label="Текст заключения" compact />}
-              </div>
-            </div>
-          </section>
-          <AnalyticsOverviewPanel payload={scientometrics} metrics={analyticsMetrics} metricLabels={metricLabels} />
+          <AnalyticsAuthorTablePanel
+            table={analyticsAuthorTable}
+            metrics={analyticsMetrics}
+            metricLabels={metricLabels}
+            dataFilters={dataFilters}
+            setDataFilters={setDataFilters}
+            dataSearch={dataSearch}
+            setDataSearch={setDataSearch}
+            dataSort={dataSort}
+            setDataSort={setDataSort}
+            dataDirection={dataDirection}
+            setDataDirection={setDataDirection}
+            selectedAuthorIds={selectedAuthorIds}
+            setSelectedAuthorIds={setSelectedAuthorIds}
+            topN={topN}
+            setTopN={setTopN}
+            onSelect={onSelect}
+          />
+          <DescriptiveStatsPanel
+            payload={scientometrics}
+            metrics={analyticsMetrics}
+            metricLabels={metricLabels}
+            downloads={analyticsDownloads}
+            hasExportScope={hasAnalyticsExportScope}
+          />
           <DistributionComparisonPanel
             payload={scientometrics}
             metrics={analyticsMetrics}
             metricLabels={metricLabels}
             highlightedAuthors={selectedAuthorRows}
             loading={loadingScientometrics}
-            viewMode={distributionView}
-            onViewModeChange={setDistributionView}
           />
           <section className="panel">
             <div className="panel-head split">
@@ -2960,10 +2971,7 @@ function StatisticsPage({
             </div>
             {showBoxplot && <MetricBoxplotPanel payload={scientometrics} metrics={analyticsMetrics} metricLabels={metricLabels} />}
           </section>
-          <section className="analytics-large-grid">
-            <CorrelationMatrixPanels payload={scientometrics} method="spearman" metrics={analyticsMetrics} metricLabels={metricLabels} />
-            <RankShiftPanel payload={scientometrics} metricLabels={metricLabels} />
-          </section>
+          <CorrelationMatrixPanel payload={scientometrics} method="spearman" metrics={analyticsMetrics} metricLabels={metricLabels} />
           <FindingsPanel payload={scientometrics} metricLabels={metricLabels} />
           <ConclusionDraftPanel payload={scientometrics} metricLabels={metricLabels} />
         </>
@@ -2972,56 +2980,246 @@ function StatisticsPage({
   );
 }
 
-function ScientometricScopePanel({ payload, fallbackN }: { payload: any; fallbackN: number }) {
-  const scope = payload?.scope ?? {};
-  return (
-    <section className="panel">
-      <div className="panel-head">
-        <span className="step-badge">Область анализа</span>
-        <h2>Паспорт аналитической области</h2>
-      </div>
-      <div className="key-grid">
-        <KeyValue label="Расчет" value={String(scope.run_id ?? "")} />
-        <KeyValue label="Локальный срез" value={String(scope.dump_id ?? "")} />
-        <KeyValue label="Учет вклада авторов" value={modeLabel(String(scope.fraction_mode ?? ""))} />
-        <KeyValue label="Авторов" value={fmt(scope.n_authors ?? payload?.n_authors ?? 0)} />
-        <KeyValue label="Авторов в сравнении" value={fmt(scope.rank_top_n ?? fallbackN)} />
-        <KeyValue label="Область авторов" value={scope.analysis_author_scope === "all_resolved_authors" ? "все авторы выбранного среза" : String(scope.analysis_author_scope ?? "")} />
-      </div>
-    </section>
-  );
-}
-
-function AnalyticsOverviewPanel({ payload, metrics, metricLabels }: { payload: ScientometricAnalysisPayload; metrics: string[]; metricLabels?: Record<string, string> }) {
+function DescriptiveStatsPanel({
+  payload,
+  metrics,
+  metricLabels,
+  downloads,
+  hasExportScope,
+}: {
+  payload: ScientometricAnalysisPayload;
+  metrics: string[];
+  metricLabels?: Record<string, string>;
+  downloads: Record<string, string>;
+  hasExportScope: boolean;
+}) {
   const rows = metrics
     .map((metricName) => {
       const descriptive = (payload.descriptive ?? {})[metricName] ?? {};
       const boxplot = (payload.boxplots ?? {})[metricName] ?? {};
-      const hasData = [descriptive.median, descriptive.mean, boxplot.outlier_count].some((value) => Number.isFinite(Number(value)));
+      const hasData = Number(descriptive.n ?? 0) > 0 || [descriptive.median, descriptive.mean, boxplot.outlier_count].some((value) => Number.isFinite(Number(value)));
       return {
         metricName,
-        median: Number(descriptive.median ?? boxplot.median ?? 0),
-        mean: Number(descriptive.mean ?? 0),
+        n: Number(descriptive.n ?? 0),
+        mean: numberOrNull(descriptive.mean),
+        median: numberOrNull(descriptive.median ?? boxplot.median),
+        q1: numberOrNull(descriptive.q1 ?? boxplot.q1),
+        q3: numberOrNull(descriptive.q3 ?? boxplot.q3),
+        min: numberOrNull(descriptive.min ?? boxplot.min_whisker),
+        max: numberOrNull(descriptive.max ?? boxplot.max_whisker),
+        stddev: numberOrNull(descriptive.stddev),
         outliers: Number(boxplot.outlier_count ?? 0),
         hasData,
       };
     })
     .filter((row) => row.hasData);
-  const topOutlier = [...rows].sort((left, right) => right.outliers - left.outliers)[0];
-  const medianBaseline = rows.find((row) => row.metricName === String(payload.scope?.baseline_metric ?? "")) ?? rows[0];
+  const baselineMetric = String(payload.scope?.baseline_metric ?? "");
   return (
     <section className="panel">
-      <div className="panel-head">
-        <span className="step-badge">Сводка</span>
-        <h2>Главное по текущей выборке</h2>
-        <p>Подробные распределения и включение отдельных индексов находятся во вкладке “Индексы”. Здесь оставлены только ориентиры для чтения результатов.</p>
+      <div className="panel-head split">
+        <div>
+          <span className="step-badge">Сводная статистика</span>
+          <h2>Статистические ориентиры по показателям</h2>
+          <p>Эта таблица дает минимум, который нужен для чтения графиков: размер выборки, центр распределения, типичный диапазон, общий размах и число резко выделяющихся значений.</p>
+        </div>
+        <div className="download-inline">
+          {hasExportScope && <DownloadLink href={downloads.descriptive} label="Сводная таблица" compact />}
+          {hasExportScope && <DownloadLink href={downloads.correlations} label="Связь показателей" compact />}
+          {hasExportScope && <DownloadLink href={downloads.findings} label="Выводы" compact />}
+          {hasExportScope && <DownloadLink href={downloads.conclusion} label="Заключение" compact />}
+        </div>
       </div>
-      <div className="metric-grid">
-        <MetricCard label="Авторов в анализе" value={fmt(payload.n_authors ?? 0)} />
-        <MetricCard label="Показателей" value={fmt(metrics.length)} />
-        <MetricCard label="Медиана основного показателя" value={medianBaseline ? `${metricLabelFor(medianBaseline.metricName, metricLabels)}: ${formatAnalysisValue(medianBaseline.median)}` : "—"} />
-        <MetricCard label="Больше всего выделяющихся значений" value={topOutlier ? `${metricLabelFor(topOutlier.metricName, metricLabels)}: ${fmt(topOutlier.outliers)}` : "—"} />
+      <div className="table-wrap stats-summary-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Показатель</th>
+              <th>Авторов</th>
+              <th>Среднее</th>
+              <th>Медиана</th>
+              <th>Квартильный диапазон</th>
+              <th>Мин–макс</th>
+              <th>Стандартное отклонение</th>
+              <th>Выделяющиеся</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.metricName} className={row.metricName === baselineMetric ? "summary-baseline-row" : undefined}>
+                <td><b>{metricLabelFor(row.metricName, metricLabels)}</b>{row.metricName === baselineMetric ? <span className="muted-inline"> основной</span> : null}</td>
+                <td>{fmt(row.n)}</td>
+                <td>{formatNullableAnalysisValue(row.mean)}</td>
+                <td>{formatNullableAnalysisValue(row.median)}</td>
+                <td>{formatNullableRange(row.q1, row.q3)}</td>
+                <td>{formatNullableRange(row.min, row.max)}</td>
+                <td>{formatNullableAnalysisValue(row.stddev)}</td>
+                <td>{fmt(row.outliers)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+    </section>
+  );
+}
+
+function formatNullableAnalysisValue(value: number | null) {
+  return value === null ? "—" : formatAnalysisValue(value);
+}
+
+function formatNullableRange(left: number | null, right: number | null) {
+  if (left === null && right === null) return "—";
+  return `${formatNullableAnalysisValue(left)} – ${formatNullableAnalysisValue(right)}`;
+}
+
+function analysisWarningLabel(warning: string, metricLabels?: Record<string, string>) {
+  const text = String(warning || "");
+  const iqrMatch = text.match(/IQR is zero for metrics? ([^;.]+)[.;]/i);
+  if (iqrMatch) {
+    const metrics = iqrMatch[1]
+      .split(/,\s*/)
+      .map((item) => metricLabelFor(item.trim(), metricLabels))
+      .join(", ");
+    return `Для показателей ${metrics} межквартильный размах равен нулю; правило выделяющихся значений по ящику с усами здесь неинформативно.`;
+  }
+  if (/IQR outlier fences are not informative/i.test(text)) {
+    return "Межквартильный размах равен нулю; границы выделяющихся значений по ящику с усами здесь неинформативны.";
+  }
+  return text;
+}
+
+function AnalyticsAuthorTablePanel({
+  table,
+  metrics,
+  metricLabels,
+  dataFilters,
+  setDataFilters,
+  dataSearch,
+  setDataSearch,
+  dataSort,
+  setDataSort,
+  dataDirection,
+  setDataDirection,
+  selectedAuthorIds,
+  setSelectedAuthorIds,
+  topN,
+  setTopN,
+  onSelect,
+}: {
+  table?: TableResponse;
+  metrics: string[];
+  metricLabels?: Record<string, string>;
+  dataFilters: TableColumnFilters;
+  setDataFilters: (value: TableColumnFilters) => void;
+  dataSearch: string;
+  setDataSearch: (value: string) => void;
+  dataSort: string;
+  setDataSort: (value: string) => void;
+  dataDirection: "asc" | "desc";
+  setDataDirection: (value: "asc" | "desc") => void;
+  selectedAuthorIds: string[];
+  setSelectedAuthorIds: (value: string[]) => void;
+  topN: number;
+  setTopN: (value: number) => void;
+  onSelect: (value: { kind: "author" | "work"; id: string }) => void;
+}) {
+  const visibleAuthorIds = useMemo(() => [...new Set((table?.rows ?? []).map((row) => String(row.author_id ?? "").trim()).filter(Boolean))], [table?.rows]);
+  const selectedSet = new Set(selectedAuthorIds);
+  const allVisibleSelected = visibleAuthorIds.length > 0 && visibleAuthorIds.every((id) => selectedSet.has(id));
+  const reset = () => {
+    setDataFilters({});
+    setDataSearch("");
+    setDataSort("");
+    setDataDirection("desc");
+    setSelectedAuthorIds([]);
+  };
+  return (
+    <section className="panel table-panel analytics-author-table">
+      <div className="panel-head split">
+        <div>
+          <span className="step-badge">Авторы</span>
+          <h2>Таблица авторов и рейтингов</h2>
+          <p>Фильтры, сортировка и число строк в этой таблице сразу меняют графики и выводы ниже. Выбранные авторы показываются отдельными точками.</p>
+        </div>
+        <div className="download-inline">
+          <button type="button" className="ghost-button" onClick={reset}>Сбросить</button>
+        </div>
+      </div>
+      <div className="form-grid tight">
+        <Field label="Поиск по авторам">
+          <input value={dataSearch} onChange={(event) => setDataSearch(event.target.value)} placeholder="ФИО, организация, страна или ID" />
+          <small className="field-hint">Поиск выполняется на backend по авторской таблице выбранного среза.</small>
+        </Field>
+        <Field label="Сколько авторов взять">
+          <div className="limit-input-row">
+            <input
+              type="number"
+              min={1}
+              max={500000}
+              value={topN > 0 ? String(topN) : ""}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setTopN(Number.isFinite(next) && next > 0 ? Math.floor(next) : 0);
+              }}
+              placeholder="Все"
+            />
+            <button type="button" className={topN <= 0 ? "choice-pill active" : "choice-pill"} onClick={() => setTopN(0)}>
+              Все
+            </button>
+          </div>
+          <small className="field-hint">Ограничение применяется после фильтров и сортировки.</small>
+        </Field>
+      </div>
+      <div className="action-row">
+        {visibleAuthorIds.length > 0 && (
+          <button
+            type="button"
+            className={allVisibleSelected ? "choice-pill active" : "choice-pill"}
+            onClick={() => setSelectedAuthorIds(allVisibleSelected ? [] : visibleAuthorIds)}
+          >
+            {allVisibleSelected ? "Убрать точки с графиков" : "Показать видимых авторов точками"}
+          </button>
+        )}
+        {selectedAuthorIds.length > 0 && <span className="selection-chip passive">Выбрано авторов: {fmt(selectedAuthorIds.length)}</span>}
+      </div>
+      <DataRestrictionChips
+        filters={dataFilters}
+        sortField={dataSort}
+        sortDirection={dataDirection}
+        search={dataSearch}
+        selectedAuthorIds={selectedAuthorIds}
+        limit={topN}
+        onResetSearch={() => setDataSearch("")}
+        onRemoveFilter={(field) => {
+          const next = { ...dataFilters };
+          delete next[field];
+          setDataFilters(next);
+        }}
+        onResetSort={() => {
+          setDataSort("");
+          setDataDirection("desc");
+        }}
+      />
+      <DataGrid
+        data={table}
+        onSelect={onSelect}
+        hiddenFields={["author_id"]}
+        fieldLabels={metricLabels}
+        sortField={dataSort}
+        sortDirection={dataDirection}
+        onSortChange={(field, direction) => {
+          setDataSort(field);
+          setDataDirection(direction);
+        }}
+        enableColumnFilters
+        columnFilters={dataFilters}
+        onColumnFiltersChange={setDataFilters}
+        selectableRows
+        selectedIds={selectedAuthorIds}
+        selectionField="author_id"
+        onSelectedIdsChange={setSelectedAuthorIds}
+      />
+      <p className="muted">Показатели в таблице: {metrics.map((item) => metricLabelFor(item, metricLabels)).join(", ")}.</p>
     </section>
   );
 }
@@ -3034,88 +3232,36 @@ function DistributionComparisonPanel({
   metricLabels,
   highlightedAuthors,
   loading = false,
-  viewMode,
-  onViewModeChange,
 }: {
   payload: ScientometricAnalysisPayload;
   metrics: string[];
   metricLabels?: Record<string, string>;
   highlightedAuthors?: Record<string, unknown>[];
   loading?: boolean;
-  viewMode: "normalized" | "raw";
-  onViewModeChange: (value: "normalized" | "raw") => void;
 }) {
   const visibleMetrics = metrics.filter(Boolean);
   const rows = visibleMetrics
     .map((metricName) => ({ metricName, rows: rawDistributionRows(payload, metricName) }))
     .filter((item) => item.rows.length > 0);
-  const normalizedRows = normalizedDistributionRows(payload, visibleMetrics);
-  const highlightRows = selectedAuthorDistributionMarkers(payload, visibleMetrics, highlightedAuthors ?? [], viewMode, normalizedRows);
+  const highlightRows = selectedAuthorDistributionMarkers(payload, visibleMetrics, highlightedAuthors ?? []);
   const hasHighlights = highlightRows.length > 0;
   return (
     <section className="panel analytics-main-chart">
       <div className="panel-head split">
         <div>
           <span className="step-badge">Распределение</span>
-          <h2>Сравнение наукометрических индексов</h2>
-          <p>{viewMode === "normalized" ? "Значения каждого индекса приведены к общей шкале 0–100, чтобы сравнивать форму распределения между показателями." : "По горизонтали показано исходное значение индекса, по вертикали количество авторов. Каждый показатель показан отдельно, чтобы не смешивать разные единицы."}</p>
+          <h2>Распределение авторов по показателям</h2>
+          <p>Каждый показатель показан отдельно в собственной шкале. По горизонтали — значение показателя, по вертикали — число авторов. Нижняя полоса позволяет приблизить нужный диапазон.</p>
         </div>
         {loading && <span className="status-chip"><Loader2 size={14} className="spin" /> Обновление</span>}
       </div>
-      <div className="segmented-row" role="group" aria-label="Масштаб графика">
-        <button type="button" className={viewMode === "normalized" ? "choice-pill active" : "choice-pill"} onClick={() => onViewModeChange("normalized")}>
-          Общая шкала 0–100
-        </button>
-        <button type="button" className={viewMode === "raw" ? "choice-pill active" : "choice-pill"} onClick={() => onViewModeChange("raw")}>
-          Исходные значения
-        </button>
-      </div>
       {hasHighlights && (
         <div className="selection-summary active">
-          <span>Красные точки показывают выбранных авторов из таблицы “Данные”.</span>
+          <span>Красные точки показывают авторов, выбранных в таблице выше.</span>
         </div>
       )}
-      {visibleMetrics.length === 0 || (viewMode === "normalized" ? normalizedRows.length === 0 : rows.length === 0) ? (
-        <EmptyState title="Выберите хотя бы один индекс" detail="Включите показатель в блоке “Какие индексы показывать” во вкладке “Индексы”." />
-      ) : viewMode === "normalized" ? (
-        <div className="chart-box main-distribution-chart">
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={normalizedRows} margin={{ left: 10, right: 24, top: 16, bottom: 18 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="position" type="number" domain={[0, 100]} tickFormatter={(value) => `${fmt(value)}`} label={{ value: "Значение индекса, приведенное к общей шкале", position: "insideBottom", offset: -8 }} />
-              <YAxis allowDecimals={false} label={{ value: "Авторов", angle: -90, position: "insideLeft" }} />
-              <Tooltip
-                labelFormatter={(value) => `Общая шкала: ${fmt(value)}`}
-                formatter={(value, name, item: any) => {
-                  if (item?.payload?.author) return [`${metricLabelFor(String(item.payload.metricName), metricLabels)}: ${formatAnalysisValue(item.payload.value)}`, item.payload.author];
-                  return [fmt(value), metricLabelFor(String(name), metricLabels)];
-                }}
-              />
-              {visibleMetrics.map((metricName, index) => (
-                <Line
-                  key={metricName}
-                  type="monotone"
-                  dataKey={metricName}
-                  name={metricName}
-                  stroke={CHART_COLORS[index % CHART_COLORS.length]}
-                  strokeWidth={3}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                  connectNulls
-                />
-              ))}
-              {hasHighlights && (
-                <Scatter
-                  name="Выбранные авторы"
-                  data={highlightRows}
-                  dataKey="count"
-                  fill="#be123c"
-                  shape="circle"
-                />
-              )}
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
+      {visibleMetrics.length === 0 || rows.length === 0 ? (
+        <EmptyState title="Выберите хотя бы один показатель" detail="Включите показатель во вкладке “Индексы” или в конструкторе собственной формулы." />
       ) : (
         <div className="distribution-small-multiples">
           {rows.map((item, index) => (
@@ -3126,10 +3272,10 @@ function DistributionComparisonPanel({
               </div>
               <div className="chart-box index-distribution-chart">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={item.rows} margin={{ left: 8, right: 14, top: 8, bottom: 18 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="center" type="number" tickFormatter={(value) => fmt(value)} />
-                    <YAxis allowDecimals={false} />
+                  <ComposedChart data={item.rows} margin={{ left: 8, right: 14, top: 8, bottom: 30 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e7edf4" />
+                    <XAxis dataKey="center" type="number" tickFormatter={(value) => fmt(value)} domain={["dataMin", "dataMax"]} />
+                    <YAxis allowDecimals={false} label={{ value: "Авторов", angle: -90, position: "insideLeft" }} />
                     <Tooltip
                       labelFormatter={(_, payloadRows) => {
                         const row = payloadRows?.[0]?.payload;
@@ -3141,6 +3287,7 @@ function DistributionComparisonPanel({
                         return [fmt(value), "авторов"];
                       }}
                     />
+                    <Area type="monotone" dataKey="count" fill={CHART_COLORS[index % CHART_COLORS.length]} fillOpacity={0.14} stroke="none" isAnimationActive={false} />
                     <Line type="monotone" dataKey="count" stroke={CHART_COLORS[index % CHART_COLORS.length]} strokeWidth={3} dot={false} activeDot={{ r: 4 }} name="Авторов" />
                     <Scatter
                       name="Выбранные авторы"
@@ -3149,6 +3296,7 @@ function DistributionComparisonPanel({
                       fill="#be123c"
                       shape="circle"
                     />
+                    <Brush dataKey="center" height={18} travellerWidth={8} tickFormatter={(value) => fmt(value)} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
@@ -3160,31 +3308,7 @@ function DistributionComparisonPanel({
   );
 }
 
-function normalizedDistributionRows(payload: ScientometricAnalysisPayload, metrics: string[]) {
-  const prepared = metrics
-    .map((metricName) => {
-      const rows = rawDistributionRows(payload, metricName);
-      if (!rows.length) return null;
-      const min = Math.min(...rows.map((row) => row.lo));
-      const max = Math.max(...rows.map((row) => row.hi));
-      return { metricName, rows, min, max };
-    })
-    .filter(Boolean) as Array<{ metricName: string; rows: ReturnType<typeof rawDistributionRows>; min: number; max: number }>;
-  const maxBins = Math.max(0, ...prepared.map((item) => item.rows.length));
-  if (!maxBins) return [];
-  return Array.from({ length: maxBins }, (_, index) => {
-    const position = maxBins === 1 ? 0 : Math.round((index / (maxBins - 1)) * 100);
-    const row: Record<string, number> = { position };
-    prepared.forEach((item) => {
-      const sourceIndex = Math.round((index / Math.max(1, maxBins - 1)) * Math.max(0, item.rows.length - 1));
-      row[item.metricName] = Number(item.rows[sourceIndex]?.count ?? 0);
-    });
-    return row;
-  });
-}
-
 type DistributionMarker = {
-  position?: number;
   center?: number;
   count: number;
   value: number;
@@ -3196,32 +3320,16 @@ function selectedAuthorDistributionMarkers(
   payload: ScientometricAnalysisPayload,
   metrics: string[],
   authors: Record<string, unknown>[],
-  viewMode: "normalized" | "raw",
-  normalizedRows: Array<Record<string, number>>,
 ): DistributionMarker[] {
   if (!authors.length) return [];
   return metrics.flatMap((metricName) => {
     const bins = rawDistributionRows(payload, metricName);
     if (!bins.length) return [];
-    const min = Math.min(...bins.map((row) => row.lo));
-    const max = Math.max(...bins.map((row) => row.hi));
     const out: DistributionMarker[] = [];
     authors.forEach((author) => {
         const value = Number(author[metricName]);
         if (!Number.isFinite(value)) return;
         const authorName = String(author.author_display_name || author.author_id || "Выбранный автор");
-        if (viewMode === "normalized") {
-          const position = max > min ? Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100)) : 50;
-          const nearest = nearestDistributionRow(normalizedRows, position);
-          out.push({
-            position,
-            count: Math.max(1, Number(nearest?.[metricName] ?? 1)),
-            value,
-            metricName,
-            author: authorName,
-          });
-          return;
-        }
         const nearest = nearestRawDistributionBin(bins, value);
         out.push({
           center: value,
@@ -3233,13 +3341,6 @@ function selectedAuthorDistributionMarkers(
       });
     return out;
   });
-}
-
-function nearestDistributionRow(rows: Array<Record<string, number>>, position: number) {
-  return rows.reduce<Record<string, number> | null>((best, row) => {
-    if (!best) return row;
-    return Math.abs(Number(row.position) - position) < Math.abs(Number(best.position) - position) ? row : best;
-  }, null);
 }
 
 function nearestRawDistributionBin(rows: ReturnType<typeof rawDistributionRows>, value: number) {
@@ -3273,12 +3374,10 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
       const q3 = numberOrNull(boxplot.q3);
       const max = numberOrNull(boxplot.max_whisker ?? boxplot.max);
       if (![min, q1, median, q3, max].every((value) => value !== null)) return null;
-      const left = Math.min(min as number, q1 as number, median as number, q3 as number, max as number);
-      const right = Math.max(min as number, q1 as number, median as number, q3 as number, max as number);
-      const pct = (value: number | null) => {
-        if (value === null || right <= left) return 50;
-        return Math.max(0, Math.min(100, ((value - left) / (right - left)) * 100));
-      };
+      const outlierRows = ((payload.outliers ?? {})[metricName] ?? []) as Array<Record<string, unknown>>;
+      const outlierValues = outlierRows.map((item) => Number(item.value)).filter(Number.isFinite).slice(0, 24);
+      const left = Math.min(min as number, q1 as number, median as number, q3 as number, max as number, ...outlierValues);
+      const right = Math.max(min as number, q1 as number, median as number, q3 as number, max as number, ...outlierValues);
       return {
         metricName,
         min: min as number,
@@ -3287,11 +3386,9 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
         q3: q3 as number,
         max: max as number,
         outliers: Number(boxplot.outlier_count ?? 0),
-        minPct: pct(min),
-        q1Pct: pct(q1),
-        medianPct: pct(median),
-        q3Pct: pct(q3),
-        maxPct: pct(max),
+        outlierValues,
+        domainMin: left,
+        domainMax: right,
       };
     })
     .filter(Boolean) as Array<{
@@ -3302,42 +3399,55 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
       q3: number;
       max: number;
       outliers: number;
-      minPct: number;
-      q1Pct: number;
-      medianPct: number;
-      q3Pct: number;
-      maxPct: number;
+      outlierValues: number[];
+      domainMin: number;
+      domainMax: number;
     }>;
   if (!rows.length) {
     return <EmptyState title="Нет диапазонов" detail="Для выбранных индексов нет достаточного числа числовых значений." />;
   }
   return (
-    <div className="boxplot-simple-list">
-      <div className="boxplot-simple-scale" aria-hidden="true">
-        <span>меньше</span>
-        <span>больше</span>
-      </div>
+    <div className="boxplot-svg-list">
       {rows.map((row) => {
-        const boxLeft = Math.min(row.q1Pct, row.q3Pct);
-        const boxWidth = Math.max(1.5, Math.abs(row.q3Pct - row.q1Pct));
-        const whiskerLeft = Math.min(row.minPct, row.maxPct);
-        const whiskerWidth = Math.max(1.5, Math.abs(row.maxPct - row.minPct));
+        const x = (value: number) => {
+          const leftPad = 64;
+          const rightPad = 38;
+          const width = 1000 - leftPad - rightPad;
+          if (row.domainMax <= row.domainMin) return leftPad + width / 2;
+          return leftPad + ((value - row.domainMin) / (row.domainMax - row.domainMin)) * width;
+        };
+        const minX = x(row.min);
+        const q1X = x(row.q1);
+        const medianX = x(row.median);
+        const q3X = x(row.q3);
+        const maxX = x(row.max);
+        const boxX = Math.min(q1X, q3X);
+        const boxWidth = Math.max(4, Math.abs(q3X - q1X));
         return (
-          <div key={row.metricName} className="boxplot-simple-row">
-            <div className="boxplot-simple-label">
+          <div key={row.metricName} className="boxplot-svg-row">
+            <div className="boxplot-svg-title">
               <b>{metricLabelFor(row.metricName, metricLabels)}</b>
-              <span>медиана {formatAnalysisValue(row.median)}{row.outliers ? ` · выделяется ${fmt(row.outliers)}` : ""}</span>
+              <span>Q1 {formatAnalysisValue(row.q1)} · медиана {formatAnalysisValue(row.median)} · Q3 {formatAnalysisValue(row.q3)}{row.outliers ? ` · выделяющихся ${fmt(row.outliers)}` : ""}</span>
             </div>
-            <div
-              className="boxplot-simple-track"
-              title={`Минимум ${formatAnalysisValue(row.min)}, 25% ${formatAnalysisValue(row.q1)}, медиана ${formatAnalysisValue(row.median)}, 75% ${formatAnalysisValue(row.q3)}, максимум ${formatAnalysisValue(row.max)}`}
-            >
-              <span className="boxplot-simple-whisker" style={{ left: `${whiskerLeft}%`, width: `${whiskerWidth}%` }} />
-              <span className="boxplot-simple-cap" style={{ left: `${row.minPct}%` }} />
-              <span className="boxplot-simple-cap" style={{ left: `${row.maxPct}%` }} />
-              <span className="boxplot-simple-box" style={{ left: `${boxLeft}%`, width: `${boxWidth}%` }} />
-              <span className="boxplot-simple-median" style={{ left: `${row.medianPct}%` }} />
-            </div>
+            <svg viewBox="0 0 1000 88" role="img" aria-label={`Ящик с усами для ${metricLabelFor(row.metricName, metricLabels)}`} className="boxplot-svg">
+              <line x1="64" y1="62" x2="962" y2="62" className="boxplot-axis" />
+              {[row.domainMin, row.q1, row.median, row.q3, row.domainMax].map((value, index) => (
+                <g key={`${row.metricName}-${index}-${value}`}>
+                  <line x1={x(value)} y1="57" x2={x(value)} y2="67" className="boxplot-axis-tick" />
+                  <text x={x(value)} y="82" textAnchor="middle">{formatAnalysisValue(value)}</text>
+                </g>
+              ))}
+              <line x1={minX} y1="34" x2={maxX} y2="34" className="boxplot-whisker" />
+              <line x1={minX} y1="22" x2={minX} y2="46" className="boxplot-cap" />
+              <line x1={maxX} y1="22" x2={maxX} y2="46" className="boxplot-cap" />
+              <rect x={boxX} y="18" width={boxWidth} height="32" rx="2" className="boxplot-box" />
+              <line x1={medianX} y1="14" x2={medianX} y2="54" className="boxplot-median" />
+              {row.outlierValues.map((value, index) => (
+                <circle key={`${row.metricName}-outlier-${index}`} cx={x(value)} cy="34" r="4" className="boxplot-outlier">
+                  <title>{`Выделяющееся значение: ${formatAnalysisValue(value)}`}</title>
+                </circle>
+              ))}
+            </svg>
           </div>
         );
       })}
@@ -3350,110 +3460,35 @@ function numberOrNull(value: unknown) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function rankShiftChartRows(payload: ScientometricAnalysisPayload, metricLabels?: Record<string, string>) {
-  const comparisons = payload.rank_comparisons ?? {};
-  return Object.entries(comparisons)
-    .flatMap(([compareMetric, comparison]: [string, any]) => {
-      const rows = (comparison?.largest_shifts ?? []) as Array<Record<string, unknown>>;
-      return rows.slice(0, 8).map((row) => {
-        const author = String(row.author_display_name || row.author_id || "Автор");
-        const value = Number(row.abs_rank_delta ?? 0);
-        return {
-          label: `${author.length > 24 ? `${author.slice(0, 23)}...` : author} · ${metricShortLabel(compareMetric, metricLabels)}`,
-          tooltip: `${author}: ${metricLabelFor(String(comparison?.baseline_metric ?? payload.scope?.baseline_metric ?? ""), metricLabels)} → ${metricLabelFor(compareMetric, metricLabels)}`,
-          value,
-        };
-      });
-    })
-    .filter((row) => Number.isFinite(row.value) && row.value > 0)
-    .sort((left, right) => right.value - left.value)
-    .slice(0, 14);
-}
-
-const CORRELATION_METRIC_GROUPS = [
-  { title: "Публикации и цитирование", metrics: ["p", "c", "c_frac", "cpp"] },
-  { title: "Классические индексы", metrics: ["h", "i10", "g", "m_local"] },
-  { title: "Дополнительные индексы", metrics: ["f5", "fm5", "iupv", "islv", "lrdi"] },
-];
-
-function CorrelationMatrixPanels({ payload, method, metrics, metricLabels }: { payload: any; method: "spearman" | "pearson_log1p" | "kendall_tau_b"; metrics: string[]; metricLabels?: Record<string, string> }) {
+function CorrelationMatrixPanel({ payload, method, metrics, metricLabels }: { payload: any; method: "spearman" | "pearson_log1p" | "kendall_tau_b"; metrics: string[]; metricLabels?: Record<string, string> }) {
   const matrix = method === "kendall_tau_b" ? payload?.correlations?.kendall_tau_b?.matrix ?? {} : payload?.correlations?.[method] ?? {};
   const skipped = payload?.correlations?.kendall_tau_b?.skipped ?? [];
-  const groups = correlationMetricGroups(metrics);
+  const visibleMetrics = metrics.filter((metricName) => matrix?.[metricName]);
   return (
     <section className="panel correlation-panel-wide">
       <div className="panel-head">
         <span className="step-badge">Связь показателей</span>
-        <h2>{correlationLabel(method)} по группам</h2>
-        <p>Матрицы разделены по смысловым группам, чтобы сравнение мест в рейтинге читалось проще.</p>
+        <h2>{correlationLabel(method)} между рейтингами</h2>
+        <p>Большая матрица показывает, насколько похоже упорядочиваются авторы по выбранным показателям. Значение ближе к 1 означает более похожий рейтинг.</p>
       </div>
       {method === "kendall_tau_b" && skipped.length > 0 && <div className="notice warn"><b>Часть пар не рассчитана</b><span>Слишком много наблюдений для выбранного способа сравнения. Уменьшите число строк или уточните фильтр во вкладке “Данные”.</span></div>}
-      {groups.length === 0 ? (
+      {visibleMetrics.length < 2 ? (
         <EmptyState title="Недостаточно показателей" detail="Для матрицы нужно выбрать минимум два показателя одной смысловой группы." />
       ) : (
-        <div className="correlation-matrix-grid">
-          {groups.map((group) => (
-            <div key={group.title} className="correlation-matrix-card">
-              <b>{group.title}</b>
-              <div className="heatmap-grid compact-heatmap" style={{ gridTemplateColumns: `minmax(96px, 1fr) repeat(${group.metrics.length}, minmax(56px, 1fr))` }}>
-                <span />
-                {group.metrics.map((metricName) => <b key={metricName}>{metricShortLabel(metricName, metricLabels)}</b>)}
-                {group.metrics.map((left) => (
-                  <div className="heatmap-row-fragment" key={left}>
-                    <b>{metricShortLabel(left, metricLabels)}</b>
-                    {group.metrics.map((right) => {
-                      const value = matrix?.[left]?.[right];
-                      return <span key={`${group.title}-${left}-${right}`} style={{ background: correlationColor(value) }}>{value === null || value === undefined ? "—" : fmt(value)}</span>;
-                    })}
-                  </div>
-                ))}
+        <div className="correlation-matrix-card wide">
+          <div className="heatmap-grid compact-heatmap" style={{ gridTemplateColumns: `minmax(120px, 1fr) repeat(${visibleMetrics.length}, minmax(72px, 1fr))` }}>
+            <span />
+            {visibleMetrics.map((metricName) => <b key={metricName}>{metricShortLabel(metricName, metricLabels)}</b>)}
+            {visibleMetrics.map((left) => (
+              <div className="heatmap-row-fragment" key={left}>
+                <b>{metricShortLabel(left, metricLabels)}</b>
+                {visibleMetrics.map((right) => {
+                  const value = matrix?.[left]?.[right];
+                  return <span key={`${left}-${right}`} style={{ background: correlationColor(value) }}>{value === null || value === undefined ? "—" : fmt(value)}</span>;
+                })}
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function correlationMetricGroups(metrics: string[]) {
-  const selected = new Set(metrics);
-  const groups = CORRELATION_METRIC_GROUPS
-    .map((group) => ({
-      title: group.title,
-      metrics: group.metrics.filter((metricName) => selected.has(metricName)),
-    }))
-    .filter((group) => group.metrics.length >= 2);
-  const grouped = new Set(groups.flatMap((group) => group.metrics));
-  const other = metrics.filter((metricName) => !grouped.has(metricName));
-  if (other.length >= 2) {
-    groups.push({ title: "Другие выбранные показатели", metrics: other });
-  }
-  return groups;
-}
-
-function RankShiftPanel({ payload, metricLabels }: { payload: ScientometricAnalysisPayload; metricLabels?: Record<string, string> }) {
-  const rows = rankShiftChartRows(payload, metricLabels);
-  return (
-    <section className="panel">
-      <div className="panel-head">
-        <span className="step-badge">Изменение мест</span>
-        <h2>Как меняются места авторов при смене показателя</h2>
-        <p>Диаграмма показывает самые большие изменения места относительно основного показателя. Чем выше столбец, тем сильнее автор меняет позицию.</p>
-      </div>
-      {rows.length === 0 ? (
-        <EmptyState title="Изменений мест нет" detail="Выберите минимум два показателя для сравнения или увеличьте выборку авторов." />
-      ) : (
-        <div className="chart-box compact-chart">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={rows} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" />
-              <YAxis type="category" dataKey="label" width={150} />
-              <Tooltip formatter={(value, _name, item: any) => [fmt(value), item?.payload?.tooltip ?? "Изменение места"]} />
-              <Bar dataKey="value" fill="#155e75" name="Изменение места" />
-            </BarChart>
-          </ResponsiveContainer>
+            ))}
+          </div>
         </div>
       )}
     </section>
