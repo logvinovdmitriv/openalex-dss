@@ -385,19 +385,73 @@ def _terminate_process_group(process: subprocess.Popen[str]) -> None:
 
 
 def _cli_download_snapshot(files_dir: Path) -> dict[str, int]:
-    files_seen = 0
-    bytes_written = 0
     if not files_dir.exists():
         return {"files_seen": 0, "bytes_written": 0}
-    for path in files_dir.rglob("*"):
-        if not path.is_file():
-            continue
-        files_seen += 1
+    return {
+        "files_seen": _bounded_file_count(files_dir, max_files=5000),
+        "bytes_written": _directory_size_bytes(files_dir),
+    }
+
+
+def _bounded_file_count(files_dir: Path, *, max_files: int) -> int:
+    files_seen = 0
+    stack = [files_dir]
+    while stack and files_seen < max_files:
+        current = stack.pop()
         try:
-            bytes_written += path.stat().st_size
+            entries = list(current.iterdir())
         except OSError:
             continue
-    return {"files_seen": files_seen, "bytes_written": bytes_written}
+        for path in entries:
+            if path.is_dir():
+                stack.append(path)
+                continue
+            if path.is_file():
+                files_seen += 1
+                if files_seen >= max_files:
+                    return files_seen
+    return files_seen
+
+
+def _directory_size_bytes(path: Path) -> int:
+    try:
+        completed = subprocess.run(
+            ["du", "-sk", str(path)],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=4,
+        )
+        if completed.returncode == 0:
+            raw = completed.stdout.split(maxsplit=1)[0]
+            return int(raw) * 1024
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        pass
+    bytes_written = 0
+    stack = [path]
+    max_files = 5000
+    files_seen = 0
+    while stack and files_seen < max_files:
+        current = stack.pop()
+        try:
+            entries = list(current.iterdir())
+        except OSError:
+            continue
+        for child in entries:
+            if child.is_dir():
+                stack.append(child)
+                continue
+            if not child.is_file():
+                continue
+            files_seen += 1
+            try:
+                bytes_written += child.stat().st_size
+            except OSError:
+                continue
+            if files_seen >= max_files:
+                break
+    return bytes_written
 
 
 def _cli_download_percent(bytes_written: int, planned_raw_bytes: int, elapsed_seconds: int) -> int:

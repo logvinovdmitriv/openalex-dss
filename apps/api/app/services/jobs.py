@@ -582,9 +582,14 @@ def _stage_for_action(action: str) -> str:
 
 
 def _download_progress(run_id: str, progress: dict[str, Any]) -> None:
-    percent = int(progress.get("percent") or 0)
-    # Keep a little room for normalization and report-building in build_from_openalex.
-    bounded = min(95, max(25, percent))
+    percent = max(0, min(100, int(progress.get("percent") or 0)))
+    action = str(get_run(run_id).get("action") or "")
+    if action == "build_from_openalex":
+        # Download is only the first phase of this action. Keep the global
+        # progress monotonic and leave room for table preparation and indices.
+        bounded = min(85, max(20, 20 + round(percent * 0.65)))
+    else:
+        bounded = min(99, max(25, percent))
     fetched = int(progress.get("fetched") or 0)
     total = progress.get("total_available")
     files_seen = int(progress.get("files_seen") or 0)
@@ -597,7 +602,7 @@ def _download_progress(run_id: str, progress: dict[str, Any]) -> None:
         stage = str(progress.get("stage") or f"Загрузчик OpenAlex скачал файлов: {files_seen}")
     else:
         stage = str(progress.get("stage") or "Загрузчик OpenAlex запущен; точный процент появится после упаковки локальных файлов")
-    update_progress(run_id, bounded, stage, progress)
+    update_progress(run_id, bounded, stage, {**progress, "download_percent": percent})
 
 
 def _allow_unchecked_download() -> bool:

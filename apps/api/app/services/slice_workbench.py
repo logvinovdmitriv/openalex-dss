@@ -777,10 +777,13 @@ def _with_dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
 def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
     raw_jsonl = Path(str(dump.get("raw_jsonl") or ""))
     raw_exists = raw_jsonl.is_file()
-    cli_files_dir = Path(str(dump.get("cli_files_dir") or ""))
-    cli_files_snapshot = _downloaded_files_snapshot(cli_files_dir) if cli_files_dir else {"files_seen": 0, "bytes_written": 0}
-    cli_files_ready = bool(cli_files_dir and cli_files_snapshot["files_seen"] > 0)
+    storage_plan = dump.get("storage_plan") if isinstance(dump.get("storage_plan"), dict) else {}
+    cli_files_dir_raw = str(dump.get("cli_files_dir") or storage_plan.get("cli_output_dir") or "").strip()
+    cli_files_dir = Path(cli_files_dir_raw) if cli_files_dir_raw else None
     manifest_path = Path(str(dump.get("dump_manifest") or dump.get("manifest_path") or raw_jsonl.with_name("dump_manifest.json")))
+    files_manifest_path = Path(str(dump.get("files_manifest") or manifest_path.with_name("files_manifest.json")))
+    cli_files_snapshot = _downloaded_files_snapshot(cli_files_dir, files_manifest_path) if cli_files_dir is not None else {"files_seen": 0, "bytes_written": 0}
+    cli_files_ready = bool(cli_files_dir is not None and cli_files_snapshot["files_seen"] > 0)
     manifest_exists = manifest_path.is_file()
     records = int(dump.get("records_downloaded") or 0)
     completeness = str(dump.get("scientific_completeness") or "").strip()
@@ -816,6 +819,8 @@ def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
             "tables_ready": tables_ready,
             "indices_ready": indices_ready,
             "associated_run_id": associated_run,
+            "files_seen": cli_files_snapshot["files_seen"],
+            "bytes_written": cli_files_snapshot["bytes_written"],
         }
     if records <= 0:
         return {
@@ -828,6 +833,8 @@ def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
             "tables_ready": tables_ready,
             "indices_ready": indices_ready,
             "associated_run_id": associated_run,
+            "files_seen": cli_files_snapshot["files_seen"],
+            "bytes_written": cli_files_snapshot["bytes_written"],
         }
     if not tables_ready:
         return {
@@ -840,6 +847,8 @@ def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
             "tables_ready": False,
             "indices_ready": indices_ready,
             "associated_run_id": associated_run,
+            "files_seen": cli_files_snapshot["files_seen"],
+            "bytes_written": cli_files_snapshot["bytes_written"],
         }
     if not indices_ready:
         return {
@@ -852,6 +861,8 @@ def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
             "tables_ready": True,
             "indices_ready": False,
             "associated_run_id": associated_run,
+            "files_seen": cli_files_snapshot["files_seen"],
+            "bytes_written": cli_files_snapshot["bytes_written"],
         }
     status = "partial" if completeness == "partial" else "analyzed"
     label = "частичный срез" if completeness == "partial" else "готов"
@@ -866,6 +877,8 @@ def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
         "indices_ready": True,
         "associated_run_id": associated_run,
         "dump_dir": str(dump_dir),
+        "files_seen": cli_files_snapshot["files_seen"],
+        "bytes_written": cli_files_snapshot["bytes_written"],
     }
 
 
@@ -891,7 +904,8 @@ def _filesystem_dump_records(limit: int = 250) -> list[dict[str, Any]]:
         manifests.extend(dumps_dir.glob("*/dump_manifest.json"))
     raw_dir = DATA / "raw" / "openalex_cli"
     if raw_dir.exists():
-        manifests.extend(raw_dir.glob("**/dump_manifest.json"))
+        manifests.extend(raw_dir.glob("*/dump_manifest.json"))
+        manifests.extend(raw_dir.glob("*/*/dump_manifest.json"))
     manifests = sorted(set(manifests), key=_path_mtime, reverse=True)
     manifest_dirs = {manifest_path.parent.resolve() for manifest_path in manifests}
     for manifest_path in manifests[: max(1, min(limit, 250))]:
@@ -925,14 +939,15 @@ def _filesystem_dump_records(limit: int = 250) -> list[dict[str, Any]]:
         }
         records.append(source)
     if raw_dir.exists() and len(records) < limit:
-        for files_dir in sorted(raw_dir.glob("**/files"), key=_path_mtime, reverse=True):
+        candidate_file_dirs = list(raw_dir.glob("*/files")) + list(raw_dir.glob("*/*/files"))
+        for files_dir in sorted(candidate_file_dirs, key=_path_mtime, reverse=True):
             base_dir = files_dir.parent
             try:
                 if base_dir.resolve() in manifest_dirs:
                     continue
             except OSError:
                 continue
-            snapshot = _downloaded_files_snapshot(files_dir)
+            snapshot = _downloaded_files_snapshot(files_dir, base_dir / "files_manifest.json")
             if snapshot["files_seen"] <= 0:
                 continue
             fingerprint = hashlib.sha256(str(base_dir).encode("utf-8")).hexdigest()[:16]
@@ -971,20 +986,50 @@ def _filesystem_dump_records(limit: int = 250) -> list[dict[str, Any]]:
     return records
 
 
-def _downloaded_files_snapshot(files_dir: Path) -> dict[str, int]:
+def _downloaded_files_snapshot(files_dir: Path, manifest_path: Path | None = None) -> dict[str, int]:
+    manifest_snapshot = _files_manifest_snapshot(manifest_path or files_dir.parent / "files_manifest.json")
+    if manifest_snapshot["files_seen"] > 0:
+        return manifest_snapshot
     files_seen = 0
     bytes_written = 0
     if not files_dir.is_dir():
         return {"files_seen": 0, "bytes_written": 0}
-    for path in files_dir.rglob("*"):
-        if not path.is_file():
-            continue
-        files_seen += 1
+    stack = [files_dir]
+    max_files = 5000
+    while stack and files_seen < max_files:
+        current = stack.pop()
         try:
-            bytes_written += path.stat().st_size
+            entries = list(current.iterdir())
         except OSError:
             continue
+        for path in entries:
+            if path.is_dir():
+                stack.append(path)
+                continue
+            if not path.is_file():
+                continue
+            files_seen += 1
+            try:
+                bytes_written += path.stat().st_size
+            except OSError:
+                continue
+            if files_seen >= max_files:
+                break
     return {"files_seen": files_seen, "bytes_written": bytes_written}
+
+
+def _files_manifest_snapshot(manifest_path: Path) -> dict[str, int]:
+    if not manifest_path.is_file():
+        return {"files_seen": 0, "bytes_written": 0}
+    doc = _read_json(manifest_path)
+    files = doc.get("files") if isinstance(doc, dict) else None
+    if not isinstance(files, list):
+        return {"files_seen": 0, "bytes_written": 0}
+    bytes_written = 0
+    for item in files:
+        if isinstance(item, dict):
+            bytes_written += int(item.get("bytes") or 0)
+    return {"files_seen": len(files), "bytes_written": bytes_written}
 
 
 def _path_mtime(path: Path) -> float:

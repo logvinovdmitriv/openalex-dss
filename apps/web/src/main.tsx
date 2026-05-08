@@ -164,15 +164,15 @@ function buildWorkflowNav({
   const reasons: Partial<Record<View, string>> = {
     data: "Сначала выберите или скачайте срез",
     rankings: "Сначала выберите или скачайте срез",
-    statistics: "Сначала рассчитайте индексы",
-    reports: "Сначала рассчитайте индексы",
+    statistics: running ? "Дождитесь завершения текущей задачи" : "Сначала рассчитайте индексы",
+    reports: running ? "Дождитесь завершения текущей задачи" : "Сначала рассчитайте индексы",
   };
   const unlocked: Record<View, boolean> = {
     slices: true,
     data: scopeReady,
     rankings: scopeReady,
-    statistics: scopeReady && hasAuthorIndices,
-    reports: scopeReady && hasAuthorIndices,
+    statistics: scopeReady && hasAuthorIndices && !running,
+    reports: scopeReady && hasAuthorIndices && !running,
   };
   const complete: Record<View, boolean> = {
     slices: scopeReady,
@@ -305,9 +305,9 @@ function Workbench() {
     if (notifiedRunRef.current === key) return;
     notifiedRunRef.current = key;
     if (current.status === "failed") {
-      emitToast({ title: "Загрузка среза завершилась ошибкой", message: String(current.error || "Проверьте параметры среза и журнал run."), tone: "error", key });
+      emitToast({ title: `${runActionTitle(current.action)} завершился ошибкой`, message: String(current.error || "Проверьте параметры среза и журнал run."), tone: "error", key });
     } else if (current.status === "completed") {
-      emitToast({ title: "Срез готов", message: "Локальные данные обновлены и доступны для выбора.", tone: "success", key });
+      emitToast({ title: runCompletedTitle(current.action), message: "Локальные данные обновлены и доступны для выбора.", tone: "success", key });
     }
   }, [run.data?.run_id, run.data?.status, run.data?.error]);
 
@@ -638,7 +638,7 @@ function Workbench() {
       const nextDumpId = String(result?.dump?.dump_id ?? result?.run?.payload?.dump_id ?? "");
       if (nextRunId) setRunId(nextRunId);
       if (nextDumpId && !nextDumpId.startsWith("dump_pending_")) setDumpId(nextDumpId);
-      qc.invalidateQueries({ queryKey: ["run", nextRunId] });
+      if (nextRunId) qc.invalidateQueries({ queryKey: ["run", nextRunId] });
       qc.invalidateQueries({ queryKey: ["workbench"] });
       qc.invalidateQueries({ queryKey: ["dumps"] });
       navigate("data");
@@ -837,6 +837,11 @@ function Workbench() {
           </div>
         </header>
         {errors.length > 0 && <div className="notice error">{errors[0]}</div>}
+        {run.data && view !== "slices" && view !== "data" && ["queued", "running", "cancelling", "failed"].includes(String(run.data.status ?? "")) && (
+          <section className="panel task-status-panel">
+            <RunCard run={run.data} />
+          </section>
+        )}
 
         {view === "slices" && (
           <SlicesPage
@@ -890,7 +895,7 @@ function Workbench() {
             onDeleteDownloadedDump={(nextDumpId) => deleteDownloadedDump.mutate(nextDumpId)}
             deletingSliceId={String(deleteSavedSlice.variables ?? "")}
             deletingDumpId={String(deleteDownloadedDump.variables ?? "")}
-            repairingDumpId={String(repairDownloadedDump.variables ?? "")}
+            repairingDumpId={activeRepairDumpId(run.data, repairDownloadedDump.variables)}
             selectedSliceId={String(sliceDoc?.slice_id ?? "")}
             selectedDumpId={effectiveDumpId}
           />
@@ -1121,6 +1126,10 @@ function SlicesPage({
   const apiKeyReady = Boolean(apiKey.trim()) || backendCliApiKeyConfigured;
   const sliceRows = buildDownloadedSliceRows(downloadedDumps).slice(0, 20);
   const selectSliceRow = (row: UnifiedSliceRow) => {
+    if (row.selectDisabled) {
+      emitToast({ title: "Срез пока недоступен", message: row.status.reason || "Сначала восстановите локальные файлы среза.", tone: row.status.tone === "error" ? "error" : "info" });
+      return;
+    }
     if (row.dump) {
       onSelectDownloadedDump(row.dump);
       return;
@@ -1156,6 +1165,8 @@ function SlicesPage({
               status={row.status}
               selected={Boolean(row.dumpIds.length && row.dumpIds.includes(selectedDumpId))}
               onClick={() => selectSliceRow(row)}
+              actionDisabled={row.selectDisabled}
+              actionHint={row.status.reason}
               onInfo={() => row.dump && onShowDumpInfo(row.dump)}
               repairAction={row.repairAction}
               repairing={row.dumpIds.includes(repairingDumpId)}
@@ -1350,7 +1361,8 @@ type UnifiedSliceRow = {
   meta: string;
   detail: string;
   action: string;
-  status: { label: string; tone: "ok" | "warn" | "error" | "info" };
+  status: { status: string; label: string; tone: "ok" | "warn" | "error" | "info"; reason?: string };
+  selectDisabled?: boolean;
   repairAction?: string;
   sliceId: string;
   dumpIds: string[];
@@ -1368,13 +1380,21 @@ function buildDownloadedSliceRows(downloadedDumps: any[]): UnifiedSliceRow[] {
       const mb = bytesToMb(Number(dump?.bytes_written ?? dump?.raw_size_bytes ?? 0));
       const updated = String(dump?.updated_at_utc ?? dump?.created_at_utc ?? dump?.created_at ?? "").trim();
       const health = dumpHealth(dump);
+      const disabled = health.status === "broken" || health.status === "needs_repair";
+      const detail = [
+        records ? `${fmt(records)} работ` : "",
+        Number.isFinite(mb) && mb > 0 ? `${fmt(mb)} МБ` : "",
+        updated ? `обновлен: ${updated}` : "",
+        health.reason && health.tone !== "ok" ? health.reason : "",
+      ].filter(Boolean).join(" · ") || "локальные файлы готовы";
       return {
         key: dumpId || sliceId || String(dump?.raw_jsonl ?? index),
         title: downloadedSliceTitle(dump),
         meta: health.label,
-        detail: [records ? `${fmt(records)} работ` : "", Number.isFinite(mb) && mb > 0 ? `${fmt(mb)} МБ` : "", updated ? `обновлен: ${updated}` : ""].filter(Boolean).join(" · ") || "локальные файлы готовы",
-        action: "Выбрать",
+        detail,
+        action: disabled ? "Недоступен" : "Выбрать",
         status: health,
+        selectDisabled: disabled,
         repairAction: health.repairAction,
         sliceId,
         dumpIds: dumpId ? [dumpId] : [],
@@ -1384,17 +1404,18 @@ function buildDownloadedSliceRows(downloadedDumps: any[]): UnifiedSliceRow[] {
     .sort((left, right) => left.title.localeCompare(right.title, "ru"));
 }
 
-function dumpHealth(dump: any): { label: string; tone: "ok" | "warn" | "error" | "info"; repairAction?: string } {
+function dumpHealth(dump: any): { status: string; label: string; tone: "ok" | "warn" | "error" | "info"; reason?: string; repairAction?: string } {
   const health = dump?.health ?? {};
   const status = String(health.status ?? "").trim();
   const label = String(health.label ?? "").trim();
-  if (status === "broken") return { label: label || "поврежден", tone: "error" };
-  if (status === "needs_repair") return { label: label || "требует восстановления", tone: "warn", repairAction: "Восстановить" };
-  if (status === "ready" && health.repairable) return { label: label || "данные готовы", tone: "info", repairAction: "Рассчитать индексы" };
-  if (status === "partial") return { label: label || "частичный срез", tone: "warn" };
-  if (status === "analyzed") return { label: label || "готов", tone: "ok" };
-  if (String(dump?.scientific_completeness ?? "") === "partial") return { label: "частичный срез", tone: "warn" };
-  return { label: "скачан", tone: "ok" };
+  const reason = String(health.reason ?? "").trim();
+  if (status === "broken") return { status, label: label || "поврежден", tone: "error", reason };
+  if (status === "needs_repair") return { status, label: label || "требует восстановления", tone: "warn", reason, repairAction: "Восстановить" };
+  if (status === "ready" && health.repairable) return { status, label: label || "данные готовы", tone: "info", reason, repairAction: "Рассчитать индексы" };
+  if (status === "partial") return { status, label: label || "частичный срез", tone: "warn", reason };
+  if (status === "analyzed") return { status, label: label || "готов", tone: "ok", reason };
+  if (String(dump?.scientific_completeness ?? "") === "partial") return { status: "partial", label: "частичный срез", tone: "warn", reason };
+  return { status: status || "downloaded", label: "скачан", tone: "ok", reason };
 }
 
 function downloadedSliceTitle(dump: any) {
@@ -1417,6 +1438,14 @@ function materializationRunPayload(apiKey: string, downloadDir: string, maxDownl
   return payload;
 }
 
+function activeRepairDumpId(run: any, pendingDumpId: unknown) {
+  const pending = String(pendingDumpId ?? "");
+  const status = String(run?.status ?? "");
+  const action = String(run?.action ?? "");
+  if (action !== "repair_dump" || !["queued", "running", "cancelling"].includes(status)) return pending;
+  return String(run?.payload?.dump_id ?? pending);
+}
+
 function ArtifactChoice({
   title,
   meta,
@@ -1424,6 +1453,8 @@ function ArtifactChoice({
   action,
   status,
   onClick,
+  actionDisabled = false,
+  actionHint,
   selected = false,
   onInfo,
   repairAction,
@@ -1437,8 +1468,10 @@ function ArtifactChoice({
   meta: string;
   detail: string;
   action: string;
-  status?: { label: string; tone: "ok" | "warn" | "error" | "info" };
+  status?: { label: string; tone: "ok" | "warn" | "error" | "info"; reason?: string };
   onClick: () => void;
+  actionDisabled?: boolean;
+  actionHint?: string;
   selected?: boolean;
   onInfo?: () => void;
   repairAction?: string;
@@ -1452,7 +1485,7 @@ function ArtifactChoice({
     <div className={`artifact-choice ${selected ? "selected" : ""} ${status ? `status-${status.tone}` : ""}`}>
       <div>
         <strong>{title}</strong>
-        <span>{status?.label ?? meta}</span>
+        <span className={`status-chip ${status?.tone ?? "info"}`}>{status?.label ?? meta}</span>
         <small>{detail}</small>
       </div>
       <div className="artifact-choice-actions">
@@ -1462,7 +1495,7 @@ function ArtifactChoice({
             <Info size={16} />
           </button>
         )}
-        <button type="button" onClick={onClick}>{action}</button>
+        <button type="button" onClick={onClick} disabled={actionDisabled} title={actionHint}>{action}</button>
         {onRepair && repairAction && (
           <button type="button" onClick={onRepair} disabled={repairing}>
             {repairing ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />} {repairing ? "Запуск..." : repairAction}
@@ -1506,12 +1539,15 @@ function DumpInfoModal({ dump, onClose }: { dump: any; onClose: () => void }) {
           <KeyValue label="Время загрузки" value={dump?.elapsed_seconds ? `${fmt(Number(dump.elapsed_seconds))} сек.` : "—"} />
           <KeyValue label="Полнота" value={dumpCompletenessLabel(String(dump?.scientific_completeness ?? ""))} />
           <KeyValue label="Причина остановки" value={dumpStopReasonLabel(String(dump?.stop_reason ?? ""))} />
+          <KeyValue label="Состояние" value={health.reason || "Срез готов к работе."} />
+          <KeyValue label="Файлов загрузчика" value={dump?.health?.files_seen ? fmt(Number(dump.health.files_seen)) : "—"} />
           <KeyValue label="Финальный анализ" value={dump?.allowed_for_final_analysis ? "доступен" : "только предварительный"} />
           <KeyValue label="Индексы" value={dump?.health?.indices_ready ? "рассчитаны" : "не рассчитаны"} />
         </div>
         <div className="key-grid">
           <KeyValue label="Папка загрузки" value={String(storage?.download_base_dir ?? "—")} />
           <KeyValue label="Файл среза" value={rawPath || "—"} />
+          <KeyValue label="Папка файлов OpenAlex" value={String(dump?.cli_files_dir ?? storage?.cli_output_dir ?? "—")} />
           <KeyValue label="Паспорт загрузки" value={manifestPath || "—"} />
           <KeyValue label="Список файлов" value={String(dump?.files_manifest ?? "—")} />
         </div>
@@ -3848,6 +3884,7 @@ function RunCard({ run }: { run: WorkbenchRun }) {
   const hasWorkCounter = fetchedWorks > 0 || targetWorks > 0;
   const hasFilesCounter = details.files_seen || details.bytes_written;
   const live = runLiveState(run);
+  const phases = runProgressPhases(run, details);
   return (
     <div className={`run-card ${run.status === "failed" ? "error" : ""} ${live.active ? "live" : ""}`}>
       <div className="run-live-head">
@@ -3857,8 +3894,15 @@ function RunCard({ run }: { run: WorkbenchRun }) {
           <small>{live.detail}</small>
         </div>
       </div>
-        <span>{runActionTitle(run.action)}: {run.run_id}</span>
+      <span className="run-id-line">{runActionTitle(run.action)}: {run.run_id}</span>
       <ProgressBar percent={progress.percent} label={progress.label} tone={run.status === "failed" ? "error" : "normal"} />
+      {phases.length > 0 && (
+        <div className="run-phase-grid" aria-label="Подробный ход выполнения">
+          {phases.map((phase) => (
+            <PhaseBar key={phase.id} phase={phase} />
+          ))}
+        </div>
+      )}
       {Object.keys(details).length > 0 && (
         <div className="run-progress-details">
           {hasWorkCounter && <span>{fmt(fetchedWorks)} / {fmt(targetWorks)} работ</span>}
@@ -3878,22 +3922,128 @@ function runActionTitle(action: unknown) {
   if (value === "recalculate") return "Расчет индексов";
   if (value === "build_from_openalex") return "Скачивание и расчет среза";
   if (value === "fetch_slice_dump") return "Скачивание среза";
+  if (value === "repair_dump") return "Восстановление среза";
   return "Задача";
+}
+
+function runCompletedTitle(action: unknown) {
+  const value = String(action ?? "");
+  if (value === "repair_dump") return "Срез восстановлен";
+  if (value === "recalculate") return "Индексы рассчитаны";
+  if (value === "fetch_slice_dump") return "Срез скачан";
+  if (value === "build_from_openalex") return "Срез скачан и рассчитан";
+  return "Задача завершена";
 }
 
 function runLiveState(run: WorkbenchRun) {
   const action = String(run.action ?? "");
   const status = String(run.status ?? "");
   const isSliceLoad = action === "build_from_openalex" || action === "fetch_slice_dump";
+  if (status === "queued" && action === "repair_dump") return { active: true, title: "Восстановление в очереди", detail: "Операция начнется автоматически." };
   if (status === "queued") return { active: true, title: "Срез в очереди", detail: "Загрузка начнется автоматически." };
+  if (status === "running" && action === "repair_dump") return { active: true, title: "Восстановление среза", detail: "Проверка, упаковка, таблицы и расчет отображаются отдельными этапами." };
   if (status === "running" && isSliceLoad) return { active: true, title: "Загрузка среза", detail: "Статус обновляется в реальном времени." };
   if (status === "running") return { active: true, title: "Выполнение", detail: "Статус обновляется в реальном времени." };
-  if (status === "cancelling") return { active: true, title: "Остановка загрузки", detail: "Система сохраняет уже скачанные записи как частичный срез." };
-  if (status === "cancelled") return { active: false, title: "Загрузка остановлена", detail: "Частичный срез будет доступен, если успели скачаться записи." };
+  if (status === "cancelling") return {
+    active: true,
+    title: action === "repair_dump" ? "Остановка восстановления" : "Остановка загрузки",
+    detail: action === "repair_dump" ? "Текущий срез останется в списке с текущим состоянием." : "Система сохраняет уже скачанные записи как частичный срез.",
+  };
+  if (status === "cancelled") return {
+    active: false,
+    title: action === "repair_dump" ? "Восстановление остановлено" : "Загрузка остановлена",
+    detail: action === "repair_dump" ? "Срез можно восстановить повторно из списка срезов." : "Частичный срез будет доступен, если успели скачаться записи.",
+  };
+  if (status === "completed" && action === "repair_dump") return { active: false, title: "Срез восстановлен", detail: "Локальные таблицы и индексы доступны." };
   if (status === "completed" && isSliceLoad) return { active: false, title: "Срез готов", detail: "Локальные таблицы доступны для анализа." };
   if (status === "completed") return { active: false, title: "Готово", detail: "Задача завершена." };
-  if (status === "failed") return { active: false, title: "Ошибка выполнения", detail: "Подробности показаны ниже и в уведомлении." };
+  if (status === "failed") return {
+    active: false,
+    title: action === "repair_dump" ? "Восстановление не выполнено" : "Ошибка выполнения",
+    detail: "Подробности показаны ниже и в уведомлении.",
+  };
   return { active: false, title: action || "Run", detail: status || "нет статуса" };
+}
+
+type RunPhase = {
+  id: string;
+  label: string;
+  percent: number;
+  state: "pending" | "active" | "done" | "error";
+};
+
+function runProgressPhases(run: WorkbenchRun, details: Record<string, any>): RunPhase[] {
+  const action = String(run.action ?? "");
+  const status = String(run.status ?? "");
+  const percent = typeof run.progress_percent === "number" ? run.progress_percent : progressForRun(run).percent;
+  const failed = status === "failed";
+  const completed = status === "completed";
+  const queued = status === "queued";
+  const phase = (id: string, label: string, rangeStart: number, rangeEnd: number): RunPhase => ({
+    id,
+    label,
+    percent: completed ? 100 : phasePercent(percent, rangeStart, rangeEnd),
+    state: failed ? "error" : completed || percent >= rangeEnd ? "done" : percent >= rangeStart ? "active" : "pending",
+  });
+  if (action === "build_from_openalex") {
+    return [
+      {
+        id: "download",
+        label: "Скачивание файлов",
+        percent: completed ? 100 : Math.max(0, Math.min(100, Number(details.download_percent ?? phasePercent(percent, 20, 85)))),
+        state: failed ? "error" : completed || percent >= 85 ? "done" : queued ? "pending" : "active",
+      },
+      phase("normalize", "Подготовка таблиц", 86, 90),
+      phase("compute", "Расчет индексов", 90, 98),
+    ];
+  }
+  if (action === "fetch_slice_dump") {
+    return [
+      {
+        id: "download",
+        label: "Скачивание файлов",
+        percent: completed ? 100 : Math.max(0, Math.min(100, Number(details.download_percent ?? percent))),
+        state: failed ? "error" : completed ? "done" : queued ? "pending" : "active",
+      },
+      phase("pack", "Упаковка среза", 82, 95),
+    ];
+  }
+  if (action === "repair_dump") {
+    return [
+      phase("check", "Проверка файлов", 20, 28),
+      phase("pack", "Упаковка", 28, 35),
+      phase("normalize", "Подготовка таблиц", 36, 40),
+      phase("compute", "Расчет индексов", 40, 98),
+    ];
+  }
+  if (action === "recalculate") {
+    return [
+      phase("check", "Проверка таблиц", 45, 50),
+      phase("compute", "Расчет индексов", 50, 91),
+      phase("report", "Паспорт и отчет", 91, 98),
+    ];
+  }
+  return [];
+}
+
+function phasePercent(value: number, start: number, end: number) {
+  if (value <= start) return 0;
+  if (value >= end) return 100;
+  return Math.max(0, Math.min(100, Math.round(((value - start) / Math.max(1, end - start)) * 100)));
+}
+
+function PhaseBar({ phase }: { phase: RunPhase }) {
+  return (
+    <div className={`run-phase ${phase.state}`}>
+      <div className="progress-meta">
+        <span>{phase.label}</span>
+        <b>{phase.percent}%</b>
+      </div>
+      <div className={`progress-track ${phase.state === "error" ? "error" : ""}`}>
+        <span style={{ width: `${phase.percent}%` }} />
+      </div>
+    </div>
+  );
 }
 
 function ProgressBar({ percent, label, tone = "normal" }: { percent: number; label: string; tone?: "normal" | "error" }) {

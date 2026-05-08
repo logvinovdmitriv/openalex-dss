@@ -436,9 +436,18 @@ function humanRunStage(stage: unknown, status?: string, action?: string) {
   const raw = String(stage || "").trim();
   if (status === "completed") return "Готово";
   if (status === "cancelled") return "Остановлено";
-  if (status === "cancelling") return "Остановка загрузки";
+  if (status === "cancelling") return action === "repair_dump" ? "Остановка восстановления" : "Остановка загрузки";
   if (status === "failed") return "Ошибка";
-  if (raw.includes("OpenAlex") || raw.includes("Упаковано") || raw.includes("Нормализация")) return raw.replaceAll("OpenAlex CLI", "загрузчик OpenAlex").replaceAll("CLI", "OpenAlex");
+  if (
+    raw.includes("OpenAlex") ||
+    raw.includes("Упаковано") ||
+    raw.includes("Упаковка") ||
+    raw.includes("Нормализация") ||
+    raw.includes("Подготовка таблиц") ||
+    raw.includes("Восстановление")
+  ) {
+    return raw.replaceAll("OpenAlex CLI", "загрузчик OpenAlex").replaceAll("CLI", "OpenAlex");
+  }
   const known: Record<string, string> = {
     queued: "В очереди",
     starting: "Запуск",
@@ -449,9 +458,12 @@ function humanRunStage(stage: unknown, status?: string, action?: string) {
     "computing indices": "Расчет индексов",
     "normalizing local file": "Нормализация локального среза",
     "packing CLI JSON files": "Упаковка файлов OpenAlex",
+    "Восстановление локального среза": "Восстановление локального среза",
   };
   if (known[raw]) return known[raw];
   if (status === "running" && (action === "build_from_openalex" || action === "fetch_slice_dump")) return "Загрузка среза";
+  if (status === "running" && action === "repair_dump") return "Восстановление среза";
+  if (status === "running" && action === "recalculate") return "Расчет индексов";
   return raw || status || "Выполнение";
 }
 

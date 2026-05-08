@@ -1407,11 +1407,20 @@ input[aria-invalid="true"] {
   min-width: 0;
 }
 
+.artifact-choice > div:first-child .status-chip {
+  justify-self: start;
+}
+
 .artifact-choice-actions {
   display: grid;
   justify-items: end;
   gap: 6px;
   min-width: 0;
+}
+
+.artifact-choice-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .danger-button {
@@ -1503,6 +1512,47 @@ input[aria-invalid="true"] {
 
 .progress-track.error span {
   background: #dc2626;
+}
+
+.run-id-line {
+  font-weight: 700;
+}
+
+.run-phase-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.run-phase {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid #dbe6ef;
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: #f8fbfd;
+}
+
+.run-phase.pending {
+  opacity: 0.68;
+}
+
+.run-phase.active {
+  border-color: #9fc7dd;
+  background: #f3f9fd;
+}
+
+.run-phase.done {
+  border-color: #9ac7a7;
+  background: #f4fbf6;
+}
+
+.run-phase.error {
+  border-color: #f3b5b5;
+  background: #fff7f7;
 }
 
 .estimate-budget {

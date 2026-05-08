@@ -259,6 +259,26 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(dump["health"]["files_seen"], 1)
         self.assertEqual(dump["cli_files_dir"], str(files_dir))
 
+    def test_downloaded_files_snapshot_uses_files_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            files_dir = Path(tmp) / "files"
+            files_dir.mkdir()
+            manifest = Path(tmp) / "files_manifest.json"
+            manifest.write_text(
+                """{
+                  "files": [
+                    {"path": "a.json.gz", "bytes": 10, "records": 2},
+                    {"path": "b.json.gz", "bytes": 15, "records": 3}
+                  ],
+                  "status": "ok"
+                }""",
+                encoding="utf-8",
+            )
+
+            snapshot = slice_workbench._downloaded_files_snapshot(files_dir, manifest)
+
+        self.assertEqual(snapshot, {"files_seen": 2, "bytes_written": 25})
+
     def test_repair_dump_can_start_from_unpacked_cli_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)

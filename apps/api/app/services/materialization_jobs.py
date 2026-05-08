@@ -105,9 +105,9 @@ def _repair_dump(
 ) -> dict[str, Any]:
     dump = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
     raw_jsonl = str(payload.get("source_path") or dump.get("raw_jsonl") or "").strip()
-    raw_jsonl, dump = _ensure_repair_raw_file(dump, raw_jsonl, update_progress_callback)
     if update_progress_callback:
-        update_progress_callback(25, "Проверка локального файла среза", {"source_path": raw_jsonl})
+        update_progress_callback(25, "Проверка локальных файлов среза", {"source_path": raw_jsonl})
+    raw_jsonl, dump = _ensure_repair_raw_file(dump, raw_jsonl, update_progress_callback)
     analysis_eligibility = pipeline.analysis_eligibility_from_dump(dump, dev_override=True)
     built = pipeline.import_local_file(
         normalize_internal_pipeline_payload(
@@ -124,7 +124,7 @@ def _repair_dump(
             }
         ),
         progress_callback=update_progress_callback,
-        compute_progress_base=35,
+        compute_progress_base=40,
     )
     return {"status": "ok", "mode": "repair_dump", "dump": dump, "build": built, "analysis_eligibility": analysis_eligibility}
 

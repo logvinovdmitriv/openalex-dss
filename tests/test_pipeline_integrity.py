@@ -587,6 +587,45 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIn("download_progress_callback", dispatch.call_args.kwargs)
         self.assertIn("update_progress_callback", dispatch.call_args.kwargs)
 
+    def test_build_download_progress_keeps_room_for_table_and_index_phases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp) / "runs"
+            with jobs._LOCK:
+                jobs._RUNS.clear()
+                jobs._RUN_EXECUTION_PAYLOADS.clear()
+            with patch.object(jobs, "RUNS_DIR", runs_dir):
+                run = jobs.create_run(
+                    "build_from_openalex",
+                    {"accepted_estimate_signature": "estimate", "accepted_download_signature": "download"},
+                    autostart=False,
+                )
+                jobs._download_progress(run["run_id"], {"percent": 95, "stage": "Загрузка среза", "files_seen": 10, "bytes_written": 1024})
+                updated = jobs.get_run(run["run_id"])
+
+        self.assertLessEqual(updated["progress_percent"], 85)
+        self.assertEqual(updated["progress"]["download_percent"], 95)
+        self.assertEqual(updated["progress"]["files_seen"], 10)
+
+    def test_repair_dump_progress_hands_off_to_compute_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "works.jsonl.gz"
+            raw.write_bytes(b"not-empty")
+            progress: list[tuple[int, str]] = []
+            with (
+                patch.object(materialization_jobs.pipeline, "analysis_eligibility_from_dump", return_value={"allowed_for_final_analysis": True, "status": "allowed"}),
+                patch.object(materialization_jobs.pipeline, "import_local_file", return_value={"status": "ok", "archive": {}}) as import_local_file,
+            ):
+                result = materialization_jobs.dispatch(
+                    "run_repair",
+                    "repair_dump",
+                    {"source_path": str(raw), "dump_manifest": {"dump_id": "dump_a", "raw_jsonl": str(raw), "records_downloaded": 1}},
+                    update_progress_callback=lambda percent, stage, _extra=None: progress.append((percent, stage)),
+                )
+
+        self.assertEqual(result["mode"], "repair_dump")
+        self.assertEqual(progress[0], (25, "Проверка локальных файлов среза"))
+        self.assertEqual(import_local_file.call_args.kwargs["compute_progress_base"], 40)
+
     def test_internal_plan_job_action_is_not_supported(self) -> None:
         with self.assertRaises(ValueError) as raised:
             jobs._dispatch("run_plan", "plan", {"filter_mode": "all"})
