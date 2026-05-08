@@ -131,10 +131,10 @@ $OPENALEX_DSS_DATA_DIR/workbench/active_context.json    UI pointer to the active
 ```
 
 Canonical slice tables are Parquet. Run tables and passports stay scoped to
-`run_id`. Interactive table access, filters and sorting are executed on the
-backend with DuckDB-backed paths where possible; the frontend receives only the
-requested page or compact analytical payload. CSV is an export format, not the
-main analytical store.
+`run_id`. Run-table materialization and interactive table access use DuckDB or
+streaming reads where possible; the frontend receives only the requested page or
+compact analytical payload. CSV is an export format, not the main analytical
+store.
 
 SQLite is used only for local metadata catalogs, entity suggestions and slice
 metadata. It is not the analytical store. PostgreSQL is reserved for a later

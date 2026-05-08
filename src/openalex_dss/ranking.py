@@ -4,6 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from .duckdb_io import copy_query, sql_literal, table_expression
 from .io_utils import as_float, as_int, read_table_dicts, write_csv_dicts, write_parquet_dicts
 
 CORE_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local")
@@ -30,6 +31,22 @@ def build_ratings(
     indices_path: str | Path = "data/runs/local/tables/indices.csv",
     out_path: str | Path = "data/runs/local/tables/ratings.csv",
     metrics: tuple[str, ...] = METRICS,
+    *,
+    return_rows: bool = True,
+) -> list[dict[str, Any]]:
+    if not return_rows:
+        try:
+            _build_ratings_duckdb(indices_path, out_path, metrics)
+        except ImportError:
+            _build_ratings_python(indices_path, out_path, metrics)
+        return []
+    return _build_ratings_python(indices_path, out_path, metrics)
+
+
+def _build_ratings_python(
+    indices_path: str | Path,
+    out_path: str | Path,
+    metrics: tuple[str, ...],
 ) -> list[dict[str, Any]]:
     rows = read_table_dicts(indices_path)
     by_run_mode: defaultdict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
@@ -69,6 +86,56 @@ def build_ratings(
     write_csv_dicts(out_path, out_rows, RATING_FIELDS)
     write_parquet_dicts(Path(out_path).with_suffix(".parquet"), out_rows, RATING_FIELDS)
     return out_rows
+
+
+def _build_ratings_duckdb(
+    indices_path: str | Path,
+    out_path: str | Path,
+    metrics: tuple[str, ...],
+) -> None:
+    if not metrics:
+        write_csv_dicts(out_path, [], RATING_FIELDS)
+        write_parquet_dicts(Path(out_path).with_suffix(".parquet"), [], RATING_FIELDS)
+        return
+    relation = table_expression(indices_path)
+    metric_parts = [
+        f"""
+        SELECT
+            CAST(run_id AS VARCHAR) AS run_id,
+            CAST(fraction_mode AS VARCHAR) AS fraction_mode,
+            {sql_literal(metric)} AS metric_name,
+            CAST(author_id AS VARCHAR) AS author_id,
+            CAST(author_display_name AS VARCHAR) AS author_display_name,
+            COALESCE(TRY_CAST({metric} AS DOUBLE), 0.0) AS score,
+            COALESCE(TRY_CAST(c AS DOUBLE), 0.0) AS tie_break_c,
+            COALESCE(TRY_CAST(p AS BIGINT), 0) AS tie_break_p,
+            CAST(author_id AS VARCHAR) AS tie_break_author_id
+        FROM {relation}
+        """
+        for metric in metrics
+    ]
+    query = f"""
+WITH metric_rows AS (
+    {" UNION ALL ".join(metric_parts)}
+),
+ranked AS (
+    SELECT
+        *,
+        RANK() OVER (
+            PARTITION BY run_id, fraction_mode, metric_name
+            ORDER BY score DESC
+        ) AS rank_competition,
+        DENSE_RANK() OVER (
+            PARTITION BY run_id, fraction_mode, metric_name
+            ORDER BY score DESC
+        ) AS rank_dense
+    FROM metric_rows
+)
+SELECT {", ".join(RATING_FIELDS)}
+FROM ranked
+ORDER BY fraction_mode, metric_name, rank_competition, tie_break_c DESC, tie_break_p DESC, author_id
+"""
+    copy_query(query, out_path, Path(out_path).with_suffix(".parquet"))
 
 
 def sort_metric_rows(rows: list[dict[str, Any]], metric: str) -> list[dict[str, Any]]:

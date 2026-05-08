@@ -402,7 +402,14 @@ def _run_compute(
     ratings_csv = run_tables / "ratings.csv"
 
     step(0.18, "Формирование авторского уровня данных")
-    build_author_work_metrics(input_tables["works"], input_tables["authorships"], author_work_csv, cfg.fraction_modes, run_id=run_id)
+    build_author_work_metrics(
+        input_tables["works"],
+        input_tables["authorships"],
+        author_work_csv,
+        cfg.fraction_modes,
+        run_id=run_id,
+        return_rows=False,
+    )
     step(0.48, "Расчет наукометрических показателей")
     compute_indices(
         author_work_csv,
@@ -410,9 +417,10 @@ def _run_compute(
         cfg.lrdi_p0,
         cfg.lrdi_lambda,
         cfg.analysis_year,
+        return_rows=False,
     )
     step(0.72, "Построение рейтингов")
-    build_ratings(indices_csv, ratings_csv)
+    build_ratings(indices_csv, ratings_csv, return_rows=False)
     run_table_outputs = {
         "author_work": author_work_csv,
         "indices": indices_csv,

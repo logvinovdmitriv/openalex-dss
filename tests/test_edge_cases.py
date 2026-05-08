@@ -76,6 +76,43 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertGreater(a1["islv"], 0.0)
             self.assertTrue(ratings)
 
+    def test_optimized_metric_pipeline_writes_outputs_without_returning_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "raw.jsonl"
+            raw.write_text(
+                "\n".join(
+                    [
+                        json.dumps(_work("W1", "A1", 12), ensure_ascii=False),
+                        json.dumps(_work("W2", "A1", 5), ensure_ascii=False),
+                        json.dumps(_work("W3", "A2", 20), ensure_ascii=False),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            normalize_raw(raw, root / "works.csv", root / "auth.csv", root / "quality.json")
+
+            mart_rows = build_author_work_metrics(
+                root / "works.csv",
+                root / "auth.csv",
+                root / "awm.csv",
+                ("integer",),
+                return_rows=False,
+            )
+            index_rows = compute_indices(root / "awm.csv", root / "indices.csv", return_rows=False)
+            rating_rows = build_ratings(root / "indices.csv", root / "ratings.csv", metrics=("h",), return_rows=False)
+
+            indices = read_table_dicts(root / "indices.csv")
+            ratings = read_table_dicts(root / "ratings.csv")
+
+        self.assertEqual(mart_rows, [])
+        self.assertEqual(index_rows, [])
+        self.assertEqual(rating_rows, [])
+        self.assertEqual(len(indices), 2)
+        self.assertEqual(len(ratings), 2)
+        self.assertEqual([row["author_id"] for row in ratings], ["https://openalex.org/A1", "https://openalex.org/A2"])
+
     def test_parquet_writer_stabilizes_mixed_openalex_column_types(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

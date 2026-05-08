@@ -41,6 +41,27 @@ class RankingConsistencyTests(unittest.TestCase):
         self.assertEqual([row["author_id"] for row in rows], ["A1", "A2"])
         self.assertEqual([row["rank_competition"] for row in rows], ["1", "1"])
 
+    def test_optimized_rating_csv_uses_same_tie_break_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "indices.csv"
+            out = root / "ratings.csv"
+            fields = ["run_id", "fraction_mode", "author_id", "author_display_name", "h", "c", "p"]
+            write_csv_dicts(
+                source,
+                [
+                    {"run_id": "base", "fraction_mode": "strict_authors_count", "author_id": "A2", "author_display_name": "B", "h": 5, "c": 40, "p": 2},
+                    {"run_id": "base", "fraction_mode": "strict_authors_count", "author_id": "A1", "author_display_name": "A", "h": 5, "c": 40, "p": 7},
+                ],
+                fields,
+            )
+
+            build_ratings(source, out, metrics=("h",), return_rows=False)
+            rows = read_csv_dicts(out)
+
+        self.assertEqual([row["author_id"] for row in rows], ["A1", "A2"])
+        self.assertEqual([row["rank_competition"] for row in rows], ["1", "1"])
+
 
 if __name__ == "__main__":
     unittest.main()

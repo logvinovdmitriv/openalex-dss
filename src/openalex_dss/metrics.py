@@ -5,6 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from .duckdb_io import copy_query, iter_query, sql_literal, table_expression
 from .io_utils import as_float, as_int, read_table_dicts, truthy, write_csv_dicts, write_parquet_dicts
 from .normalize import DELETED_AUTHOR_ID, NULL_AUTHOR_ID
 
@@ -166,6 +167,25 @@ def build_author_work_metrics(
     out_path: str | Path = "data/runs/local/tables/author_work.csv",
     fraction_modes: tuple[str, ...] = ("strict_authors_count", "renorm_valid_authors", "integer"),
     run_id: str = "base",
+    *,
+    return_rows: bool = True,
+) -> list[dict[str, Any]]:
+    if not return_rows:
+        try:
+            _build_author_work_metrics_duckdb(works_path, authorships_path, out_path, fraction_modes, run_id)
+            return []
+        except ImportError:
+            rows = _build_author_work_metrics_python(works_path, authorships_path, out_path, fraction_modes, run_id)
+            return []
+    return _build_author_work_metrics_python(works_path, authorships_path, out_path, fraction_modes, run_id)
+
+
+def _build_author_work_metrics_python(
+    works_path: str | Path,
+    authorships_path: str | Path,
+    out_path: str | Path,
+    fraction_modes: tuple[str, ...],
+    run_id: str,
 ) -> list[dict[str, Any]]:
     works = {row["work_id"]: row for row in read_table_dicts(works_path)}
     authorships = read_table_dicts(authorships_path)
@@ -234,12 +254,155 @@ def build_author_work_metrics(
     return rows
 
 
+def _build_author_work_metrics_duckdb(
+    works_path: str | Path,
+    authorships_path: str | Path,
+    out_path: str | Path,
+    fraction_modes: tuple[str, ...],
+    run_id: str,
+) -> None:
+    if not fraction_modes:
+        write_csv_dicts(out_path, [], AUTHOR_WORK_FIELDS)
+        write_parquet_dicts(Path(out_path).with_suffix(".parquet"), [], AUTHOR_WORK_FIELDS)
+        return
+    query = _author_work_query(works_path, authorships_path, fraction_modes, run_id)
+    copy_query(query, out_path, Path(out_path).with_suffix(".parquet"))
+
+
+def _author_work_query(
+    works_path: str | Path,
+    authorships_path: str | Path,
+    fraction_modes: tuple[str, ...],
+    run_id: str,
+) -> str:
+    works = table_expression(works_path)
+    authorships = table_expression(authorships_path)
+    union_parts = [_author_work_mode_query(mode, run_id) for mode in fraction_modes]
+    return f"""
+WITH joined AS (
+    SELECT
+        CAST(a.work_id AS VARCHAR) AS work_id,
+        COALESCE(TRY_CAST(a.author_seq AS BIGINT), 9223372036854775807) AS author_seq_sort,
+        CAST(a.author_seq AS VARCHAR) AS author_seq_text,
+        NULLIF(CAST(a.author_id AS VARCHAR), '') AS author_id,
+        CAST(a.author_display_name AS VARCHAR) AS author_display_name,
+        CAST(w.publication_year AS VARCHAR) AS publication_year,
+        COALESCE(TRY_CAST(w.cited_by_count AS DOUBLE), 0.0) AS cited_by_count,
+        COALESCE(TRY_CAST(a.authorships_count_raw AS DOUBLE), 0.0) AS raw_count,
+        COALESCE(TRY_CAST(a.valid_author_ids_count AS DOUBLE), 0.0) AS valid_count,
+        {_truthy_sql("a.qf_authorship_truncated")} AS is_truncated,
+        (
+            {_truthy_sql("a.qf_null_author_id")}
+            OR {_truthy_sql("a.qf_deleted_author_id")}
+            OR {_truthy_sql("a.qf_duplicate_authorship")}
+            OR {_truthy_sql("a.qf_authorship_truncated")}
+            OR {_truthy_sql("a.qf_missing_required_fields")}
+        ) AS qf_any
+    FROM {authorships} AS a
+    INNER JOIN {works} AS w ON CAST(a.work_id AS VARCHAR) = CAST(w.work_id AS VARCHAR)
+    WHERE NULLIF(CAST(a.author_id AS VARCHAR), '') IS NOT NULL
+      AND CAST(a.author_id AS VARCHAR) NOT IN ({sql_literal(NULL_AUTHOR_ID)}, {sql_literal(DELETED_AUTHOR_ID)})
+),
+dedup AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (
+            PARTITION BY work_id, author_id
+            ORDER BY author_seq_sort, author_seq_text
+        ) AS rn
+    FROM joined
+),
+base AS (
+    SELECT * FROM dedup WHERE rn = 1
+)
+SELECT {", ".join(AUTHOR_WORK_FIELDS)}
+FROM (
+    {" UNION ALL ".join(union_parts)}
+) AS author_work
+ORDER BY fraction_mode, author_id, work_id
+"""
+
+
+def _author_work_mode_query(mode: str, run_id: str) -> str:
+    if mode == "strict_authors_count":
+        denominator = "raw_count"
+        where = "raw_count > 0"
+        omitted = "GREATEST(0.0, 1.0 - (valid_count / NULLIF(raw_count, 0)))"
+        qf_null_omission = f"({omitted}) > 0"
+    elif mode == "renorm_valid_authors":
+        denominator = "valid_count"
+        where = "valid_count > 0"
+        omitted = "NULL"
+        qf_null_omission = "false"
+    elif mode == "integer":
+        denominator = "1.0"
+        where = "true"
+        omitted = "NULL"
+        qf_null_omission = "false"
+    else:
+        raise ValueError(f"Unsupported fraction mode: {mode}")
+    return f"""
+SELECT
+    {sql_literal(run_id)} AS run_id,
+    {sql_literal(mode)} AS fraction_mode,
+    work_id,
+    author_id,
+    author_display_name,
+    publication_year,
+    cited_by_count,
+    {denominator} AS authors_count_used,
+    1.0 / {denominator} AS credit_weight,
+    cited_by_count * (1.0 / {denominator}) AS cited_credit,
+    ({denominator}) = 1.0 AS single_authored_flag,
+    qf_any,
+    is_truncated AS qf_authorship_truncated,
+    {qf_null_omission} AS qf_null_omission,
+    {omitted} AS omitted_author_fraction
+FROM base
+WHERE {where}
+"""
+
+
+def _truthy_sql(expression: str) -> str:
+    return f"LOWER(COALESCE(CAST({expression} AS VARCHAR), '')) IN ('true', '1', 'yes', 'y')"
+
+
 def compute_indices(
     author_work_path: str | Path = "data/runs/local/tables/author_work.csv",
     out_path: str | Path = "data/runs/local/tables/indices.csv",
     lrdi_p0: float = 5.0,
     lrdi_lambda: float = 0.15,
     analysis_year: int = 2026,
+    *,
+    return_rows: bool = True,
+) -> list[dict[str, Any]]:
+    if not return_rows:
+        try:
+            out_rows = _compute_indices_streaming(author_work_path, lrdi_p0=lrdi_p0, lrdi_lambda=lrdi_lambda, analysis_year=analysis_year)
+        except ImportError:
+            out_rows = _compute_indices_python(
+                author_work_path,
+                out_path,
+                lrdi_p0=lrdi_p0,
+                lrdi_lambda=lrdi_lambda,
+                analysis_year=analysis_year,
+            )
+            return []
+        assign_iupv_percentiles(out_rows)
+        out_rows.sort(key=lambda row: (row["fraction_mode"], row["author_id"]))
+        write_csv_dicts(out_path, out_rows, AUTHOR_INDEX_FIELDS)
+        write_parquet_dicts(Path(out_path).with_suffix(".parquet"), out_rows, AUTHOR_INDEX_FIELDS)
+        return []
+    return _compute_indices_python(author_work_path, out_path, lrdi_p0=lrdi_p0, lrdi_lambda=lrdi_lambda, analysis_year=analysis_year)
+
+
+def _compute_indices_python(
+    author_work_path: str | Path,
+    out_path: str | Path,
+    *,
+    lrdi_p0: float,
+    lrdi_lambda: float,
+    analysis_year: int,
 ) -> list[dict[str, Any]]:
     rows = read_table_dicts(author_work_path)
     groups: defaultdict[tuple[str, str, str], list[dict[str, str]]] = defaultdict(list)
@@ -249,50 +412,109 @@ def compute_indices(
     out_rows: list[dict[str, Any]] = []
     for (run_id, mode, author_id), group in groups.items():
         group.sort(key=lambda row: row["work_id"])
-        citations = [as_int(row["cited_by_count"]) for row in group]
-        cited_credits = [as_float(row["cited_credit"]) for row in group]
-        p = len({row["work_id"] for row in group})
-        c = float(sum(citations))
-        c_frac = float(sum(cited_credits))
-        h = h_index(citations)
-        i10 = i10_index(citations)
-        g = g_index(citations)
-        publication_years = [as_int(row.get("publication_year")) for row in group if as_int(row.get("publication_year")) > 0]
-        local_age = max(publication_years) - min(publication_years) + 1 if publication_years else 1
-        f5_value = _f5(group)
-        fm5_value = _fm5(group)
-        out_rows.append(
-            {
-                "run_id": run_id,
-                "fraction_mode": mode,
-                "author_id": author_id,
-                "author_display_name": _first_nonempty(row.get("author_display_name") for row in group),
-                "p": p,
-                "c": c,
-                "c_frac": c_frac,
-                "cpp": c / p if p else 0.0,
-                "h": h,
-                "i10": i10,
-                "g": g,
-                "m_local": h / max(1, local_age),
-                "top1_share": (max(citations) / c) if c > 0 and citations else 0.0,
-                "f5": f5_value,
-                "fm5": fm5_value,
-                "iupv": 0.0,
-                "islv": 0.0,
-                "lrdi": lrdi(group, analysis_year=analysis_year, p0=lrdi_p0, lam=lrdi_lambda),
-                "mean_authors_per_work": sum(as_float(row["authors_count_used"]) for row in group) / len(group),
-                "share_single_authored": sum(1 for row in group if truthy(row["single_authored_flag"])) / len(group),
-                "n_flagged_works": sum(1 for row in group if truthy(row["qf_any"])),
-                "n_truncated_works": sum(1 for row in group if truthy(row["qf_authorship_truncated"])),
-            }
-        )
+        out_rows.append(_index_row(run_id, mode, author_id, group, lrdi_p0=lrdi_p0, lrdi_lambda=lrdi_lambda, analysis_year=analysis_year))
 
     assign_iupv_percentiles(out_rows)
     out_rows.sort(key=lambda row: (row["fraction_mode"], row["author_id"]))
     write_csv_dicts(out_path, out_rows, AUTHOR_INDEX_FIELDS)
     write_parquet_dicts(Path(out_path).with_suffix(".parquet"), out_rows, AUTHOR_INDEX_FIELDS)
     return out_rows
+
+
+def _compute_indices_streaming(
+    author_work_path: str | Path,
+    *,
+    lrdi_p0: float,
+    lrdi_lambda: float,
+    analysis_year: int,
+) -> list[dict[str, Any]]:
+    relation = table_expression(author_work_path)
+    query = f"""
+SELECT *
+FROM {relation}
+ORDER BY run_id, fraction_mode, author_id, work_id
+"""
+    out_rows: list[dict[str, Any]] = []
+    current_key: tuple[str, str, str] | None = None
+    group: list[dict[str, Any]] = []
+    for row in iter_query(query):
+        key = (str(row.get("run_id") or ""), str(row.get("fraction_mode") or ""), str(row.get("author_id") or ""))
+        if current_key is not None and key != current_key:
+            out_rows.append(
+                _index_row(
+                    current_key[0],
+                    current_key[1],
+                    current_key[2],
+                    group,
+                    lrdi_p0=lrdi_p0,
+                    lrdi_lambda=lrdi_lambda,
+                    analysis_year=analysis_year,
+                )
+            )
+            group = []
+        current_key = key
+        group.append(row)
+    if current_key is not None:
+        out_rows.append(
+            _index_row(
+                current_key[0],
+                current_key[1],
+                current_key[2],
+                group,
+                lrdi_p0=lrdi_p0,
+                lrdi_lambda=lrdi_lambda,
+                analysis_year=analysis_year,
+            )
+        )
+    return out_rows
+
+
+def _index_row(
+    run_id: str,
+    mode: str,
+    author_id: str,
+    group: list[dict[str, Any]],
+    *,
+    lrdi_p0: float,
+    lrdi_lambda: float,
+    analysis_year: int,
+) -> dict[str, Any]:
+    citations = [as_int(row["cited_by_count"]) for row in group]
+    cited_credits = [as_float(row["cited_credit"]) for row in group]
+    p = len({row["work_id"] for row in group})
+    c = float(sum(citations))
+    c_frac = float(sum(cited_credits))
+    h = h_index(citations)
+    i10 = i10_index(citations)
+    g = g_index(citations)
+    publication_years = [as_int(row.get("publication_year")) for row in group if as_int(row.get("publication_year")) > 0]
+    local_age = max(publication_years) - min(publication_years) + 1 if publication_years else 1
+    f5_value = _f5(group)
+    fm5_value = _fm5(group)
+    return {
+        "run_id": run_id,
+        "fraction_mode": mode,
+        "author_id": author_id,
+        "author_display_name": _first_nonempty(row.get("author_display_name") for row in group),
+        "p": p,
+        "c": c,
+        "c_frac": c_frac,
+        "cpp": c / p if p else 0.0,
+        "h": h,
+        "i10": i10,
+        "g": g,
+        "m_local": h / max(1, local_age),
+        "top1_share": (max(citations) / c) if c > 0 and citations else 0.0,
+        "f5": f5_value,
+        "fm5": fm5_value,
+        "iupv": 0.0,
+        "islv": 0.0,
+        "lrdi": lrdi(group, analysis_year=analysis_year, p0=lrdi_p0, lam=lrdi_lambda),
+        "mean_authors_per_work": sum(as_float(row["authors_count_used"]) for row in group) / len(group),
+        "share_single_authored": sum(1 for row in group if truthy(row["single_authored_flag"])) / len(group),
+        "n_flagged_works": sum(1 for row in group if truthy(row["qf_any"])),
+        "n_truncated_works": sum(1 for row in group if truthy(row["qf_authorship_truncated"])),
+    }
 
 
 def _denominator(mode: str, raw_count: int, valid_count: int) -> int:

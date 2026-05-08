@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from .duckdb_io import sql_literal
 from .io_utils import csv_value, ensure_parent, iter_jsonl, write_json, write_parquet_dicts
 
 NULL_AUTHOR_ID = "https://openalex.org/A9999999999"
@@ -296,8 +297,8 @@ def _write_parquet_from_csv(csv_path: str | Path, fieldnames: list[str], row_cou
         return write_parquet_dicts(parquet_path, _read_csv_rows_for_parquet(csv_path), fieldnames)
 
     ensure_parent(parquet_path)
-    csv_literal = _duckdb_literal(csv_path)
-    parquet_literal = _duckdb_literal(parquet_path)
+    csv_literal = sql_literal(Path(csv_path))
+    parquet_literal = sql_literal(parquet_path)
     columns = ", ".join(f'"{field}"' for field in fieldnames)
     query = f"SELECT {columns} FROM read_csv_auto({csv_literal}, header=true)"
     con = duckdb.connect(database=":memory:")
@@ -312,10 +313,6 @@ def _read_csv_rows_for_parquet(csv_path: str | Path) -> list[dict[str, str]]:
     opener = gzip.open if Path(csv_path).suffix == ".gz" else open
     with opener(csv_path, "rt", encoding="utf-8", newline="") as f:
         return list(csv.DictReader(f))
-
-
-def _duckdb_literal(path: str | Path) -> str:
-    return "'" + str(Path(path)).replace("'", "''") + "'"
 
 
 def _work_topic_row(work_id: str, topic: dict[str, Any], primary_topic: dict[str, Any]) -> dict[str, Any]:

@@ -835,8 +835,8 @@ class PipelineIntegrityTests(unittest.TestCase):
             with (
                 patch.object(pipeline, "DATA", root),
                 patch.object(pipeline, "build_author_work_metrics", side_effect=lambda *_args, **_kwargs: Path(_args[2]).write_text("author_work\n", encoding="utf-8")),
-                patch.object(pipeline, "compute_indices", side_effect=lambda _source, target, *_args: Path(target).write_text("indices\n", encoding="utf-8")),
-                patch.object(pipeline, "build_ratings", side_effect=lambda _source, target: Path(target).write_text("ratings\n", encoding="utf-8")),
+                patch.object(pipeline, "compute_indices", side_effect=lambda _source, target, *_args, **_kwargs: Path(target).write_text("indices\n", encoding="utf-8")),
+                patch.object(pipeline, "build_ratings", side_effect=lambda _source, target, **_kwargs: Path(target).write_text("ratings\n", encoding="utf-8")),
                 patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
                 patch.dict("os.environ", {}, clear=True),
             ):
@@ -885,8 +885,8 @@ class PipelineIntegrityTests(unittest.TestCase):
             with (
                 patch.object(pipeline, "DATA", root),
                 patch.object(pipeline, "build_author_work_metrics", side_effect=lambda *_args, **_kwargs: Path(_args[2]).write_text("author_work\n", encoding="utf-8")),
-                patch.object(pipeline, "compute_indices", side_effect=lambda _source, target, *_args: Path(target).write_text("indices\n", encoding="utf-8")),
-                patch.object(pipeline, "build_ratings", side_effect=lambda _source, target: Path(target).write_text("ratings\n", encoding="utf-8")),
+                patch.object(pipeline, "compute_indices", side_effect=lambda _source, target, *_args, **_kwargs: Path(target).write_text("indices\n", encoding="utf-8")),
+                patch.object(pipeline, "build_ratings", side_effect=lambda _source, target, **_kwargs: Path(target).write_text("ratings\n", encoding="utf-8")),
                 patch.object(pipeline, "build_passports", side_effect=fake_build_passports),
                 patch.dict("os.environ", {}, clear=True),
             ):
