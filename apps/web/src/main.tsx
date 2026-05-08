@@ -416,6 +416,8 @@ function Workbench() {
     queryKey: ["local-data-preview", localDataKind, dataSearch, dataFilterKey, topN, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId, previewPageKey],
     queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: dataPreviewLimit, offset: effectiveDataOffset, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })),
     enabled: scopeReady && localDataKindAvailable,
+    placeholderData: (previous) => previous,
+    staleTime: 60_000,
   });
   const analytics = useQuery({
     queryKey: ["analytics", metric, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, topN, customMetricKey],
@@ -436,6 +438,8 @@ function Workbench() {
       customMetrics,
     )),
     enabled: hasLocalAnalyticsData,
+    placeholderData: (previous) => previous,
+    staleTime: 60_000,
   });
   const authorIndexTable = useQuery({
     queryKey: ["author-index-table", fractionMode, effectiveRunId, effectiveDumpId, topN, dataSearch, dataFilterKey, dataSort, dataDirection, previewPageKey],
@@ -451,6 +455,8 @@ function Workbench() {
       dataFilters: dataColumnFilters,
     })),
     enabled: scopeReady && Boolean((localDataSummary.data?.tables as any)?.indices?.exists),
+    placeholderData: (previous) => previous,
+    staleTime: 60_000,
   });
   const scientometrics = useQuery({
     queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, topN, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
@@ -466,6 +472,9 @@ function Workbench() {
       customMetrics,
     })),
     enabled: hasLocalAnalyticsData && scientometricMetrics.length > 0,
+    placeholderData: (previous) => previous,
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
   });
   const detail = useQuery({
     queryKey: ["detail", selected, effectiveRunId, effectiveDumpId],
@@ -475,6 +484,8 @@ function Workbench() {
         : `/works/${encodeURIComponent(selected?.id ?? "")}?run_id=${encodeURIComponent(effectiveRunId)}&dump_id=${encodeURIComponent(effectiveDumpId)}`,
     ),
     enabled: Boolean(selected) && scopeReady,
+    placeholderData: (previous) => previous,
+    staleTime: 60_000,
   });
 
   const domainPresets = (registry.data?.domain_presets ?? []) as ResearchAreaPreset[];
