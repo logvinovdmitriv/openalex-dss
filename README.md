@@ -59,7 +59,7 @@ python3.12 -m venv .venv
 .venv/bin/pip install -r apps/api/requirements.txt
 .venv/bin/pip install openalex-official
 npm install
-python3 scripts/run_dss.py
+./start
 ```
 
 После запуска:
@@ -67,6 +67,18 @@ python3 scripts/run_dss.py
 - UI: `http://127.0.0.1:5173`
 - API: `http://127.0.0.1:8000/api/v1`
 - Swagger: `http://127.0.0.1:8000/docs`
+
+Управление локальными сервисами из корня проекта:
+
+```bash
+./start    # запустить backend и frontend в фоне
+./status   # проверить процессы, порты и адреса
+./stop     # остановить backend и frontend
+./restart  # перезапустить оба сервиса
+```
+
+То же самое доступно через `npm start`, `npm run status`, `npm stop`, `npm restart`.
+Логи пишутся в `.runtime/logs/`, pid-файлы - в `.runtime/`.
 
 ## Основные вкладки системы
 

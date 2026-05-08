@@ -5,6 +5,10 @@
     "apps/web"
   ],
   "scripts": {
+    "start": "python3 scripts/dss_control.py start",
+    "stop": "python3 scripts/dss_control.py stop",
+    "status": "python3 scripts/dss_control.py status",
+    "restart": "python3 scripts/dss_control.py restart",
     "dev:web": "npm --workspace apps/web run dev",
     "build:web": "npm --workspace apps/web run build",
     "preview:web": "npm --workspace apps/web run preview",
