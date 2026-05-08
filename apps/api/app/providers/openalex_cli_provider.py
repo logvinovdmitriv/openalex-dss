@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import signal
 import shutil
 import subprocess
 import time
@@ -301,6 +302,23 @@ def _pack_work_json_files(
     return records, manifest
 
 
+def pack_existing_cli_files(
+    files_dir: str | Path,
+    raw_path: str | Path,
+    *,
+    manifest_path: str | Path | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[int, list[dict[str, Any]]]:
+    """Pack already downloaded OpenAlex CLI files into a local slice file."""
+    return _pack_work_json_files(
+        Path(files_dir),
+        Path(raw_path),
+        strict=False,
+        progress_callback=progress_callback,
+        manifest_path=Path(manifest_path) if manifest_path else None,
+    )
+
+
 def _run_cli_download(
     command: list[str],
     *,
@@ -317,7 +335,7 @@ def _run_cli_download(
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     stop_reason = "cli_completed"
     with stdout_path.open("w", encoding="utf-8", newline="\n") as stdout_handle, stderr_path.open("w", encoding="utf-8", newline="\n") as stderr_handle:
-        process = subprocess.Popen(command, cwd=str(base_dir), text=True, stdout=stdout_handle, stderr=stderr_handle)
+        process = subprocess.Popen(command, cwd=str(base_dir), text=True, stdout=stdout_handle, stderr=stderr_handle, start_new_session=True)
         while process.poll() is None:
             time.sleep(5)
             snapshot = _cli_download_snapshot(files_dir)
@@ -354,12 +372,15 @@ def _run_cli_download(
 
 def _terminate_process_group(process: subprocess.Popen[str]) -> None:
     try:
-        process.terminate()
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        process.kill()
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            return
         process.wait(timeout=10)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return
 
 

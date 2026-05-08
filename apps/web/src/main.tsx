@@ -17,6 +17,7 @@ import {
   Settings2,
   Sigma,
   UploadCloud,
+  Wrench,
   X,
 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
@@ -245,6 +246,7 @@ function Workbench() {
   const [selected, setSelected] = useState<{ kind: "author" | "work"; id: string } | null>(null);
   const [localDataKind, setLocalDataKind] = useState<LocalDataKind>("indices");
   const [dataColumnFilters, setDataColumnFilters] = useState<TableColumnFilters>({});
+  const [dumpInfo, setDumpInfo] = useState<any | null>(null);
   const navRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
@@ -629,6 +631,19 @@ function Workbench() {
       qc.invalidateQueries({ queryKey: ["scientometrics"] });
     },
   });
+  const repairDownloadedDump = useMutation({
+    mutationFn: (nextDumpId: string) => postJson<any>(`/dumps/${encodeURIComponent(nextDumpId)}/repair`, {}),
+    onSuccess: (result) => {
+      const nextRunId = String(result?.run?.run_id ?? "");
+      const nextDumpId = String(result?.dump?.dump_id ?? result?.run?.payload?.dump_id ?? "");
+      if (nextRunId) setRunId(nextRunId);
+      if (nextDumpId && !nextDumpId.startsWith("dump_pending_")) setDumpId(nextDumpId);
+      qc.invalidateQueries({ queryKey: ["run", nextRunId] });
+      qc.invalidateQueries({ queryKey: ["workbench"] });
+      qc.invalidateQueries({ queryKey: ["dumps"] });
+      navigate("data");
+    },
+  });
   const recalculate = useMutation({
     mutationFn: () => {
       if (!effectiveDumpId) {
@@ -724,6 +739,7 @@ function Workbench() {
     runMaterialization.error,
     downloadSlice.error,
     selectDownloadedDumpRemote.error,
+    repairDownloadedDump.error,
     deleteSavedSlice.error,
     deleteDownloadedDump.error,
     recalculate.error,
@@ -868,10 +884,13 @@ function Workbench() {
             onSelectSavedSlice={selectSavedSlice}
             onSelectMaterialization={selectMaterializationPlan}
             onSelectDownloadedDump={selectDownloadedDump}
+            onShowDumpInfo={setDumpInfo}
+            onRepairDownloadedDump={(nextDumpId) => repairDownloadedDump.mutate(nextDumpId)}
             onDeleteSavedSlice={(sliceId) => deleteSavedSlice.mutate(sliceId)}
             onDeleteDownloadedDump={(nextDumpId) => deleteDownloadedDump.mutate(nextDumpId)}
             deletingSliceId={String(deleteSavedSlice.variables ?? "")}
             deletingDumpId={String(deleteDownloadedDump.variables ?? "")}
+            repairingDumpId={String(repairDownloadedDump.variables ?? "")}
             selectedSliceId={String(sliceDoc?.slice_id ?? "")}
             selectedDumpId={effectiveDumpId}
           />
@@ -983,6 +1002,7 @@ function Workbench() {
       )}
 
       {selected && <DetailDrawer selected={selected} onClose={() => setSelected(null)} detail={detail.data} />}
+      {dumpInfo && <DumpInfoModal dump={dumpInfo} onClose={() => setDumpInfo(null)} />}
     </motion.main>
   );
 }
@@ -1028,10 +1048,13 @@ function SlicesPage({
   onSelectSavedSlice,
   onSelectMaterialization,
   onSelectDownloadedDump,
+  onShowDumpInfo,
+  onRepairDownloadedDump,
   onDeleteSavedSlice,
   onDeleteDownloadedDump,
   deletingSliceId,
   deletingDumpId,
+  repairingDumpId,
   selectedSliceId,
   selectedDumpId,
 }: {
@@ -1075,10 +1098,13 @@ function SlicesPage({
   onSelectSavedSlice: (doc: any) => void;
   onSelectMaterialization: (plan: any) => void;
   onSelectDownloadedDump: (dump: any) => void;
+  onShowDumpInfo: (dump: any) => void;
+  onRepairDownloadedDump: (dumpId: string) => void;
   onDeleteSavedSlice: (sliceId: string) => void;
   onDeleteDownloadedDump: (dumpId: string) => void;
   deletingSliceId: string;
   deletingDumpId: string;
+  repairingDumpId: string;
   selectedSliceId: string;
   selectedDumpId: string;
 }) {
@@ -1104,6 +1130,10 @@ function SlicesPage({
     if (!window.confirm(`Удалить локальный срез “${row.title}”? Будут удалены скачанные файлы и таблицы этого среза.`)) return;
     row.dumpIds.forEach(onDeleteDownloadedDump);
   };
+  const repairSliceRow = (row: UnifiedSliceRow) => {
+    const dumpId = row.dumpIds[0];
+    if (dumpId) onRepairDownloadedDump(dumpId);
+  };
 
   return (
     <div className="stack">
@@ -1123,8 +1153,13 @@ function SlicesPage({
               meta={row.meta}
               detail={row.detail}
               action={row.action}
+              status={row.status}
               selected={Boolean(row.dumpIds.length && row.dumpIds.includes(selectedDumpId))}
               onClick={() => selectSliceRow(row)}
+              onInfo={() => row.dump && onShowDumpInfo(row.dump)}
+              repairAction={row.repairAction}
+              repairing={row.dumpIds.includes(repairingDumpId)}
+              onRepair={() => repairSliceRow(row)}
               deleteAction="Удалить"
               deleting={row.dumpIds.includes(deletingDumpId)}
               onDelete={() => deleteSliceRow(row)}
@@ -1315,6 +1350,8 @@ type UnifiedSliceRow = {
   meta: string;
   detail: string;
   action: string;
+  status: { label: string; tone: "ok" | "warn" | "error" | "info" };
+  repairAction?: string;
   sliceId: string;
   dumpIds: string[];
   slice?: any;
@@ -1330,18 +1367,34 @@ function buildDownloadedSliceRows(downloadedDumps: any[]): UnifiedSliceRow[] {
       const records = Number(dump?.records_downloaded ?? 0);
       const mb = bytesToMb(Number(dump?.bytes_written ?? dump?.raw_size_bytes ?? 0));
       const updated = String(dump?.updated_at_utc ?? dump?.created_at_utc ?? dump?.created_at ?? "").trim();
+      const health = dumpHealth(dump);
       return {
         key: dumpId || sliceId || String(dump?.raw_jsonl ?? index),
         title: downloadedSliceTitle(dump),
-        meta: "скачан",
+        meta: health.label,
         detail: [records ? `${fmt(records)} работ` : "", Number.isFinite(mb) && mb > 0 ? `${fmt(mb)} МБ` : "", updated ? `обновлен: ${updated}` : ""].filter(Boolean).join(" · ") || "локальные файлы готовы",
         action: "Выбрать",
+        status: health,
+        repairAction: health.repairAction,
         sliceId,
         dumpIds: dumpId ? [dumpId] : [],
         dump,
       };
     })
     .sort((left, right) => left.title.localeCompare(right.title, "ru"));
+}
+
+function dumpHealth(dump: any): { label: string; tone: "ok" | "warn" | "error" | "info"; repairAction?: string } {
+  const health = dump?.health ?? {};
+  const status = String(health.status ?? "").trim();
+  const label = String(health.label ?? "").trim();
+  if (status === "broken") return { label: label || "поврежден", tone: "error" };
+  if (status === "needs_repair") return { label: label || "требует восстановления", tone: "warn", repairAction: "Восстановить" };
+  if (status === "ready" && health.repairable) return { label: label || "данные готовы", tone: "info", repairAction: "Рассчитать индексы" };
+  if (status === "partial") return { label: label || "частичный срез", tone: "warn" };
+  if (status === "analyzed") return { label: label || "готов", tone: "ok" };
+  if (String(dump?.scientific_completeness ?? "") === "partial") return { label: "частичный срез", tone: "warn" };
+  return { label: "скачан", tone: "ok" };
 }
 
 function downloadedSliceTitle(dump: any) {
@@ -1369,8 +1422,13 @@ function ArtifactChoice({
   meta,
   detail,
   action,
+  status,
   onClick,
   selected = false,
+  onInfo,
+  repairAction,
+  repairing = false,
+  onRepair,
   deleteAction,
   deleting = false,
   onDelete,
@@ -1379,22 +1437,37 @@ function ArtifactChoice({
   meta: string;
   detail: string;
   action: string;
+  status?: { label: string; tone: "ok" | "warn" | "error" | "info" };
   onClick: () => void;
   selected?: boolean;
+  onInfo?: () => void;
+  repairAction?: string;
+  repairing?: boolean;
+  onRepair?: () => void;
   deleteAction?: string;
   deleting?: boolean;
   onDelete?: () => void;
 }) {
   return (
-    <div className={selected ? "artifact-choice selected" : "artifact-choice"}>
+    <div className={`artifact-choice ${selected ? "selected" : ""} ${status ? `status-${status.tone}` : ""}`}>
       <div>
         <strong>{title}</strong>
-        <span>{meta}</span>
+        <span>{status?.label ?? meta}</span>
         <small>{detail}</small>
       </div>
       <div className="artifact-choice-actions">
         {selected && <span className="status-chip ok">выбран</span>}
+        {onInfo && (
+          <button type="button" className="icon-button" onClick={onInfo} title="Информация о срезе" aria-label="Информация о срезе">
+            <Info size={16} />
+          </button>
+        )}
         <button type="button" onClick={onClick}>{action}</button>
+        {onRepair && repairAction && (
+          <button type="button" onClick={onRepair} disabled={repairing}>
+            {repairing ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />} {repairing ? "Запуск..." : repairAction}
+          </button>
+        )}
         {onDelete && (
           <button type="button" className="danger-button" onClick={onDelete} disabled={deleting || !deleteAction}>
             {deleting ? "Удаление..." : deleteAction}
@@ -1403,6 +1476,76 @@ function ArtifactChoice({
       </div>
     </div>
   );
+}
+
+function DumpInfoModal({ dump, onClose }: { dump: any; onClose: () => void }) {
+  const health = dumpHealth(dump);
+  const request = dump?.openalex_request ?? {};
+  const storage = dump?.storage_plan ?? {};
+  const signatures = dump?.signatures ?? {};
+  const rawPath = String(dump?.raw_jsonl ?? "");
+  const manifestPath = String(dump?.dump_manifest ?? dump?.manifest_path ?? "");
+  const filter = String(request?.filter ?? dump?.openalex_filter ?? "");
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Информация о локальном срезе">
+      <div className="modal dump-info-modal">
+        <div className="modal-head">
+          <div>
+            <span className={`status-chip ${health.tone}`}>{health.label}</span>
+            <h2>{downloadedSliceTitle(dump)}</h2>
+            <p>Служебная информация о скачанном локальном срезе, его расположении, объеме и параметрах отбора.</p>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} title="Закрыть"><X size={18} /></button>
+        </div>
+        <div className="key-grid">
+          <KeyValue label="Идентификатор среза" value={String(dump?.dump_id ?? "—")} />
+          <KeyValue label="Работ" value={fmt(Number(dump?.records_downloaded ?? 0))} />
+          <KeyValue label="Ожидалось работ" value={dump?.records_expected ? fmt(Number(dump.records_expected)) : "—"} />
+          <KeyValue label="Размер файла" value={`${fmt(bytesToMb(Number(dump?.bytes_written ?? 0)))} МБ`} />
+          <KeyValue label="Скачан" value={String(dump?.created_at_utc ?? dump?.download_finished_at_utc ?? "—")} />
+          <KeyValue label="Время загрузки" value={dump?.elapsed_seconds ? `${fmt(Number(dump.elapsed_seconds))} сек.` : "—"} />
+          <KeyValue label="Полнота" value={dumpCompletenessLabel(String(dump?.scientific_completeness ?? ""))} />
+          <KeyValue label="Причина остановки" value={dumpStopReasonLabel(String(dump?.stop_reason ?? ""))} />
+          <KeyValue label="Финальный анализ" value={dump?.allowed_for_final_analysis ? "доступен" : "только предварительный"} />
+          <KeyValue label="Индексы" value={dump?.health?.indices_ready ? "рассчитаны" : "не рассчитаны"} />
+        </div>
+        <div className="key-grid">
+          <KeyValue label="Папка загрузки" value={String(storage?.download_base_dir ?? "—")} />
+          <KeyValue label="Файл среза" value={rawPath || "—"} />
+          <KeyValue label="Паспорт загрузки" value={manifestPath || "—"} />
+          <KeyValue label="Список файлов" value={String(dump?.files_manifest ?? "—")} />
+        </div>
+        <details className="technical-details" open>
+          <summary>Параметры отбора OpenAlex</summary>
+          <pre>{filter || "Фильтр не найден в паспорте среза."}</pre>
+        </details>
+        <details className="technical-details">
+          <summary>Контрольные подписи</summary>
+          <div className="key-grid">
+            <KeyValue label="Подпись оценки" value={String(signatures?.estimate_signature ?? dump?.estimate_signature ?? "—")} />
+            <KeyValue label="Подпись загрузки" value={String(signatures?.download_signature ?? dump?.download_signature ?? "—")} />
+            <KeyValue label="SHA-256 файла" value={String(dump?.raw_jsonl_sha256 ?? dump?.sha256 ?? "—")} />
+          </div>
+        </details>
+      </div>
+    </div>
+  );
+}
+
+function dumpCompletenessLabel(value: string) {
+  if (value === "complete") return "полный";
+  if (value === "partial") return "частичный";
+  if (value === "empty") return "пустой";
+  if (value === "failed") return "ошибка";
+  return value || "не указано";
+}
+
+function dumpStopReasonLabel(value: string) {
+  if (value === "cli_completed") return "загрузка завершена";
+  if (value === "user_cancelled") return "остановлено пользователем";
+  if (value === "size_limit_reached") return "достигнут лимит размера";
+  if (value === "cli_pack_failed") return "ошибка упаковки";
+  return value || "не указано";
 }
 
 function LocalDataPage({

@@ -118,6 +118,16 @@ def delete_dump(dump_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/dumps/{dump_id}/repair", status_code=202)
+def repair_dump(dump_id: str) -> dict[str, Any]:
+    try:
+        return slice_workbench.repair_dump(dump_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Локальный срез не найден") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/workbench")
 def workbench_summary() -> dict[str, Any]:
     return slice_workbench.workbench_summary()

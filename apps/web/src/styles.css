@@ -1386,6 +1386,21 @@ input[aria-invalid="true"] {
   background: #f4fbf6;
 }
 
+.artifact-choice.status-warn {
+  border-color: #f2c27a;
+  background: #fffaf0;
+}
+
+.artifact-choice.status-error {
+  border-color: #f3b5b5;
+  background: #fff7f7;
+}
+
+.artifact-choice.status-info {
+  border-color: #bdd7e7;
+  background: #f4f9fc;
+}
+
 .artifact-choice > div:first-child {
   display: grid;
   gap: 3px;
@@ -1661,6 +1676,40 @@ input[aria-invalid="true"] {
   border-color: #f2c27a;
   background: #fff8eb;
   color: #8a5100;
+}
+
+.status-chip.error {
+  border-color: #f3b5b5;
+  background: #fff2f2;
+  color: #9f1c1c;
+}
+
+.status-chip.info {
+  border-color: #bfd7e8;
+  background: #f1f7fb;
+  color: var(--accent);
+}
+
+.dump-info-modal {
+  width: min(980px, calc(100vw - 32px));
+}
+
+.dump-info-modal .modal-head {
+  align-items: start;
+}
+
+.dump-info-modal pre {
+  max-width: 100%;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid #dbe6ef;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f8fbfd;
+  color: #172127;
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 .dump-card-head {

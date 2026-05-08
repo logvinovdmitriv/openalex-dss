@@ -25,7 +25,15 @@ class PipelineIntegrityTests(unittest.TestCase):
             cfg = SimpleNamespace(slice_name="slice_a")
             with patch.object(pipeline, "DATA", data):
                 self.assertEqual(pipeline._download_output_dir({}, cfg).resolve(), (data / "raw/openalex_cli/slice_a").resolve())
+                self.assertEqual(
+                    pipeline._download_output_dir({"run_id": "run_A"}, cfg).resolve(),
+                    (data / "raw/openalex_cli/slice_a/run_A").resolve(),
+                )
                 self.assertEqual(pipeline._download_output_dir({"download_dir": "custom"}, cfg).resolve(), (data / "custom/slice_a").resolve())
+                self.assertEqual(
+                    pipeline._download_output_dir({"download_dir": "custom", "materialization_id": "mat_A"}, cfg).resolve(),
+                    (data / "custom/slice_a/mat_A").resolve(),
+                )
                 self.assertEqual(pipeline._download_output_dir({"download_dir": "data/custom"}, cfg).resolve(), (data / "custom/slice_a").resolve())
                 self.assertEqual(pipeline._download_output_dir({"download_dir": str(data / "chosen" / "slice_a")}, cfg).resolve(), (data / "chosen" / "slice_a").resolve())
 
@@ -228,6 +236,19 @@ class PipelineIntegrityTests(unittest.TestCase):
 
         self.assertEqual(cancelled["status"], "cancelling")
 
+    def test_cancel_queued_run_finishes_without_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp) / "runs"
+            with jobs._LOCK:
+                jobs._RUNS.clear()
+                jobs._RUN_EXECUTION_PAYLOADS.clear()
+            with patch.object(jobs, "RUNS_DIR", runs_dir):
+                run = jobs.create_run("recalculate", {"dump_id": "dump_a"}, autostart=False)
+                cancelled = jobs.cancel_run(run["run_id"])
+
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(cancelled["progress_percent"], 100)
+
     def test_stale_running_run_is_marked_failed_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runs_dir = Path(tmp) / "runs"
@@ -262,8 +283,66 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(run["status"], "failed")
         self.assertIn("Задача была прервана", run["error"])
 
+    def test_stale_materialization_run_recovers_downloaded_dump_after_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "data"
+            runs_dir = data / "runs"
+            run_dir = runs_dir / "run_recover"
+            raw_dir = data / "raw/openalex_cli/slice_a/mat_a"
+            raw_dir.mkdir(parents=True)
+            run_dir.mkdir(parents=True)
+            raw_jsonl = raw_dir / "works.jsonl.gz"
+            raw_jsonl.write_bytes(b"not-empty")
+            manifest = {
+                "slice_id": "slice_a",
+                "dump_id": "dump_recover",
+                "raw_jsonl": str(raw_jsonl),
+                "records_downloaded": 5,
+                "bytes_written": 9,
+                "scientific_completeness": "partial",
+                "usable_for_exploratory_analysis": True,
+                "allowed_for_final_analysis": False,
+            }
+            (raw_dir / "dump_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (run_dir / "run_status.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "run_recover",
+                        "action": "build_from_openalex",
+                        "status": "running",
+                        "progress_percent": 96,
+                        "progress_stage": "Нормализация локального среза",
+                        "progress": {"source_path": str(raw_jsonl)},
+                        "created_at": "2026-05-08T07:42:25Z",
+                        "started_at": "2026-05-08T07:42:25Z",
+                        "finished_at": None,
+                        "error": None,
+                        "payload": {"materialization_id": "mat_a"},
+                        "result": None,
+                        "artifacts": {},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            with jobs._LOCK:
+                jobs._RUNS.clear()
+                jobs._RUN_EXECUTION_PAYLOADS.clear()
+            with (
+                patch.object(jobs, "RUNS_DIR", runs_dir),
+                patch.object(jobs, "DATA", data),
+                patch.object(jobs.materialization_jobs, "mark_completed") as mark_completed,
+            ):
+                run = jobs.get_run("run_recover")
+
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["progress_stage"], "partial_completed_recovered")
+        self.assertEqual(run["result"]["fetch"]["dump"]["dump_id"], "dump_recover")
+        self.assertEqual(run["artifacts"]["raw_jsonl"], "raw/openalex_cli/slice_a/mat_a/works.jsonl.gz")
+        mark_completed.assert_called_once()
+
     def test_local_file_import_is_not_a_job_action(self) -> None:
-        self.assertEqual(materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS, {"fetch_slice_dump", "build_from_openalex"})
+        self.assertEqual(materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS, {"fetch_slice_dump", "build_from_openalex", "repair_dump"})
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(jobs, "RUNS_DIR", Path(tmp) / "runs"):
@@ -464,7 +543,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         }
         captured: dict[str, object] = {}
 
-        def fake_import(payload: dict[str, object]) -> dict[str, object]:
+        def fake_import(payload: dict[str, object], **_kwargs: object) -> dict[str, object]:
             captured.update(payload)
             return {"status": "ok", "mode": "import_local_file"}
 
@@ -489,6 +568,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(recalculate.call_args.args[0], "run_analysis")
         self.assertEqual(recalculate.call_args.args[1]["dump_id"], "dump_a")
         self.assertNotIn("unknown_extra", recalculate.call_args.args[1])
+        self.assertIn("update_progress_callback", recalculate.call_args.kwargs)
 
     def test_jobs_dispatch_delegates_materialization_actions_to_materialization_jobs(self) -> None:
         with patch.object(jobs.materialization_jobs, "dispatch", return_value={"status": "ok"}) as dispatch:
@@ -820,7 +900,7 @@ class PipelineIntegrityTests(unittest.TestCase):
     def test_jobs_dispatch_passes_current_run_id_to_analysis_action(self) -> None:
         captured: dict[str, dict[str, object]] = {}
 
-        def fake_recalculate(payload: dict[str, object]) -> dict[str, object]:
+        def fake_recalculate(payload: dict[str, object], **_kwargs: object) -> dict[str, object]:
             captured["recalculate"] = payload
             return {"status": "ok"}
 

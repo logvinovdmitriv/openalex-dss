@@ -352,6 +352,34 @@ def select_dump(dump_id: str) -> dict[str, Any]:
     return {"status": "ok", "dump": dump, "associated_run_id": associated_run_id, "active_context": active_context}
 
 
+def repair_dump(dump_id: str) -> dict[str, Any]:
+    requested_dump_id = str(dump_id or "").strip()
+    if not requested_dump_id:
+        raise ValueError("dump_id is required")
+    raw_dump_id, dump = _resolve_dump_record(requested_dump_id)
+    if not dump:
+        raise KeyError(requested_dump_id)
+    health = _dump_health(raw_dump_id, dump)
+    if not health.get("repairable"):
+        raise ValueError(str(health.get("reason") or "Этот локальный срез нельзя восстановить автоматически."))
+    run_payload = normalize_internal_pipeline_payload(
+        {
+            "dump_id": raw_dump_id,
+            "source_path": dump.get("raw_jsonl"),
+            "dump_manifest": dump,
+            "analysis_eligibility": {
+                "allowed_for_final_analysis": bool(dump.get("allowed_for_final_analysis")),
+                "scientific_completeness": str(dump.get("scientific_completeness") or ""),
+                "records_downloaded": int(dump.get("records_downloaded") or 0),
+                "dump_id": raw_dump_id,
+            },
+        }
+    )
+    run = jobs.create_run("repair_dump", run_payload, autostart=False)
+    jobs.start_run(run["run_id"])
+    return {"status": "queued", "dump": dump, "health": health, "run": jobs.get_run(run["run_id"])}
+
+
 def mark_materialization_run_completed(run_id: str, result: dict[str, Any], *, materialization_id: str = "") -> None:
     _ensure_dirs()
     fetch = result.get("fetch") if isinstance(result.get("fetch"), dict) else {}
@@ -734,11 +762,111 @@ def _merged_dump_records(limit: int = 250) -> list[dict[str, Any]]:
         if not dump_id:
             continue
         merged[dump_id] = {**dump, **merged.get(dump_id, {})}
+    records = [_with_dump_health(dump_id, dump) for dump_id, dump in merged.items()]
     return sorted(
-        merged.values(),
+        records,
         key=lambda item: str(item.get("created_at_utc") or item.get("download_finished_at_utc") or ""),
         reverse=True,
     )
+
+
+def _with_dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
+    return {**dump, "health": _dump_health(dump_id, dump)}
+
+
+def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
+    raw_jsonl = Path(str(dump.get("raw_jsonl") or ""))
+    raw_exists = raw_jsonl.is_file()
+    cli_files_dir = Path(str(dump.get("cli_files_dir") or ""))
+    cli_files_snapshot = _downloaded_files_snapshot(cli_files_dir) if cli_files_dir else {"files_seen": 0, "bytes_written": 0}
+    cli_files_ready = bool(cli_files_dir and cli_files_snapshot["files_seen"] > 0)
+    manifest_path = Path(str(dump.get("dump_manifest") or dump.get("manifest_path") or raw_jsonl.with_name("dump_manifest.json")))
+    manifest_exists = manifest_path.is_file()
+    records = int(dump.get("records_downloaded") or 0)
+    completeness = str(dump.get("scientific_completeness") or "").strip()
+    safe_dump_id = _safe_id(str(dump_id or dump.get("dump_id") or ""))
+    table_dir = DATA / "tables" / safe_dump_id
+    dump_dir = DATA / "dumps" / safe_dump_id
+    table_files = [table_dir / "works.parquet", table_dir / "authorships.parquet", table_dir / "work_topics.parquet"]
+    tables_ready = all(path.is_file() for path in table_files)
+    associated_run = _recent_run_for_dump(safe_dump_id)
+    indices_ready = bool(associated_run and (DATA / "runs" / associated_run / "tables" / "indices.csv").is_file())
+    if not raw_exists and cli_files_ready:
+        return {
+            "status": "needs_repair",
+            "label": "требует восстановления",
+            "reason": "Скачанные файлы есть, но единый файл среза еще не собран.",
+            "repairable": True,
+            "raw_exists": False,
+            "manifest_exists": manifest_exists,
+            "tables_ready": tables_ready,
+            "indices_ready": indices_ready,
+            "associated_run_id": associated_run,
+            "files_seen": cli_files_snapshot["files_seen"],
+            "bytes_written": cli_files_snapshot["bytes_written"],
+        }
+    if not raw_exists:
+        return {
+            "status": "broken",
+            "label": "поврежден",
+            "reason": "Файл локального среза не найден на диске.",
+            "repairable": False,
+            "raw_exists": False,
+            "manifest_exists": manifest_exists,
+            "tables_ready": tables_ready,
+            "indices_ready": indices_ready,
+            "associated_run_id": associated_run,
+        }
+    if records <= 0:
+        return {
+            "status": "broken",
+            "label": "нет работ",
+            "reason": "В локальном срезе нет записей для анализа.",
+            "repairable": False,
+            "raw_exists": True,
+            "manifest_exists": manifest_exists,
+            "tables_ready": tables_ready,
+            "indices_ready": indices_ready,
+            "associated_run_id": associated_run,
+        }
+    if not tables_ready:
+        return {
+            "status": "needs_repair",
+            "label": "требует восстановления",
+            "reason": "Скачанный файл есть, но нормализованные таблицы не собраны.",
+            "repairable": True,
+            "raw_exists": True,
+            "manifest_exists": manifest_exists,
+            "tables_ready": False,
+            "indices_ready": indices_ready,
+            "associated_run_id": associated_run,
+        }
+    if not indices_ready:
+        return {
+            "status": "ready",
+            "label": "данные готовы",
+            "reason": "Срез можно открыть; для авторских показателей запустите расчет индексов.",
+            "repairable": True,
+            "raw_exists": True,
+            "manifest_exists": manifest_exists,
+            "tables_ready": True,
+            "indices_ready": False,
+            "associated_run_id": associated_run,
+        }
+    status = "partial" if completeness == "partial" else "analyzed"
+    label = "частичный срез" if completeness == "partial" else "готов"
+    return {
+        "status": status,
+        "label": label,
+        "reason": "Срез готов к работе.",
+        "repairable": False,
+        "raw_exists": True,
+        "manifest_exists": manifest_exists,
+        "tables_ready": True,
+        "indices_ready": True,
+        "associated_run_id": associated_run,
+        "dump_dir": str(dump_dir),
+    }
 
 
 def _metadata_dump_records(limit: int = 250) -> list[dict[str, Any]]:
@@ -765,6 +893,7 @@ def _filesystem_dump_records(limit: int = 250) -> list[dict[str, Any]]:
     if raw_dir.exists():
         manifests.extend(raw_dir.glob("**/dump_manifest.json"))
     manifests = sorted(set(manifests), key=_path_mtime, reverse=True)
+    manifest_dirs = {manifest_path.parent.resolve() for manifest_path in manifests}
     for manifest_path in manifests[: max(1, min(limit, 250))]:
         manifest = _read_json(manifest_path)
         if not manifest:
@@ -795,7 +924,67 @@ def _filesystem_dump_records(limit: int = 250) -> list[dict[str, Any]]:
             "source": "filesystem",
         }
         records.append(source)
+    if raw_dir.exists() and len(records) < limit:
+        for files_dir in sorted(raw_dir.glob("**/files"), key=_path_mtime, reverse=True):
+            base_dir = files_dir.parent
+            try:
+                if base_dir.resolve() in manifest_dirs:
+                    continue
+            except OSError:
+                continue
+            snapshot = _downloaded_files_snapshot(files_dir)
+            if snapshot["files_seen"] <= 0:
+                continue
+            fingerprint = hashlib.sha256(str(base_dir).encode("utf-8")).hexdigest()[:16]
+            created = datetime.fromtimestamp(_path_mtime(base_dir), tz=timezone.utc).isoformat()
+            records.append(
+                {
+                    "dump_id": f"dump_pending_{fingerprint}",
+                    "slice_id": base_dir.parent.name,
+                    "raw_jsonl": str(base_dir / "works.jsonl.gz"),
+                    "records_downloaded": 0,
+                    "records_expected": None,
+                    "bytes_written": snapshot["bytes_written"],
+                    "sha256": "",
+                    "stop_reason": "not_packed",
+                    "created_at_utc": created,
+                    "source_mode": "openalex_cli",
+                    "scientific_completeness": "partial",
+                    "allowed_for_final_analysis": False,
+                    "openalex_filter": "",
+                    "estimate_signature": "",
+                    "download_signature": "",
+                    "files_manifest": str(base_dir / "files_manifest.json"),
+                    "dump_manifest": str(base_dir / "dump_manifest.json"),
+                    "manifest_path": str(base_dir / "dump_manifest.json"),
+                    "cli_files_dir": str(files_dir),
+                    "source": "filesystem",
+                    "storage_plan": {
+                        "download_base_dir": str(base_dir),
+                        "cli_output_dir": str(files_dir),
+                        "raw_jsonl": str(base_dir / "works.jsonl.gz"),
+                    },
+                }
+            )
+            if len(records) >= limit:
+                break
     return records
+
+
+def _downloaded_files_snapshot(files_dir: Path) -> dict[str, int]:
+    files_seen = 0
+    bytes_written = 0
+    if not files_dir.is_dir():
+        return {"files_seen": 0, "bytes_written": 0}
+    for path in files_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        files_seen += 1
+        try:
+            bytes_written += path.stat().st_size
+        except OSError:
+            continue
+    return {"files_seen": files_seen, "bytes_written": bytes_written}
 
 
 def _path_mtime(path: Path) -> float:

@@ -199,6 +199,103 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(result["dumps"][0]["dump_id"], "dump_disk")
         self.assertEqual(result["dumps"][0]["records_downloaded"], 42)
         self.assertEqual(result["dumps"][0]["source"], "filesystem")
+        self.assertEqual(result["dumps"][0]["health"]["status"], "needs_repair")
+
+    def test_repair_dump_starts_worker_from_existing_raw_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            raw_jsonl = data / "raw/openalex_cli/slice_disk/works.jsonl.gz"
+            raw_jsonl.parent.mkdir(parents=True)
+            raw_jsonl.write_text("payload", encoding="utf-8")
+            dump = {
+                "dump_id": "dump_repair",
+                "slice_id": "slice_disk",
+                "raw_jsonl": str(raw_jsonl),
+                "records_downloaded": 42,
+                "scientific_completeness": "partial",
+                "allowed_for_final_analysis": False,
+            }
+
+            captured: dict[str, object] = {}
+
+            def fake_create_run(action: str, payload: dict[str, object], autostart: bool = False) -> dict[str, object]:
+                captured["action"] = action
+                captured["payload"] = payload
+                captured["autostart"] = autostart
+                return {"run_id": "run_repair", "status": "queued", "payload": payload}
+
+            with (
+                patch.object(slice_workbench, "DATA", data),
+                patch.object(slice_workbench.metadata_store, "get_slice_dump_by_dump_id", return_value=dump),
+                patch.object(slice_workbench.jobs, "create_run", side_effect=fake_create_run),
+                patch.object(slice_workbench.jobs, "start_run", return_value={"run_id": "run_repair", "status": "running"}),
+                patch.object(slice_workbench.jobs, "get_run", return_value={"run_id": "run_repair", "status": "running"}),
+            ):
+                result = slice_workbench.repair_dump("dump_repair")
+
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(captured["action"], "repair_dump")
+        self.assertEqual(captured["payload"]["source_path"], str(raw_jsonl))
+        self.assertFalse(captured["autostart"])
+
+    def test_list_dumps_marks_unpacked_cli_files_as_repairable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            files_dir = data / "raw/openalex_cli/slice_disk/run_disk/files"
+            files_dir.mkdir(parents=True)
+            (files_dir / "part.json").write_text('{"id": "https://openalex.org/W1"}', encoding="utf-8")
+
+            with (
+                patch.object(slice_workbench, "DATA", data),
+                patch.object(slice_workbench.metadata_store, "list_slice_dumps", return_value=[]),
+            ):
+                result = slice_workbench.list_dumps()
+
+        self.assertEqual(result["total"], 1)
+        dump = result["dumps"][0]
+        self.assertTrue(dump["dump_id"].startswith("dump_pending_"))
+        self.assertEqual(dump["health"]["status"], "needs_repair")
+        self.assertTrue(dump["health"]["repairable"])
+        self.assertEqual(dump["health"]["files_seen"], 1)
+        self.assertEqual(dump["cli_files_dir"], str(files_dir))
+
+    def test_repair_dump_can_start_from_unpacked_cli_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            files_dir = data / "raw/openalex_cli/slice_disk/run_disk/files"
+            files_dir.mkdir(parents=True)
+            (files_dir / "part.json").write_text('{"id": "https://openalex.org/W1"}', encoding="utf-8")
+            dump = {
+                "dump_id": "dump_pending_abc",
+                "slice_id": "slice_disk",
+                "raw_jsonl": str(files_dir.parent / "works.jsonl.gz"),
+                "cli_files_dir": str(files_dir),
+                "records_downloaded": 0,
+                "scientific_completeness": "partial",
+                "allowed_for_final_analysis": False,
+            }
+
+            captured: dict[str, object] = {}
+
+            def fake_create_run(action: str, payload: dict[str, object], autostart: bool = False) -> dict[str, object]:
+                captured["action"] = action
+                captured["payload"] = payload
+                captured["autostart"] = autostart
+                return {"run_id": "run_repair", "status": "queued", "payload": payload}
+
+            with (
+                patch.object(slice_workbench, "DATA", data),
+                patch.object(slice_workbench.metadata_store, "get_slice_dump_by_dump_id", return_value=dump),
+                patch.object(slice_workbench.jobs, "create_run", side_effect=fake_create_run),
+                patch.object(slice_workbench.jobs, "start_run", return_value={"run_id": "run_repair", "status": "running"}),
+                patch.object(slice_workbench.jobs, "get_run", return_value={"run_id": "run_repair", "status": "running"}),
+            ):
+                result = slice_workbench.repair_dump("dump_pending_abc")
+
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(captured["action"], "repair_dump")
+        self.assertEqual(captured["payload"]["dump_manifest"]["cli_files_dir"], str(files_dir))
+        self.assertFalse(captured["autostart"])
 
     def test_select_dump_uses_filesystem_manifest_when_metadata_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

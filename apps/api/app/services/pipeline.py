@@ -23,11 +23,15 @@ from openalex_dss.normalize import normalize_raw  # noqa: E402
 from openalex_dss.passports import build_passports  # noqa: E402
 from openalex_dss.ranking import build_ratings  # noqa: E402
 
-def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
+StageProgressCallback = Callable[[int, str, dict[str, Any] | None], None]
+
+
+def recalculate(payload: dict[str, Any], progress_callback: StageProgressCallback | None = None) -> dict[str, Any]:
     cfg = _cfg(payload)
     _write_runtime_config(cfg)
     run_id = str(payload.get("run_id") or cfg.slice_name or "recalculate")
     dump_id = str(payload.get("dump_id") or _dump_id_from_payload(payload) or cfg.slice_name)
+    _emit_progress(progress_callback, 48, "Проверка локальных таблиц среза", {"dump_id": dump_id})
     input_tables = resolve_dump_tables(dump_id, required=True)
     analysis_eligibility = _recover_analysis_eligibility(payload, dump_id=dump_id, run_id=run_id)
     compute = _run_compute(
@@ -37,10 +41,16 @@ def recalculate(payload: dict[str, Any]) -> dict[str, Any]:
         analysis_eligibility=analysis_eligibility,
         input_tables=input_tables,
         extra_primary_artifacts=_dump_provenance_primary_artifacts(dump_id),
+        progress_callback=progress_callback,
+        progress_base=52,
+        progress_span=38,
     )
+    _emit_progress(progress_callback, 91, "Обновление паспорта расчета", {"run_id": run_id, "dump_id": dump_id})
     _write_pipeline_summary("recalculate", cfg, {**payload, "run_id": run_id, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(cfg, {**payload, "run_id": run_id, "dump_id": dump_id, "analysis_eligibility": analysis_eligibility, "active_context_source": "recalculate", **compute})
+    _emit_progress(progress_callback, 96, "Сборка отчета", {"run_id": run_id, "dump_id": dump_id})
     report = reports.build_report_bundle(metric="h", fraction_mode=cfg.fraction_mode_default, limit=100, run_id=run_id, dump_id=dump_id)
+    _emit_progress(progress_callback, 98, "Расчет индексов завершен", {"run_id": run_id, "dump_id": dump_id})
     return {"status": "ok", "mode": "recalculate", "archive": archive, "report": report, "analysis_eligibility": analysis_eligibility, "input_tables": compute["input_tables"]}
 
 
@@ -117,7 +127,12 @@ def fetch_slice_dump(
     return {"status": "ok", "mode": "fetch_slice_dump", "query_plan": plan, "dump": passport}
 
 
-def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
+def import_local_file(
+    payload: dict[str, Any],
+    progress_callback: StageProgressCallback | None = None,
+    *,
+    compute_progress_base: int = 70,
+) -> dict[str, Any]:
     source_path = str(payload.get("source_path") or "").strip()
     if not source_path:
         raise ValueError("source_path is required")
@@ -145,7 +160,9 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
     dump_manifest_path = _write_dump_manifest_if_present(dump_id, dump_manifest)
     if not dump_manifest_path:
         _clear_stale_dump_manifest(dump_id)
+    _emit_progress(progress_callback, max(0, compute_progress_base - 4), "Нормализация локального среза", {"source_path": str(source), "dump_id": dump_id})
     quality, dump_table_sources, quality_report = _normalize_dump_to_scope(source, dump_id)
+    _emit_progress(progress_callback, max(0, compute_progress_base - 2), "Подготовка таблиц среза", {"dump_id": dump_id, "works": quality.get("raw_works")})
     input_tables = _materialize_dump_tables_from_sources(dump_id, dump_table_sources)
     source_type = "openalex_cli_dump_import" if dump_manifest else "local_file"
     fetch_meta = {
@@ -180,7 +197,11 @@ def import_local_file(payload: dict[str, Any]) -> dict[str, Any]:
         analysis_eligibility=analysis_eligibility,
         input_tables=input_tables,
         extra_primary_artifacts=extra_primary_artifacts,
+        progress_callback=progress_callback,
+        progress_base=compute_progress_base,
+        progress_span=max(1, 98 - compute_progress_base),
     )
+    _emit_progress(progress_callback, 98, "Срез и индексы готовы", {"run_id": run_id, "dump_id": dump_id})
     _write_pipeline_summary("import_local_file", cfg, {**payload, "run_id": run_id, "source_file": profile, "analysis_eligibility": analysis_eligibility, "input_dump_id": dump_id})
     archive = _archive_run_artifacts(
         cfg,
@@ -320,8 +341,16 @@ def _run_compute(
     analysis_eligibility: dict[str, Any] | None = None,
     input_tables: dict[str, Path] | None = None,
     extra_primary_artifacts: dict[str, Any] | None = None,
+    progress_callback: StageProgressCallback | None = None,
+    progress_base: int = 50,
+    progress_span: int = 45,
 ) -> dict[str, Any]:
+    def step(relative: float, stage: str, extra: dict[str, Any] | None = None) -> None:
+        percent = progress_base + int(max(0.0, min(1.0, relative)) * max(1, progress_span))
+        _emit_progress(progress_callback, percent, stage, {"run_id": run_id, "dump_id": dump_id, **(extra or {})})
+
     input_tables = input_tables or resolve_dump_tables(dump_id, required=True)
+    step(0.02, "Проверка контрольных сумм входных таблиц")
     input_table_checksums = _table_checksums(input_tables)
     run_dir = DATA / "runs" / _safe_id(run_id)
     run_tables = run_dir / "tables"
@@ -332,7 +361,9 @@ def _run_compute(
     indices_csv = run_tables / "indices.csv"
     ratings_csv = run_tables / "ratings.csv"
 
+    step(0.18, "Формирование авторского уровня данных")
     build_author_work_metrics(input_tables["works"], input_tables["authorships"], author_work_csv, cfg.fraction_modes, run_id=run_id)
+    step(0.48, "Расчет наукометрических показателей")
     compute_indices(
         author_work_csv,
         indices_csv,
@@ -340,6 +371,7 @@ def _run_compute(
         cfg.lrdi_lambda,
         cfg.analysis_year,
     )
+    step(0.72, "Построение рейтингов")
     build_ratings(indices_csv, ratings_csv)
     run_table_outputs = {
         "author_work": author_work_csv,
@@ -356,6 +388,7 @@ def _run_compute(
         "run/tables/ratings.csv": ratings_csv,
     }
     primary_artifacts.update(extra_primary_artifacts or {})
+    step(0.88, "Запись паспортов и контрольных сумм")
     build_passports(
         cfg,
         ROOT,
@@ -365,6 +398,7 @@ def _run_compute(
         input_tables=input_table_manifest,
         primary_artifacts=primary_artifacts,
     )
+    step(0.98, "Расчетные таблицы готовы")
     passport_outputs = {
         "slice_passport": str(run_passports / "slice_passport.json"),
         "calculation_passport": str(run_passports / "calculation_passport.json"),
@@ -392,6 +426,16 @@ def _table_manifest(paths: dict[str, Path], checksums: dict[str, str]) -> dict[s
         }
         for name, path in paths.items()
     }
+
+
+def _emit_progress(
+    progress_callback: StageProgressCallback | None,
+    percent: int,
+    stage: str,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    if progress_callback:
+        progress_callback(max(0, min(99, int(percent))), stage, extra)
 
 
 def _cfg(payload: dict[str, Any]) -> Any:
@@ -422,9 +466,12 @@ def _query_plan_from_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _download_output_dir(payload: dict[str, Any], cfg: Any) -> Path:
+    raw_folder_id = str(payload.get("materialization_id") or payload.get("run_id") or "").strip()
+    folder_id = _safe_id(raw_folder_id) if raw_folder_id else ""
     raw = str(payload.get("download_dir") or "").strip()
     if not raw:
-        return DATA / "raw" / "openalex_cli" / _safe_id(str(cfg.slice_name or "slice"))
+        base = DATA / "raw" / "openalex_cli" / _safe_id(str(cfg.slice_name or "slice"))
+        return base / folder_id if folder_id else base
     base = Path(raw).expanduser()
     if not base.is_absolute():
         if base.parts and base.parts[0] == "data":
@@ -438,8 +485,6 @@ def _download_output_dir(payload: dict[str, Any], cfg: Any) -> Path:
     except ValueError as exc:
         raise ValueError(f"Папка загрузки должна находиться внутри хранилища данных DSS: {DATA}") from exc
     safe_slice = _safe_id(str(cfg.slice_name or "slice"))
-    raw_folder_id = str(payload.get("materialization_id") or payload.get("run_id") or "").strip()
-    folder_id = _safe_id(raw_folder_id) if raw_folder_id else ""
     base = resolved if resolved.name == safe_slice else resolved / safe_slice
     return base / folder_id if folder_id else base
 
