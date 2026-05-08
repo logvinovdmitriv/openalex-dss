@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import heapq
+import json
 import math
+import os
 from statistics import NormalDist
+from pathlib import Path
 from typing import Any
 
+from app.core.paths import DATA
 from app.services import cohorts, custom_metrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
@@ -73,6 +78,29 @@ def build_scientometric_analysis(
     data_limit: int = 0,
     custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
+    cache_path = _analysis_cache_path(
+        fraction_mode=fraction_mode,
+        metrics=metrics,
+        baseline_metric=baseline_metric,
+        filters=filters,
+        run_id=run_id,
+        dump_id=dump_id,
+        cohort_id=cohort_id,
+        cohort_filter_policy=cohort_filter_policy,
+        top_n=top_n,
+        data_filters=data_filters,
+        data_search=data_search,
+        author_ids=author_ids,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
+    )
+    if cache_path:
+        cached = _read_analysis_cache(cache_path)
+        if cached:
+            return cached
+
     context = _analysis_context(
         fraction_mode=fraction_mode,
         metrics=metrics,
@@ -102,14 +130,22 @@ def build_scientometric_analysis(
     rank_top_n = context["rank_top_n"]
     rows = context["rows"]
 
-    value_vectors = _metric_value_vectors(rows, _unique_preserve_order([*selected_metrics, *SCORECARD_FACTORS.values()]))
+    vector_metrics = _unique_preserve_order([*selected_metrics, *SCORECARD_FACTORS.values()])
+    value_vectors = _metric_value_vectors(rows, vector_metrics)
+    rank_vectors = _rank_vectors({metric: value_vectors.get(metric, []) for metric in vector_metrics})
     descriptive = _describe_metrics_from_vectors(len(rows), selected_metrics, value_vectors)
     boxplots = _boxplot_metrics_from_vectors(rows, selected_metrics, value_vectors)
     histograms = _histogram_metrics_from_vectors(selected_metrics, value_vectors)
     normality = _normality_metrics_from_vectors(selected_metrics, value_vectors)
-    correlations = correlation_matrices(rows, selected_metrics, value_vectors=value_vectors)
-    rank_comparison_payload = rank_comparisons(rows, selected_metrics, baseline_metric=baseline_metric, rank_top_n=min(rank_top_n, len(rows) or rank_top_n))
-    scorecard = metric_scorecard(rows, selected_metrics, descriptive=descriptive, value_vectors=value_vectors)
+    correlations = correlation_matrices(rows, selected_metrics, value_vectors=value_vectors, rank_vectors=rank_vectors)
+    rank_comparison_payload = rank_comparisons(
+        rows,
+        selected_metrics,
+        baseline_metric=baseline_metric,
+        rank_top_n=min(rank_top_n, len(rows) or rank_top_n),
+        value_vectors=value_vectors,
+    )
+    scorecard = metric_scorecard(rows, selected_metrics, descriptive=descriptive, value_vectors=value_vectors, rank_vectors=rank_vectors)
     warnings = _analysis_warnings(
         rows,
         selected_metrics,
@@ -162,7 +198,7 @@ def build_scientometric_analysis(
         scope=analysis_scope,
     )
 
-    return {
+    payload = {
         "schema": SCIENTOMETRIC_ANALYSIS_SCHEMA,
         "scope": analysis_scope,
         "cohort_context": cohort_context,
@@ -186,6 +222,100 @@ def build_scientometric_analysis(
         "conclusion_draft": conclusion,
         "warnings": warnings,
     }
+    if cache_path:
+        _write_analysis_cache(cache_path, payload)
+    return payload
+
+
+def _analysis_cache_path(
+    *,
+    fraction_mode: str,
+    metrics: list[str] | tuple[str, ...] | None,
+    baseline_metric: str,
+    filters: dict[str, Any] | None,
+    run_id: str,
+    dump_id: str,
+    cohort_id: str,
+    cohort_filter_policy: str,
+    top_n: int,
+    data_filters: dict[str, Any] | None,
+    data_search: str,
+    author_ids: list[str] | set[str] | tuple[str, ...] | None,
+    data_sort: str,
+    data_direction: str,
+    data_limit: int,
+    custom_metric_defs: list[dict[str, str]] | None,
+) -> Path | None:
+    if str(cohort_id or "").strip():
+        return None
+    try:
+        selected_metrics = _select_metrics(metrics, custom_metric_defs)
+        baseline_metric = str(baseline_metric or "h").strip() or "h"
+        if baseline_metric not in selected_metrics:
+            selected_metrics = [baseline_metric, *selected_metrics]
+        scope = warehouse.resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+        scoped_run_id = scope["run_id"]
+        scoped_dump_id = scope["dump_id"]
+        indices_path = warehouse.resolve_scoped_table_path("indices", run_id=scoped_run_id, dump_id=scoped_dump_id)
+        if not indices_path or not indices_path.is_file() or not scoped_run_id:
+            return None
+        stat = indices_path.stat()
+        data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
+        data_limit_value = max(0, min(_int_value(data_limit, 0), 500_000))
+        data_sort_value = str(data_sort or "").strip() if data_limit_value > 0 else ""
+        data_direction_value = data_direction if data_sort_value else "desc"
+        key_payload = {
+            "schema": SCIENTOMETRIC_ANALYSIS_SCHEMA,
+            "run_id": scoped_run_id,
+            "dump_id": scoped_dump_id,
+            "fraction_mode": str(fraction_mode or "strict_authors_count"),
+            "metrics": selected_metrics,
+            "baseline_metric": baseline_metric,
+            "filters": clean_analysis_filters(filters or {}),
+            "top_n": max(0, min(_int_value(top_n, 100), 500_000)),
+            "data_filters": warehouse.parse_column_filters(data_filters),
+            "data_search": str(data_search or "").strip(),
+            "author_ids": sorted(_clean_author_ids(author_ids) or []),
+            "data_sort": data_sort_value,
+            "data_direction": data_direction_value,
+            "data_limit": data_limit_value,
+            "custom_metric_defs": custom_metric_defs or [],
+            "cohort_filter_policy": str(cohort_filter_policy or "membership"),
+            "indices": {
+                "path": str(indices_path),
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            },
+        }
+        digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:32]
+        return DATA / "runs" / _safe_segment(scoped_run_id) / "analytics" / f"scientometrics_{digest}.json"
+    except Exception:
+        return None
+
+
+def _safe_segment(value: str) -> str:
+    cleaned = "".join(ch for ch in str(value or "") if ch.isalnum() or ch in {"_", "-"})
+    return cleaned or "run"
+
+
+def _read_analysis_cache(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(payload, dict) and payload.get("schema") == SCIENTOMETRIC_ANALYSIS_SCHEMA:
+        return payload
+    return None
+
+
+def _write_analysis_cache(path: Path, payload: dict[str, Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        return
 
 
 def describe_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, Any]:
@@ -259,6 +389,7 @@ def correlation_matrices(
     metrics: list[str] | tuple[str, ...],
     *,
     value_vectors: dict[str, list[float | None]] | None = None,
+    rank_vectors: dict[str, list[float | None]] | None = None,
 ) -> dict[str, Any]:
     selected = list(metrics)
     if value_vectors is None or any(metric not in value_vectors for metric in selected):
@@ -268,7 +399,8 @@ def correlation_matrices(
         for metric, values in value_vectors.items()
         if metric in selected
     }
-    rank_vectors = _rank_vectors({metric: value_vectors.get(metric, []) for metric in selected})
+    if rank_vectors is None or any(metric not in rank_vectors for metric in selected):
+        rank_vectors = _rank_vectors({metric: value_vectors.get(metric, []) for metric in selected})
     return {
         "pearson_log1p": _correlation_matrix_from_vectors(selected, log_vectors),
         "spearman": _correlation_matrix_from_vectors(selected, rank_vectors),
@@ -283,13 +415,22 @@ def rank_comparisons(
     baseline_metric: str = "h",
     rank_top_n: int = 100,
     top_n: int | None = None,
+    value_vectors: dict[str, list[float | None]] | None = None,
 ) -> dict[str, Any]:
     if top_n is not None:
         rank_top_n = top_n
     selected = list(metrics)
-    ranks = {metric: _competition_ranks(rows, metric) for metric in selected}
+    author_ids = _row_author_ids(rows)
+    if value_vectors is None or any(metric not in value_vectors for metric in selected):
+        ranks = {metric: _competition_ranks(rows, metric) for metric in selected}
+    else:
+        ranks = {metric: _competition_ranks_from_vectors(author_ids, value_vectors.get(metric, [])) for metric in selected}
     overlap_cuts = _overlap_cuts(rank_top_n)
-    top_overlap = _top_overlap_matrix(ranks, overlap_cuts)
+    ordered_authors = {
+        metric: [author_id for author_id, _ in sorted(metric_ranks.items(), key=lambda item: (item[1], item[0]))]
+        for metric, metric_ranks in ranks.items()
+    }
+    top_overlap = _top_overlap_matrix_from_ordered(ordered_authors, overlap_cuts)
     author_names = {
         str(row.get("author_id") or ""): str(row.get("author_display_name") or row.get("display_name") or "")
         for row in rows
@@ -297,7 +438,7 @@ def rank_comparisons(
     }
     comparisons: dict[str, Any] = {}
     baseline_ranks = ranks.get(baseline_metric, {})
-    top_base = _top_exact_set(baseline_ranks, rank_top_n)
+    top_base = set((ordered_authors.get(baseline_metric) or [])[:rank_top_n])
     for metric in selected:
         if metric == baseline_metric:
             continue
@@ -324,7 +465,7 @@ def rank_comparisons(
                 heapq.heappush(largest_shifts_heap, heap_item)
             elif heap_item[:2] > largest_shifts_heap[0][:2]:
                 heapq.heapreplace(largest_shifts_heap, heap_item)
-        top_metric = _top_exact_set(metric_ranks, rank_top_n)
+        top_metric = set((ordered_authors.get(metric) or [])[:rank_top_n])
         top_overlap_exact = len(top_base & top_metric)
         jaccard_exact = _jaccard(top_base, top_metric)
         ordered_abs_values = sorted(abs_values)
@@ -478,13 +619,15 @@ def metric_scorecard(
     *,
     descriptive: dict[str, Any] | None = None,
     value_vectors: dict[str, list[float | None]] | None = None,
+    rank_vectors: dict[str, list[float | None]] | None = None,
 ) -> dict[str, Any]:
     descriptive = descriptive or describe_metrics(rows, metrics)
     factors = SCORECARD_FACTORS
     vector_metrics = _unique_preserve_order([*metrics, *factors.values()])
     if value_vectors is None or any(metric not in value_vectors for metric in vector_metrics):
         value_vectors = _metric_value_vectors(rows, vector_metrics)
-    rank_vectors = _rank_vectors({metric: value_vectors.get(metric, []) for metric in vector_metrics})
+    if rank_vectors is None or any(metric not in rank_vectors for metric in vector_metrics):
+        rank_vectors = _rank_vectors({metric: value_vectors.get(metric, []) for metric in vector_metrics})
     payload: dict[str, Any] = {}
     for metric in metrics:
         metric_payload = {
@@ -1221,9 +1364,9 @@ def _analysis_context(
 
     parsed_data_filters = warehouse.parse_column_filters(data_filters)
     data_search = str(data_search or "").strip()
-    data_sort = str(data_sort or "").strip()
-    data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
     data_limit = max(0, min(_int_value(data_limit, 0), 500_000))
+    data_sort = str(data_sort or "").strip() if data_limit > 0 else ""
+    data_direction = "asc" if data_sort and str(data_direction or "").strip().lower() == "asc" else "desc"
     required_row_fields = {
         "author_id",
         "author_display_name",
@@ -1775,9 +1918,56 @@ def _competition_ranks(rows: list[dict[str, Any]], metric: str) -> dict[str, int
     return ranks
 
 
+def _row_author_ids(rows: list[dict[str, Any]]) -> list[str]:
+    return [str(row.get("author_id") or "").strip() for row in rows]
+
+
+def _competition_ranks_from_vectors(author_ids: list[str], values: list[float | None]) -> dict[str, int]:
+    items = [
+        (author_id, value)
+        for author_id, value in zip(author_ids, values)
+        if author_id and value is not None
+    ]
+    items.sort(key=lambda item: (-item[1], item[0]))
+    ranks: dict[str, int] = {}
+    current_rank = 0
+    previous_value = None
+    for index, (author_id, value) in enumerate(items, start=1):
+        if previous_value is None or value != previous_value:
+            current_rank = index
+            previous_value = value
+        ranks[author_id] = current_rank
+    return ranks
+
+
 def _top_overlap_matrix(ranks: dict[str, dict[str, int]], cuts: list[int]) -> dict[str, Any]:
     metrics = list(ranks.keys())
     top_sets = {metric: _top_exact_sets(ranks[metric], cuts) for metric in metrics}
+    payload: dict[str, Any] = {}
+    for left in metrics:
+        payload[left] = {}
+        for right in metrics:
+            by_cut = {}
+            for cut in cuts:
+                left_top = top_sets[left].get(cut, set())
+                right_top = top_sets[right].get(cut, set())
+                by_cut[str(cut)] = {
+                    "overlap": len(left_top & right_top),
+                    "jaccard": _jaccard(left_top, right_top),
+                    "left_n": len(left_top),
+                    "right_n": len(right_top),
+                }
+            payload[left][right] = by_cut
+    return {
+        "mode": "exact_n_by_competition_rank_then_author_id",
+        "cuts": cuts,
+        "matrix": payload,
+    }
+
+
+def _top_overlap_matrix_from_ordered(ordered_authors: dict[str, list[str]], cuts: list[int]) -> dict[str, Any]:
+    metrics = list(ordered_authors.keys())
+    top_sets = {metric: {cut: set(authors[:cut]) for cut in cuts} for metric, authors in ordered_authors.items()}
     payload: dict[str, Any] = {}
     for left in metrics:
         payload[left] = {}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import unittest
 from pathlib import Path
@@ -132,15 +133,15 @@ class LocalDataRouteTests(unittest.TestCase):
     def test_local_data_preview_csv_uses_whitelisted_kind(self) -> None:
         with (
             patch.object(local_data.warehouse, "table_exists", return_value=True),
-            patch.object(local_data.warehouse, "export_table_csv", return_value="author_id,h\nA1,3\n") as export_table_csv,
+            patch.object(local_data.warehouse, "iter_table_csv", return_value=iter(["author_id,h\n", "A1,3\n"])) as iter_table_csv,
         ):
             response = local_data.local_data_preview_csv(kind="indices", run_id="run_a", limit=1000, offset=0)
 
         self.assertIn("openalex_dss_local_data_indices.csv", response.headers["Content-Disposition"])
         self.assertEqual(response.headers["X-OpenAlex-DSS-Scope-Status"], "explicit_scope")
         self.assertEqual(response.headers["X-OpenAlex-DSS-Reproducible"], "true")
-        self.assertEqual(response.body.decode("utf-8"), "author_id,h\nA1,3\n")
-        export_table_csv.assert_called_once_with(
+        self.assertEqual(asyncio.run(_stream_text(response)), "author_id,h\nA1,3\n")
+        iter_table_csv.assert_called_once_with(
             "indices",
             run_id="run_a",
             dump_id="",
@@ -161,6 +162,13 @@ class LocalDataRouteTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
+
+
+async def _stream_text(response: object) -> str:
+    chunks: list[str] = []
+    async for chunk in response.body_iterator:  # type: ignore[attr-defined]
+        chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk))
+    return "".join(chunks)
 
 
 if __name__ == "__main__":

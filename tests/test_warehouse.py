@@ -19,6 +19,22 @@ from openalex_dss.io_utils import write_parquet_dicts  # noqa: E402
 
 
 class WarehouseTests(unittest.TestCase):
+    def test_count_rows_reuses_path_stat_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            table_path = Path(tmp) / "indices.csv"
+            table_path.write_text("author_id,h\nA1,1\n", encoding="utf-8")
+            warehouse._ROW_COUNT_CACHE.clear()
+            with (
+                patch.object(warehouse, "resolve_scoped_table_path", return_value=table_path),
+                patch.object(warehouse, "_count_csv_rows", return_value=1) as count_csv_rows,
+            ):
+                first = warehouse.count_rows("indices", run_id="run_a")
+                second = warehouse.count_rows("indices", run_id="run_a")
+
+        self.assertEqual(first, 1)
+        self.assertEqual(second, 1)
+        self.assertEqual(count_csv_rows.call_count, 1)
+
     def test_empty_author_id_filter_returns_empty_rows(self) -> None:
         rows = [
             {"author_id": "https://openalex.org/A1", "h": 3},

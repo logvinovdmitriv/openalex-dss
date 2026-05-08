@@ -6,7 +6,7 @@ import sys
 from collections import defaultdict
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import duckdb
 
@@ -44,6 +44,7 @@ EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "iupv", "islv", "lrdi")
 LINE_CHART_METRICS = EXTENDED_LINE_CHART_METRICS
 
 FilterSet = dict[str, Any]
+_ROW_COUNT_CACHE: dict[str, tuple[int, int, int]] = {}
 
 DUMP_TABLES = {"works", "authorships", "work_topics"}
 RUN_JSON_DOCS = {
@@ -153,9 +154,37 @@ def count_rows(table: str, *, run_id: str = "", dump_id: str = "") -> int:
     path = resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id)
     if not path or not path.exists():
         return 0
+    cached = _cached_row_count(path)
+    if cached is not None:
+        return cached
     if path.suffix.lower() == ".csv":
-        return _count_csv_rows(path)
-    return _count_parquet_rows(path)
+        count = _count_csv_rows(path)
+    else:
+        count = _count_parquet_rows(path)
+    _remember_row_count(path, count)
+    return count
+
+
+def _cached_row_count(path: Path) -> int | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    cached = _ROW_COUNT_CACHE.get(str(path))
+    if not cached:
+        return None
+    size, mtime_ns, count = cached
+    if size == stat.st_size and mtime_ns == stat.st_mtime_ns:
+        return count
+    return None
+
+
+def _remember_row_count(path: Path, count: int) -> None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return
+    _ROW_COUNT_CACHE[str(path)] = (stat.st_size, stat.st_mtime_ns, int(count))
 
 
 def _count_csv_rows(path: Path) -> int:
@@ -426,12 +455,88 @@ def export_table(
 
 
 def export_table_csv(table: str, **kwargs: Any) -> str:
-    payload = export_table(table, **kwargs)
-    output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=payload["fields"], extrasaction="ignore")
-    writer.writeheader()
-    writer.writerows(payload["rows"])
-    return output.getvalue()
+    return "".join(iter_table_csv(table, **kwargs))
+
+
+def iter_table_csv(table: str, **kwargs: Any) -> Iterator[str]:
+    if table not in TABLE_KINDS:
+        raise ValueError(f"Unknown table: {table}")
+    scope = resolve_analysis_scope(run_id=str(kwargs.get("run_id") or ""), dump_id=str(kwargs.get("dump_id") or ""))
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
+    fields = table_schema(table, run_id=run_id, dump_id=dump_id)
+    if not fields:
+        return iter(())
+
+    q = str(kwargs.get("q") or "")
+    fraction_mode = str(kwargs.get("fraction_mode") or "")
+    metric = str(kwargs.get("metric") or "")
+    author_id = str(kwargs.get("author_id") or "")
+    work_id = str(kwargs.get("work_id") or "")
+    data_filters = kwargs.get("data_filters")
+    sort = str(kwargs.get("sort") or "")
+    direction = str(kwargs.get("direction") or "desc")
+    raw_limit = max(0, min(500_000, int(kwargs.get("limit") or 0)))
+    offset = max(0, int(kwargs.get("offset") or 0))
+
+    where: list[str] = []
+    args: list[Any] = []
+    if q:
+        expr = " OR ".join([f"CAST({field} AS VARCHAR) ILIKE ?" for field in fields])
+        where.append(f"({expr})")
+        args.extend([f"%{q}%"] * len(fields))
+    if fraction_mode and "fraction_mode" in fields:
+        where.append("fraction_mode = ?")
+        args.append(fraction_mode)
+    if metric and "metric_name" in fields:
+        where.append("metric_name = ?")
+        args.append(metric)
+    if author_id and "author_id" in fields:
+        where.append("author_id = ?")
+        args.append(author_id)
+    if work_id and "work_id" in fields:
+        where.append("work_id = ?")
+        args.append(work_id)
+    _append_column_filter_clauses(where, args, fields, data_filters)
+
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+    order_sql = ""
+    if sort and sort in fields:
+        order_sql = f"ORDER BY {sort} {'DESC' if direction == 'desc' else 'ASC'}"
+    limit_sql = "LIMIT ?" if raw_limit > 0 else ""
+    query_args = [*args, offset]
+    if raw_limit > 0:
+        query_args = [*args, raw_limit, offset]
+    sql = f"SELECT * FROM {table} {where_sql} {order_sql} {limit_sql} OFFSET ?"
+    return _iter_registered_table_csv(sql, query_args, fields, run_id=run_id, dump_id=dump_id)
+
+
+def _iter_registered_table_csv(
+    sql: str,
+    args: list[Any],
+    fields: list[str],
+    *,
+    run_id: str,
+    dump_id: str,
+    chunk_size: int = 2_000,
+) -> Iterator[str]:
+    def generate() -> Iterator[str]:
+        with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
+            result = conn.execute(sql, args)
+            output = StringIO()
+            writer = csv.writer(output)
+            writer.writerow(fields)
+            yield output.getvalue()
+            while True:
+                chunk = result.fetchmany(chunk_size)
+                if not chunk:
+                    break
+                output.seek(0)
+                output.truncate(0)
+                writer.writerows(chunk)
+                yield output.getvalue()
+
+    return generate()
 
 
 def parse_column_filters(raw: str | dict[str, Any] | None) -> dict[str, dict[str, str]]:

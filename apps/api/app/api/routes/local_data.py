@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from app.services import warehouse
 
@@ -107,13 +108,13 @@ def local_data_preview_csv(
     direction: str = "desc",
     limit: int = Query(100_000, ge=0, le=500_000),
     offset: int = Query(0, ge=0),
-) -> Response:
+) -> StreamingResponse:
     table = _local_data_kind(kind)
     _require_local_data_scope(run_id=run_id, dump_id=dump_id)
     _require_existing_table(table, run_id=run_id, dump_id=dump_id)
     try:
         parsed_data_filters = warehouse.parse_column_filters(data_filters)
-        data = warehouse.export_table_csv(
+        stream = warehouse.iter_table_csv(
             table,
             run_id=run_id,
             dump_id=dump_id,
@@ -135,8 +136,8 @@ def local_data_preview_csv(
         "Content-Disposition": f'attachment; filename="{filename}"',
         **_local_data_scope_headers(run_id=run_id, dump_id=dump_id),
     }
-    return Response(
-        content=data,
+    return StreamingResponse(
+        stream,
         media_type="text/csv; charset=utf-8",
         headers=headers,
     )

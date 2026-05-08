@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -489,6 +490,42 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertTrue(payload["warnings"])
         self.assertIsNone(payload["interpretation"]["candidate_balanced_metric"])
         self.assertNotIn("best_balanced_metric", payload["interpretation"])
+
+    def test_scientometric_analysis_reuses_exact_scoped_cache(self) -> None:
+        rows = [
+            {"author_id": "A1", "author_display_name": "One", "h": 3, "p": 4, "c": 20, "c_frac": 10, "g": 5},
+            {"author_id": "A2", "author_display_name": "Two", "h": 2, "p": 2, "c": 10, "c_frac": 5, "g": 3},
+            {"author_id": "A3", "author_display_name": "Three", "h": 1, "p": 1, "c": 2, "c_frac": 1, "g": 1},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            indices = root / "runs" / "run_a" / "tables" / "indices.csv"
+            indices.parent.mkdir(parents=True)
+            indices.write_text("author_id,h\nA1,3\n", encoding="utf-8")
+            with (
+                patch.object(scientometrics, "DATA", root),
+                patch.object(scientometrics.warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": "dump_a"}),
+                patch.object(scientometrics.warehouse, "resolve_scoped_table_path", return_value=indices),
+                patch.object(scientometrics.warehouse, "selected_index_rows", return_value=rows) as selected,
+            ):
+                first = scientometrics.build_scientometric_analysis(
+                    fraction_mode="integer",
+                    metrics=["h", "p"],
+                    baseline_metric="h",
+                    run_id="run_a",
+                    data_limit=0,
+                )
+                second = scientometrics.build_scientometric_analysis(
+                    fraction_mode="integer",
+                    metrics=["h", "p"],
+                    baseline_metric="h",
+                    run_id="run_a",
+                    data_limit=0,
+                )
+
+        self.assertEqual(first["n_authors"], 3)
+        self.assertEqual(second["n_authors"], 3)
+        self.assertEqual(selected.call_count, 1)
 
 
 if __name__ == "__main__":
