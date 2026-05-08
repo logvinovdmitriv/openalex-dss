@@ -38,6 +38,64 @@ INDEX_NUMERIC_FIELDS = {
     "share_single_authored",
 }
 
+AUTHOR_INDEX_DETAIL_FIELDS = (
+    "fraction_mode",
+    "author_id",
+    "author_display_name",
+    "p",
+    "c",
+    "c_frac",
+    "cpp",
+    "h",
+    "i10",
+    "g",
+    "m_local",
+    "f5",
+    "fm5",
+    "iupv",
+    "islv",
+    "lrdi",
+)
+RATING_DETAIL_FIELDS = ("metric_name", "rank_competition", "author_id", "author_display_name", "score", "fraction_mode")
+WORK_DETAIL_FIELDS = (
+    "work_id",
+    "doi",
+    "display_name",
+    "publication_year",
+    "publication_date",
+    "type",
+    "cited_by_count",
+    "source_display_name",
+    "primary_topic_display_name",
+    "primary_topic_id",
+    "primary_subfield_id",
+    "primary_field_id",
+)
+AUTHORSHIP_DETAIL_FIELDS = (
+    "work_id",
+    "author_id",
+    "author_display_name",
+    "author_seq",
+    "country_codes_csv",
+    "institution_ids_csv",
+    "institution_display_names_csv",
+    "raw_affiliation_strings_csv",
+)
+AUTHOR_WORK_DETAIL_FIELDS = (
+    "fraction_mode",
+    "author_id",
+    "author_display_name",
+    "work_id",
+    "publication_year",
+    "cited_by_count",
+    "authors_count_used",
+    "credit_weight",
+    "cited_credit",
+    "single_authored_flag",
+    "qf_any",
+    "qf_authorship_truncated",
+)
+
 NATIVE_LINE_CHART_METRICS = ("p", "c", "h", "i10")
 CORE_LINE_CHART_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local")
 EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "iupv", "islv", "lrdi")
@@ -1306,22 +1364,49 @@ def read_json_doc(name: str, *, run_id: str = "") -> dict[str, Any] | None:
     return None
 
 
-def author_detail(author_id: str, *, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+def author_detail(
+    author_id: str,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    works_limit: int = 100,
+    works_offset: int = 0,
+) -> dict[str, Any]:
+    works_limit = max(1, min(1_000, int(works_limit or 100)))
+    works_offset = max(0, int(works_offset or 0))
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
-        indices = _records(conn.execute("SELECT * FROM indices WHERE author_id = ?", [author_id])) if table_exists("indices", run_id=run_id, dump_id=dump_id) else []
-        ratings = _records(conn.execute("SELECT * FROM ratings WHERE author_id = ? ORDER BY metric_name, rank_competition", [author_id])) if table_exists("ratings", run_id=run_id, dump_id=dump_id) else []
+        indices_fields = _registered_fields(conn, "indices")
+        ratings_fields = _registered_fields(conn, "ratings")
+        works_fields = _registered_fields(conn, "works")
+        author_work_fields = _registered_fields(conn, "author_work")
+        indices = []
+        if indices_fields:
+            select_sql = _select_existing_sql(indices_fields, AUTHOR_INDEX_DETAIL_FIELDS)
+            indices = _records(conn.execute(f"SELECT {select_sql} FROM indices WHERE author_id = ?", [author_id]))
+        ratings = []
+        if ratings_fields:
+            select_sql = _select_existing_sql(ratings_fields, RATING_DETAIL_FIELDS)
+            order_sql = _order_sql(ratings_fields, ("metric_name", "rank_competition"))
+            ratings = _records(conn.execute(f"SELECT {select_sql} FROM ratings WHERE author_id = ? {order_sql}", [author_id]))
         works = []
-        if table_exists("author_work", run_id=run_id, dump_id=dump_id) and table_exists("works", run_id=run_id, dump_id=dump_id):
+        works_has_more = False
+        if author_work_fields and works_fields:
+            select_sql = _select_existing_sql(works_fields, WORK_DETAIL_FIELDS, alias="w")
+            order_sql = _order_sql(works_fields, ("cited_by_count", "publication_date"), alias="w", direction="DESC")
             works = _records(conn.execute(
-                """
-                SELECT DISTINCT w.*
+                f"""
+                SELECT DISTINCT {select_sql}
                 FROM author_work aw
                 JOIN works w USING(work_id)
                 WHERE aw.author_id = ?
-                ORDER BY w.cited_by_count DESC, w.publication_date DESC
+                {order_sql}
+                LIMIT ? OFFSET ?
                 """,
-                [author_id],
+                [author_id, works_limit + 1, works_offset],
             ))
+            if len(works) > works_limit:
+                works_has_more = True
+                works = works[:works_limit]
     return {
         "author_id": author_id,
         "run_id": run_id,
@@ -1329,15 +1414,59 @@ def author_detail(author_id: str, *, run_id: str = "", dump_id: str = "") -> dic
         "indices": indices,
         "ratings": ratings,
         "works": works,
+        "works_limit": works_limit,
+        "works_offset": works_offset,
+        "works_has_more": works_has_more,
+        "works_next_offset": works_offset + len(works) if works_has_more else None,
     }
 
 
-def work_detail(work_id: str, *, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+def work_detail(
+    work_id: str,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    authors_limit: int = 500,
+    authors_offset: int = 0,
+) -> dict[str, Any]:
+    authors_limit = max(1, min(5_000, int(authors_limit or 500)))
+    authors_offset = max(0, int(authors_offset or 0))
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
-        works = _records(conn.execute("SELECT * FROM works WHERE work_id = ?", [work_id])) if table_exists("works", run_id=run_id, dump_id=dump_id) else []
-        authorship_order = " ORDER BY author_seq" if "author_seq" in table_schema("authorships", run_id=run_id, dump_id=dump_id) else ""
-        authorships = _records(conn.execute(f"SELECT * FROM authorships WHERE work_id = ?{authorship_order}", [work_id])) if table_exists("authorships", run_id=run_id, dump_id=dump_id) else []
-        author_work = _records(conn.execute("SELECT * FROM author_work WHERE work_id = ? ORDER BY fraction_mode, author_display_name", [work_id])) if table_exists("author_work", run_id=run_id, dump_id=dump_id) else []
+        works_fields = _registered_fields(conn, "works")
+        authorships_fields = _registered_fields(conn, "authorships")
+        author_work_fields = _registered_fields(conn, "author_work")
+        works = []
+        if works_fields:
+            select_sql = _select_existing_sql(works_fields, WORK_DETAIL_FIELDS)
+            works = _records(conn.execute(f"SELECT {select_sql} FROM works WHERE work_id = ?", [work_id]))
+        authorships = []
+        authorships_has_more = False
+        if authorships_fields:
+            select_sql = _select_existing_sql(authorships_fields, AUTHORSHIP_DETAIL_FIELDS)
+            order_sql = _order_sql(authorships_fields, ("author_seq", "author_display_name"))
+            authorships = _records(
+                conn.execute(
+                    f"SELECT {select_sql} FROM authorships WHERE work_id = ? {order_sql} LIMIT ? OFFSET ?",
+                    [work_id, authors_limit + 1, authors_offset],
+                )
+            )
+            if len(authorships) > authors_limit:
+                authorships_has_more = True
+                authorships = authorships[:authors_limit]
+        author_work = []
+        author_work_has_more = False
+        if author_work_fields:
+            select_sql = _select_existing_sql(author_work_fields, AUTHOR_WORK_DETAIL_FIELDS)
+            order_sql = _order_sql(author_work_fields, ("fraction_mode", "author_display_name"))
+            author_work = _records(
+                conn.execute(
+                    f"SELECT {select_sql} FROM author_work WHERE work_id = ? {order_sql} LIMIT ? OFFSET ?",
+                    [work_id, authors_limit + 1, authors_offset],
+                )
+            )
+            if len(author_work) > authors_limit:
+                author_work_has_more = True
+                author_work = author_work[:authors_limit]
     return {
         "work_id": work_id,
         "run_id": run_id,
@@ -1345,7 +1474,35 @@ def work_detail(work_id: str, *, run_id: str = "", dump_id: str = "") -> dict[st
         "work": works[0] if works else None,
         "authorships": authorships,
         "author_work": author_work,
+        "authors_limit": authors_limit,
+        "authors_offset": authors_offset,
+        "authorships_has_more": authorships_has_more,
+        "authorships_next_offset": authors_offset + len(authorships) if authorships_has_more else None,
+        "author_work_has_more": author_work_has_more,
+        "author_work_next_offset": authors_offset + len(author_work) if author_work_has_more else None,
     }
+
+
+def _registered_fields(conn: duckdb.DuckDBPyConnection, table: str) -> list[str]:
+    try:
+        return [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
+    except duckdb.Error:
+        return []
+
+
+def _select_existing_sql(fields: list[str], preferred: tuple[str, ...], *, alias: str = "") -> str:
+    selected = [field for field in preferred if field in fields] or list(fields)
+    prefix = f"{alias}." if alias else ""
+    return ", ".join(f"{prefix}{field}" for field in selected)
+
+
+def _order_sql(fields: list[str], preferred: tuple[str, ...], *, alias: str = "", direction: str = "ASC") -> str:
+    selected = [field for field in preferred if field in fields]
+    if not selected:
+        return ""
+    prefix = f"{alias}." if alias else ""
+    safe_direction = "DESC" if str(direction).upper() == "DESC" else "ASC"
+    return "ORDER BY " + ", ".join(f"{prefix}{field} {safe_direction}" for field in selected)
 
 
 def _records(result: duckdb.DuckDBPyConnection) -> list[dict[str, Any]]:
