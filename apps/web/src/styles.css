@@ -228,25 +228,39 @@ pre {
 
 .nav-list {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
   min-width: 0;
   align-items: center;
 }
 
 .nav-list button {
-  justify-content: center;
+  justify-content: flex-start;
   min-width: 0;
+  min-height: 46px;
   padding-inline: 8px;
   border-color: transparent;
   background: transparent;
   color: #40546a;
-  font-size: 14px;
+  font-size: 13px;
+  text-align: left;
 }
 
 .nav-list button span {
+  display: grid;
+  gap: 1px;
   min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-list button span small {
+  overflow: hidden;
+  color: #8795a3;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -255,6 +269,50 @@ pre {
   border-color: var(--border-strong);
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+.nav-list button.complete {
+  color: var(--success);
+}
+
+.nav-list button.locked {
+  border-color: transparent;
+  background: #f4f7f9;
+  color: #8a9bad;
+  opacity: 1;
+}
+
+.nav-list button.locked:hover {
+  border-color: transparent;
+}
+
+.nav-step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #e7eef6;
+  color: #40546a;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.nav-list button.active .nav-step-number {
+  background: var(--accent);
+  color: #fff;
+}
+
+.nav-list button.complete .nav-step-number {
+  background: #e3f4ea;
+  color: var(--success);
+}
+
+.nav-list button.locked .nav-step-number {
+  background: #e8edf2;
+  color: #8a9bad;
 }
 
 .workbench {

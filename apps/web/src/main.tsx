@@ -11,6 +11,7 @@ import {
   Gauge,
   Info,
   Layers3,
+  Lock,
   Loader2,
   Search,
   Settings2,
@@ -96,10 +97,16 @@ function emitToast(payload: ToastPayload) {
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
-    onError: (error) => emitToast({ title: "Данные не загрузились", message: mutationError(error), tone: "error" }),
+    onError: (error) => {
+      const message = mutationError(error);
+      emitToast({ title: "Данные не загрузились", message, tone: "error", key: `query-${message}` });
+    },
   }),
   mutationCache: new MutationCache({
-    onError: (error) => emitToast({ title: "Действие не выполнено", message: mutationError(error), tone: "error" }),
+    onError: (error) => {
+      const message = mutationError(error);
+      emitToast({ title: "Действие не выполнено", message, tone: "error", key: `mutation-${message}` });
+    },
   }),
   defaultOptions: {
     queries: {
@@ -118,6 +125,18 @@ const NAV: Array<{ id: View; label: string; icon: ReactNode }> = [
   { id: "reports", label: "Отчеты", icon: <Download size={17} /> },
 ];
 
+type WorkflowNavItem = {
+  id: View;
+  label: string;
+  icon: ReactNode;
+  index: number;
+  unlocked: boolean;
+  complete: boolean;
+  active: boolean;
+  reason: string;
+  fallback: View;
+};
+
 const COMMON_RANKING_METRICS = new Set(["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "f5", "fm5", "iupv", "islv", "lrdi"]);
 const DEFAULT_CUSTOM_METRICS: CustomMetricDefinition[] = [
   {
@@ -127,6 +146,67 @@ const DEFAULT_CUSTOM_METRICS: CustomMetricDefinition[] = [
     expression: "100 * (pr_p * pr_h * pr_c_frac) ** (1 / 3)",
   },
 ];
+
+function buildWorkflowNav({
+  view,
+  scopeReady,
+  hasAvailableLocalTables,
+  hasAuthorIndices,
+  running,
+}: {
+  view: View;
+  scopeReady: boolean;
+  hasAvailableLocalTables: boolean;
+  hasAuthorIndices: boolean;
+  running: boolean;
+}): WorkflowNavItem[] {
+  const reasons: Partial<Record<View, string>> = {
+    data: "Сначала выберите или скачайте срез",
+    rankings: "Сначала выберите или скачайте срез",
+    statistics: "Сначала рассчитайте индексы",
+    reports: "Сначала рассчитайте индексы",
+  };
+  const unlocked: Record<View, boolean> = {
+    slices: true,
+    data: scopeReady,
+    rankings: scopeReady,
+    statistics: scopeReady && hasAuthorIndices,
+    reports: scopeReady && hasAuthorIndices,
+  };
+  const complete: Record<View, boolean> = {
+    slices: scopeReady,
+    data: scopeReady && hasAvailableLocalTables,
+    rankings: scopeReady && hasAuthorIndices,
+    statistics: scopeReady && hasAuthorIndices,
+    reports: scopeReady && hasAuthorIndices,
+  };
+  return NAV.map((item, index) => {
+    const fallback: View = !scopeReady ? "slices" : !hasAuthorIndices && (item.id === "statistics" || item.id === "reports") ? "rankings" : "slices";
+    return {
+      ...item,
+      index: index + 1,
+      unlocked: unlocked[item.id],
+      complete: complete[item.id] && item.id !== view && !running,
+      active: item.id === view,
+      reason: reasons[item.id] ?? "",
+      fallback,
+    };
+  });
+}
+
+function nextUnlockedNavIndex(items: WorkflowNavItem[], current: number, key: string) {
+  const direction = key === "ArrowDown" || key === "ArrowRight" ? 1 : key === "ArrowUp" || key === "ArrowLeft" ? -1 : 0;
+  if (key === "Home") return items.findIndex((item) => item.unlocked);
+  if (key === "End") {
+    const reversedIndex = [...items].reverse().findIndex((item) => item.unlocked);
+    return reversedIndex < 0 ? undefined : items.length - 1 - reversedIndex;
+  }
+  if (!direction) return undefined;
+  for (let index = current + direction; index >= 0 && index < items.length; index += direction) {
+    if (items[index].unlocked) return index;
+  }
+  return current;
+}
 
 function App() {
   return (
@@ -177,7 +257,10 @@ function Workbench() {
       const detail = (event as CustomEvent<ToastPayload>).detail;
       const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const next: ToastItem = { id, title: detail.title, message: detail.message, tone: detail.tone ?? "info", key: detail.key };
-      setToasts((items) => [next, ...items].slice(0, 4));
+      setToasts((items) => {
+        if (next.key && items.some((item) => item.key === next.key)) return items;
+        return [next, ...items].slice(0, 4);
+      });
       window.setTimeout(() => setToasts((items) => items.filter((item) => item.id !== id)), 7_000);
     };
     window.addEventListener(TOAST_EVENT, onToast);
@@ -187,25 +270,6 @@ function Workbench() {
   const navigate = (next: View) => {
     setView(next);
     window.history.replaceState(null, "", `#${next}`);
-  };
-
-  const onNavKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const current = NAV.findIndex((item) => item.id === view);
-    if (current < 0) return;
-    const last = NAV.length - 1;
-    const nextIndex = {
-      ArrowDown: Math.min(current + 1, last),
-      ArrowRight: Math.min(current + 1, last),
-      ArrowUp: Math.max(current - 1, 0),
-      ArrowLeft: Math.max(current - 1, 0),
-      Home: 0,
-      End: last,
-    }[event.key];
-    if (nextIndex === undefined) return;
-    event.preventDefault();
-    const next = NAV[nextIndex].id;
-    navigate(next);
-    navRefs.current[nextIndex]?.focus();
   };
 
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => getJson<any>("/registry") });
@@ -228,6 +292,7 @@ function Workbench() {
       return status === "queued" || status === "running" ? 1000 : false;
     },
   });
+  const running = run.data?.status === "queued" || run.data?.status === "running";
 
   const notifiedRunRef = useRef("");
   useEffect(() => {
@@ -289,8 +354,40 @@ function Workbench() {
   }, [localDataSummary.data]);
   const localDataKindKey = localDataKindOptions.map((item) => item.value).join("|");
   const localDataKindAvailable = localDataKindOptions.some((item) => item.value === localDataKind);
+  const hasAvailableLocalTables = localDataKindOptions.length > 0;
   const hasAuthorIndices = Boolean((localDataSummary.data?.tables as any)?.indices?.exists);
   const hasLocalAnalyticsData = scopeReady && hasAuthorIndices;
+  const workflowNav = useMemo(() => buildWorkflowNav({
+    view,
+    scopeReady,
+    hasAvailableLocalTables,
+    hasAuthorIndices,
+    running,
+  }), [view, scopeReady, hasAvailableLocalTables, hasAuthorIndices, running]);
+  const guardedNavigate = (next: View) => {
+    const step = workflowNav.find((item) => item.id === next);
+    if (step && !step.unlocked) {
+      emitToast({ title: "Шаг пока недоступен", message: step.reason, tone: "info", key: `locked-${step.id}` });
+      navigate(step.fallback);
+      return;
+    }
+    navigate(next);
+  };
+  const onNavKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const current = workflowNav.findIndex((item) => item.id === view);
+    if (current < 0) return;
+    const nextIndex = nextUnlockedNavIndex(workflowNav, current, event.key);
+    if (nextIndex === undefined) return;
+    event.preventDefault();
+    const next = workflowNav[nextIndex].id;
+    guardedNavigate(next);
+    navRefs.current[nextIndex]?.focus();
+  };
+  useEffect(() => {
+    if (!workbench.isFetched && !workbench.isError) return;
+    const current = workflowNav.find((item) => item.id === view);
+    if (current && !current.unlocked) navigate(current.fallback);
+  }, [workbench.isFetched, workbench.isError, workflowNav.map((item) => `${item.id}:${item.unlocked}`).join("|"), view]);
   const table = useQuery({
     queryKey: ["local-data-preview", localDataKind, dataSearch, dataFilterKey, topN, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId],
     queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: topN, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })),
@@ -611,7 +708,6 @@ function Workbench() {
     navigate("data");
   };
 
-  const running = run.data?.status === "queued" || run.data?.status === "running";
   const tables = localDataSummary.data?.tables ?? workbench.data?.tables ?? {};
   const errors = [
     createSlice.error,
@@ -642,7 +738,10 @@ function Workbench() {
   ].filter(Boolean);
 
   useEffect(() => {
-    queryErrors.forEach((error) => emitToast({ title: "Данные не загрузились", message: mutationError(error), tone: "error" }));
+    queryErrors.forEach((error) => {
+      const message = mutationError(error);
+      emitToast({ title: "Данные не загрузились", message, tone: "error", key: `query-${message}` });
+    });
   }, [queryErrors.map((error) => mutationError(error)).join("|")]);
 
   useEffect(() => {
@@ -668,19 +767,26 @@ function Workbench() {
           </div>
         </div>
         <div role="tablist" aria-orientation="horizontal" className="nav-list" onKeyDown={onNavKeyDown}>
-          {NAV.map((item, index) => (
+          {workflowNav.map((item, index) => (
             <button
               key={item.id}
               ref={(node) => { navRefs.current[index] = node; }}
               id={`tab-${item.id}`}
               role="tab"
               aria-selected={view === item.id}
+              aria-disabled={!item.unlocked}
               aria-controls={`panel-${item.id}`}
-              className={view === item.id ? "active" : ""}
-              onClick={() => navigate(item.id)}
+              className={[view === item.id ? "active" : "", item.complete ? "complete" : "", !item.unlocked ? "locked" : ""].filter(Boolean).join(" ")}
+              tabIndex={item.unlocked ? undefined : -1}
+              title={item.unlocked ? undefined : item.reason}
+              onClick={() => guardedNavigate(item.id)}
             >
+              <b className="nav-step-number">{item.complete ? <CheckCircle2 size={13} /> : item.unlocked ? item.index : <Lock size={12} />}</b>
               {item.icon}
-              <span>{item.label}</span>
+              <span>
+                {item.label}
+                {!item.unlocked && <small>{item.reason}</small>}
+              </span>
             </button>
           ))}
         </div>

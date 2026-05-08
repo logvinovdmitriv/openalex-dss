@@ -28,14 +28,14 @@ export type CustomMetricDefinition = {
 };
 
 export async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await safeFetch(path);
   const data = await safeJson(res);
   if (!res.ok) throw new ApiError(errorMessage(data, res.status), res.status, data);
   return data as T;
 }
 
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await safeFetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -46,7 +46,7 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function deleteJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  const res = await safeFetch(path, { method: "DELETE" });
   const data = await safeJson(res);
   if (!res.ok) throw new ApiError(errorMessage(data, res.status), res.status, data);
   return data as T;
@@ -62,6 +62,24 @@ export class ApiError extends Error {
     this.status = status;
     this.payload = payload;
   }
+}
+
+async function safeFetch(path: string, init?: RequestInit) {
+  try {
+    return await fetch(`${API_BASE}${path}`, init);
+  } catch (error) {
+    throw new ApiError(networkErrorMessage(), 0, {
+      detail: error instanceof Error ? error.message : String(error),
+      path,
+    });
+  }
+}
+
+function networkErrorMessage() {
+  if (API_BASE.startsWith("/")) {
+    return "Сервер приложения недоступен. Запустите backend на 127.0.0.1:8000 и обновите страницу.";
+  }
+  return `Сервер приложения недоступен по адресу ${API_BASE}. Проверьте запуск backend и обновите страницу.`;
 }
 
 async function safeJson(res: Response): Promise<unknown> {
