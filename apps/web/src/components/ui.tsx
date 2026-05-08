@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from "@tanstack/react-table";
 import type { CellContext, SortingState } from "@tanstack/react-table";
 import type { TableColumnFilter, TableColumnFilters, TableResponse } from "../api";
@@ -40,6 +41,8 @@ export function DataGrid({
   const [sorting, setSorting] = useState<SortingState>([]);
   const [localColumnFilters, setLocalColumnFilters] = useState<TableColumnFilters>({});
   const [openColumn, setOpenColumn] = useState<string | null>(null);
+  const [columnMenuPosition, setColumnMenuPosition] = useState<ColumnMenuPosition | null>(null);
+  const columnMenuRef = useRef<HTMLDivElement | null>(null);
   const fields = (data?.fields ?? []).filter((field) => !hiddenFields.includes(field));
   const rows = data?.rows ?? [];
   const selectedSet = useMemo(() => new Set(selectedIds.map(String)), [selectedIds.join("|")]);
@@ -60,11 +63,46 @@ export function DataGrid({
     delete next[field];
     setColumnFilters(next);
   };
+  const closeColumnMenu = () => {
+    setOpenColumn(null);
+    setColumnMenuPosition(null);
+  };
+  const toggleColumnMenu = (field: string, rect: DOMRect) => {
+    if (openColumn === field) {
+      closeColumnMenu();
+      return;
+    }
+    setOpenColumn(field);
+    setColumnMenuPosition(columnMenuPositionFromRect(rect));
+  };
   const applySort = (field: string, direction: "asc" | "desc") => {
     if (onSortChange) onSortChange(field, direction);
     else setSorting([{ id: field, desc: direction === "desc" }]);
-    setOpenColumn(null);
+    closeColumnMenu();
   };
+  useEffect(() => {
+    if (!openColumn) return undefined;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (columnMenuRef.current?.contains(target)) return;
+      if ((target as HTMLElement).closest?.(".table-sort-button")) return;
+      closeColumnMenu();
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") closeColumnMenu();
+    };
+    const onViewportChange = () => closeColumnMenu();
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
+    };
+  }, [openColumn]);
   const columns = useMemo(() => fields.map((field) => ({
     accessorKey: field,
     header: fieldLabels[field] ?? columnLabel(field),
@@ -121,22 +159,24 @@ export function DataGrid({
               const active = hasColumnFilter(effectiveColumnFilters[field]) || sortField === field;
               return (
               <th key={h.id} className={active ? "column-active" : undefined}>
-                <button type="button" className="table-sort-button" onClick={() => setOpenColumn(openColumn === String(h.column.id) ? null : String(h.column.id))} aria-label={`Настроить столбец ${String(h.column.columnDef.header)}`}>
+                <button type="button" className="table-sort-button" onClick={(event) => toggleColumnMenu(field, event.currentTarget.getBoundingClientRect())} aria-label={`Настроить столбец ${String(h.column.columnDef.header)}`}>
                   <span>{flexRender(h.column.columnDef.header, h.getContext())}</span>
                   <SortMark value={h.column.getIsSorted()} />
                   {hasColumnFilter(effectiveColumnFilters[String(h.column.id)]) && <span className="filter-mark" aria-label="Есть ограничение">●</span>}
                 </button>
                 {openColumn === String(h.column.id) && (
                   <ColumnMenu
+                    menuRef={columnMenuRef}
                     field={String(h.column.id)}
                     label={String(h.column.columnDef.header)}
                     filter={effectiveColumnFilters[String(h.column.id)] ?? {}}
                     numeric={rows.some((row) => isFiniteTableNumber((row as Record<string, unknown>)[String(h.column.id)]))}
                     enableFilters={enableColumnFilters}
+                    position={columnMenuPosition}
                     onSort={applySort}
                     onFilter={setColumnFilter}
                     onReset={resetColumnFilter}
-                    onClose={() => setOpenColumn(null)}
+                    onClose={closeColumnMenu}
                   />
                 )}
               </th>
@@ -177,29 +217,65 @@ function rowSelectionId(row: Record<string, unknown>, field: string) {
   return String(row[field] ?? row.author_id ?? "").trim();
 }
 
+type ColumnMenuPosition = {
+  left: number;
+  top: number;
+  width: number;
+  maxHeight: number;
+  placement: "top" | "bottom";
+};
+
+function columnMenuPositionFromRect(rect: DOMRect): ColumnMenuPosition {
+  const gutter = 12;
+  const width = Math.min(280, window.innerWidth - gutter * 2);
+  const left = clampNumber(rect.left, gutter, Math.max(gutter, window.innerWidth - width - gutter));
+  const spaceBelow = window.innerHeight - rect.bottom - gutter;
+  const spaceAbove = rect.top - gutter;
+  const placement: "top" | "bottom" = spaceBelow < 280 && spaceAbove > spaceBelow ? "top" : "bottom";
+  const availableHeight = Math.max(180, placement === "bottom" ? spaceBelow - 8 : spaceAbove - 8);
+  return {
+    left,
+    top: placement === "bottom" ? rect.bottom + 6 : rect.top - 6,
+    width,
+    maxHeight: Math.min(380, availableHeight),
+    placement,
+  };
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function ColumnMenu({
+  menuRef,
   field,
   label,
   filter,
   numeric,
   enableFilters,
+  position,
   onSort,
   onFilter,
   onReset,
   onClose,
 }: {
+  menuRef: RefObject<HTMLDivElement | null>;
   field: string;
   label: string;
   filter: TableColumnFilter;
   numeric: boolean;
   enableFilters: boolean;
+  position: ColumnMenuPosition | null;
   onSort: (field: string, direction: "asc" | "desc") => void;
   onFilter: (field: string, patch: TableColumnFilter) => void;
   onReset: (field: string) => void;
   onClose: () => void;
 }) {
-  return (
-    <div className="column-menu" role="dialog" aria-label={`Настройка столбца ${label}`}>
+  const style: CSSProperties = position
+    ? { left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight }
+    : {};
+  return createPortal(
+    <div ref={menuRef} className={`column-menu ${position?.placement ?? "bottom"}`} style={style} role="dialog" aria-label={`Настройка столбца ${label}`}>
       <div className="column-menu-head">
         <b>{label}</b>
         <button type="button" className="icon-mini" onClick={onClose} aria-label="Закрыть">×</button>
@@ -228,7 +304,8 @@ function ColumnMenu({
           {hasColumnFilter(filter) && <button type="button" className="ghost-button" onClick={() => onReset(field)}>Сбросить столбец</button>}
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

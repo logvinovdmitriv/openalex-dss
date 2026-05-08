@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
@@ -1913,22 +1914,119 @@ function selectedAuthorIndexTable(ranking: TableResponse | undefined, metrics: s
   return { ...ranking, fields: selectedFields.length ? selectedFields : fields, rows, total: selected.size ? rows.length : ranking.total };
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function MetricInfoPopover({ metric }: { metric: SelectOption }) {
+  const iconRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const closeTimer = useRef<number | null>(null);
+  const pinnedOpen = useRef(false);
+  const [position, setPosition] = useState<{ left: number; top: number; width: number; maxHeight: number; placement: "top" | "bottom" } | null>(null);
   const metricName = metric.value;
   const description = metric.description || metricDescription(metricName);
   const formula = metric.formula || metricFormula(metricName);
   const label = metric.label || metricLabel(metricName);
+  const clearCloseTimer = () => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const close = () => {
+    clearCloseTimer();
+    pinnedOpen.current = false;
+    setPosition(null);
+  };
+  const scheduleClose = () => {
+    if (pinnedOpen.current) return;
+    clearCloseTimer();
+    closeTimer.current = window.setTimeout(() => setPosition(null), 120);
+  };
+  const open = () => {
+    clearCloseTimer();
+    const rect = iconRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const gutter = 12;
+    const width = Math.min(420, window.innerWidth - gutter * 2);
+    const left = clamp(rect.right - width, gutter, Math.max(gutter, window.innerWidth - width - gutter));
+    const spaceBelow = window.innerHeight - rect.bottom - gutter;
+    const spaceAbove = rect.top - gutter;
+    const placement: "top" | "bottom" = spaceBelow < 260 && spaceAbove > spaceBelow ? "top" : "bottom";
+    const availableHeight = Math.max(180, placement === "bottom" ? spaceBelow - 8 : spaceAbove - 8);
+    setPosition({
+      left,
+      top: placement === "bottom" ? rect.bottom + 8 : rect.top - 8,
+      width,
+      maxHeight: Math.min(360, availableHeight),
+      placement,
+    });
+  };
+  useEffect(() => {
+    if (!position) return undefined;
+    const reposition = () => open();
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (iconRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      close();
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      clearCloseTimer();
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [position?.left, position?.top, position?.placement]);
+  const togglePinned = () => {
+    if (position && pinnedOpen.current) {
+      close();
+      return;
+    }
+    pinnedOpen.current = true;
+    open();
+  };
+  const popover = position ? createPortal(
+    <div
+      ref={popoverRef}
+      className={`metric-info-popover ${position.placement}`}
+      role="tooltip"
+      style={{ left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight }}
+      onPointerEnter={clearCloseTimer}
+      onPointerLeave={scheduleClose}
+    >
+      <b>{label}</b>
+      {description && <span>{description}</span>}
+      <MetricFormulaMath metricName={metricName} fallback={formula} />
+      <small>Формула применяется только к текущему выбранному срезу.</small>
+    </div>,
+    document.body,
+  ) : null;
   return (
     <span className="metric-info-popover-wrap">
-      <span className="metric-info-icon" tabIndex={0} aria-label={`Описание показателя ${label}`}>
+      <button
+        ref={iconRef}
+        type="button"
+        className="metric-info-icon"
+        aria-label={`Описание показателя ${label}`}
+        aria-expanded={Boolean(position)}
+        onClick={togglePinned}
+        onFocus={open}
+        onBlur={scheduleClose}
+        onPointerEnter={open}
+        onPointerLeave={scheduleClose}
+      >
         <Info size={14} />
-      </span>
-      <div className="metric-info-popover" role="tooltip">
-        <b>{label}</b>
-        {description && <span>{description}</span>}
-        <MetricFormulaMath metricName={metricName} fallback={formula} />
-        <small>Формула применяется только к текущему выбранному срезу.</small>
-      </div>
+      </button>
+      {popover}
     </span>
   );
 }
