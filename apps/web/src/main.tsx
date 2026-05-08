@@ -1687,11 +1687,23 @@ function LocalDataPage({
   const hasAvailableTables = localDataKindOptions.length > 0;
   const hasTableRestrictions = Boolean(Object.keys(dataColumnFilters).length || dataSearch.trim() || dataSort || dataDirection !== "desc");
   const hasDataRestrictions = hasTableRestrictions || selectedAuthorIds.length > 0;
-  const selectedTotal = topN > 0 ? Math.min(Number(table?.total ?? 0), topN) : Number(table?.total ?? 0);
-  const pageStart = selectedTotal && table?.rows?.length ? dataOffset + 1 : 0;
-  const pageEnd = selectedTotal && table?.rows?.length ? Math.min(dataOffset + (table.rows?.length ?? 0), selectedTotal) : 0;
+  const rowsOnPage = table?.rows?.length ?? 0;
+  const totalExact = table?.total_exact !== false && table?.total !== null && table?.total !== undefined;
+  const rawTotal = Number(table?.total ?? 0);
+  const selectedTotal = totalExact ? (topN > 0 ? Math.min(rawTotal, topN) : rawTotal) : null;
+  const pageStart = rowsOnPage ? dataOffset + 1 : 0;
+  const pageEndRaw = rowsOnPage ? dataOffset + rowsOnPage : 0;
+  const pageEnd = selectedTotal !== null && selectedTotal > 0 ? Math.min(pageEndRaw, selectedTotal) : pageEndRaw;
   const canPrevPage = dataOffset > 0;
-  const canNextPage = selectedTotal > 0 && pageEnd < selectedTotal;
+  const canNextPage = totalExact
+    ? selectedTotal !== null && selectedTotal > 0 && pageEnd < selectedTotal
+    : Boolean(table?.has_more) && (topN <= 0 || pageEndRaw < topN);
+  const paginationText = rowsOnPage
+    ? totalExact && selectedTotal !== null
+      ? `Показаны строки ${fmt(pageStart)}-${fmt(pageEnd)} из ${fmt(selectedTotal)}`
+      : `Показаны строки ${fmt(pageStart)}-${fmt(pageEnd)}${table?.has_more ? " · есть следующие строки" : " · конец выборки"}`
+    : "Строк нет";
+  const limitText = totalExact && topN > 0 && rawTotal > topN ? ` (ограничено до ${fmt(topN)})` : "";
   const visibleAuthorIds = useMemo(() => {
     if (localDataKind !== "indices") return [];
     return [...new Set((table?.rows ?? []).map((row) => String(row.author_id ?? "").trim()).filter(Boolean))];
@@ -1844,8 +1856,8 @@ function LocalDataPage({
             />
             <div className="table-pagination">
               <span>
-                Показаны строки {fmt(pageStart)}-{fmt(pageEnd)} из {fmt(selectedTotal)}
-                {topN > 0 && Number(table?.total ?? 0) > topN ? ` (ограничено до ${fmt(topN)})` : ""}
+                {paginationText}
+                {limitText}
               </span>
               <div className="action-row compact">
                 <button type="button" className="ghost-button" disabled={!canPrevPage} onClick={() => setDataOffset(Math.max(0, dataOffset - pageSize))}>

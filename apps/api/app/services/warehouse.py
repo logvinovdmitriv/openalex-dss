@@ -223,6 +223,7 @@ def query_table(
     limit: int = 100,
     offset: int = 0,
     select_fields: list[str] | tuple[str, ...] | set[str] | None = None,
+    include_total: bool = True,
 ) -> dict[str, Any]:
     if table not in TABLE_KINDS:
         raise ValueError(f"Unknown table: {table}")
@@ -231,7 +232,19 @@ def query_table(
     dump_id = scope["dump_id"]
     fields = table_schema(table, run_id=run_id, dump_id=dump_id)
     if not fields:
-        return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
+        return {
+            "table": table,
+            "fields": [],
+            "rows": [],
+            "total": 0 if include_total else None,
+            "total_exact": bool(include_total),
+            "has_more": False,
+            "next_offset": None,
+            "limit": limit,
+            "offset": offset,
+            "run_id": run_id,
+            "dump_id": dump_id,
+        }
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
         payload = _query_registered_table(
             conn,
@@ -248,6 +261,7 @@ def query_table(
             limit=limit,
             offset=offset,
             select_fields=select_fields,
+            include_total=include_total,
         )
         payload["run_id"] = run_id
         payload["dump_id"] = dump_id
@@ -273,8 +287,74 @@ def _query_registered_table(
     limit: int = 100,
     offset: int = 0,
     select_fields: list[str] | tuple[str, ...] | set[str] | None = None,
+    include_total: bool = True,
 ) -> dict[str, Any]:
+    where_sql, order_sql, args = _table_query_parts(
+        fields,
+        q=q,
+        fraction_mode=fraction_mode,
+        metric=metric,
+        author_id=author_id,
+        work_id=work_id,
+        data_filters=data_filters,
+        sort=sort,
+        direction=direction,
+    )
+    selected_fields = _selected_table_fields(fields, select_fields)
+    select_sql = ", ".join(selected_fields) if selected_fields else "*"
+    raw_limit = max(0, min(500_000, int(limit or 0)))
+    offset = max(0, int(offset))
 
+    total: int | None = None
+    if include_total:
+        total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
+
+    fetch_limit = raw_limit + 1 if raw_limit > 0 and not include_total else raw_limit
+    if raw_limit > 0:
+        rel = conn.execute(
+            f"SELECT {select_sql} FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
+            [*args, fetch_limit, offset],
+        )
+        effective_limit = raw_limit
+    else:
+        rel = conn.execute(
+            f"SELECT {select_sql} FROM {table} {where_sql} {order_sql} OFFSET ?",
+            [*args, offset],
+        )
+        effective_limit = 0
+    rows = _records(rel)
+    has_more = False
+    if not include_total and raw_limit > 0 and len(rows) > raw_limit:
+        has_more = True
+        rows = rows[:raw_limit]
+    elif include_total and total is not None and raw_limit > 0:
+        has_more = offset + len(rows) < total
+    next_offset = offset + len(rows) if has_more else None
+    return {
+        "table": table,
+        "fields": selected_fields or fields,
+        "rows": rows,
+        "total": total,
+        "total_exact": bool(include_total),
+        "has_more": has_more,
+        "next_offset": next_offset,
+        "limit": effective_limit,
+        "offset": offset,
+    }
+
+
+def _table_query_parts(
+    fields: list[str],
+    *,
+    q: str = "",
+    fraction_mode: str = "",
+    metric: str = "",
+    author_id: str = "",
+    work_id: str = "",
+    data_filters: dict[str, Any] | None = None,
+    sort: str = "",
+    direction: str = "desc",
+) -> tuple[str, str, list[Any]]:
     where: list[str] = []
     args: list[Any] = []
     if q:
@@ -299,26 +379,7 @@ def _query_registered_table(
     order_sql = ""
     if sort and sort in fields:
         order_sql = f"ORDER BY {sort} {'DESC' if direction == 'desc' else 'ASC'}"
-    selected_fields = _selected_table_fields(fields, select_fields)
-    select_sql = ", ".join(selected_fields) if selected_fields else "*"
-    raw_limit = max(0, min(500_000, int(limit or 0)))
-    offset = max(0, int(offset))
-
-    total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
-    if raw_limit > 0:
-        rel = conn.execute(
-            f"SELECT {select_sql} FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
-            [*args, raw_limit, offset],
-        )
-        effective_limit = raw_limit
-    else:
-        rel = conn.execute(
-            f"SELECT {select_sql} FROM {table} {where_sql} {order_sql} OFFSET ?",
-            [*args, offset],
-        )
-        effective_limit = 0
-    rows = _records(rel)
-    return {"table": table, "fields": selected_fields or fields, "rows": rows, "total": total, "limit": effective_limit, "offset": offset}
+    return where_sql, order_sql, args
 
 
 def _selected_table_fields(fields: list[str], select_fields: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
@@ -377,87 +438,6 @@ def _parse_filter_number(value: str, field: str) -> float:
         raise ValueError(f"Invalid numeric filter for {field}: {value}") from exc
 
 
-def export_table(
-    table: str,
-    *,
-    run_id: str = "",
-    dump_id: str = "",
-    q: str = "",
-    fraction_mode: str = "",
-    metric: str = "",
-    author_id: str = "",
-    work_id: str = "",
-    data_filters: dict[str, Any] | None = None,
-    sort: str = "",
-    direction: str = "desc",
-    limit: int = 100_000,
-    offset: int = 0,
-) -> dict[str, Any]:
-    if table not in TABLE_KINDS:
-        raise ValueError(f"Unknown table: {table}")
-    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
-    run_id = scope["run_id"]
-    dump_id = scope["dump_id"]
-    fields = table_schema(table, run_id=run_id, dump_id=dump_id)
-    if not fields:
-        return {"table": table, "fields": [], "rows": [], "total": 0, "limit": limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
-
-    where: list[str] = []
-    args: list[Any] = []
-    if q:
-        expr = " OR ".join([f"CAST({field} AS VARCHAR) ILIKE ?" for field in fields])
-        where.append(f"({expr})")
-        args.extend([f"%{q}%"] * len(fields))
-    if fraction_mode and "fraction_mode" in fields:
-        where.append("fraction_mode = ?")
-        args.append(fraction_mode)
-    if metric and "metric_name" in fields:
-        where.append("metric_name = ?")
-        args.append(metric)
-    if author_id and "author_id" in fields:
-        where.append("author_id = ?")
-        args.append(author_id)
-    if work_id and "work_id" in fields:
-        where.append("work_id = ?")
-        args.append(work_id)
-    _append_column_filter_clauses(where, args, fields, data_filters)
-
-    where_sql = "WHERE " + " AND ".join(where) if where else ""
-    order_sql = ""
-    if sort and sort in fields:
-        order_sql = f"ORDER BY {sort} {'DESC' if direction == 'desc' else 'ASC'}"
-    raw_limit = max(0, min(500_000, int(limit or 0)))
-    offset = max(0, int(offset))
-
-    source_path = resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id)
-    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
-        total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
-        if raw_limit > 0:
-            rows = _records(
-                conn.execute(
-                    f"SELECT * FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
-                    [*args, raw_limit, offset],
-                )
-            )
-            effective_limit = raw_limit
-        else:
-            rows = _records(
-                conn.execute(
-                    f"SELECT * FROM {table} {where_sql} {order_sql} OFFSET ?",
-                    [*args, offset],
-                )
-            )
-            effective_limit = 0
-    payload = {"table": table, "fields": fields, "rows": rows, "total": total, "limit": effective_limit, "offset": offset, "run_id": run_id, "dump_id": dump_id}
-    if source_path:
-        payload["source_path"] = str(source_path)
-    return payload
-
-
-def export_table_csv(table: str, **kwargs: Any) -> str:
-    return "".join(iter_table_csv(table, **kwargs))
-
-
 def iter_table_csv(table: str, **kwargs: Any) -> Iterator[str]:
     if table not in TABLE_KINDS:
         raise ValueError(f"Unknown table: {table}")
@@ -479,30 +459,17 @@ def iter_table_csv(table: str, **kwargs: Any) -> Iterator[str]:
     raw_limit = max(0, min(500_000, int(kwargs.get("limit") or 0)))
     offset = max(0, int(kwargs.get("offset") or 0))
 
-    where: list[str] = []
-    args: list[Any] = []
-    if q:
-        expr = " OR ".join([f"CAST({field} AS VARCHAR) ILIKE ?" for field in fields])
-        where.append(f"({expr})")
-        args.extend([f"%{q}%"] * len(fields))
-    if fraction_mode and "fraction_mode" in fields:
-        where.append("fraction_mode = ?")
-        args.append(fraction_mode)
-    if metric and "metric_name" in fields:
-        where.append("metric_name = ?")
-        args.append(metric)
-    if author_id and "author_id" in fields:
-        where.append("author_id = ?")
-        args.append(author_id)
-    if work_id and "work_id" in fields:
-        where.append("work_id = ?")
-        args.append(work_id)
-    _append_column_filter_clauses(where, args, fields, data_filters)
-
-    where_sql = "WHERE " + " AND ".join(where) if where else ""
-    order_sql = ""
-    if sort and sort in fields:
-        order_sql = f"ORDER BY {sort} {'DESC' if direction == 'desc' else 'ASC'}"
+    where_sql, order_sql, args = _table_query_parts(
+        fields,
+        q=q,
+        fraction_mode=fraction_mode,
+        metric=metric,
+        author_id=author_id,
+        work_id=work_id,
+        data_filters=data_filters,
+        sort=sort,
+        direction=direction,
+    )
     limit_sql = "LIMIT ?" if raw_limit > 0 else ""
     query_args = [*args, offset]
     if raw_limit > 0:

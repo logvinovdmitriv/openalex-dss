@@ -4,7 +4,10 @@ export type TableResponse = {
   table: string;
   fields: string[];
   rows: Record<string, unknown>[];
-  total: number;
+  total?: number | null;
+  total_exact?: boolean;
+  has_more?: boolean;
+  next_offset?: number | null;
   limit: number;
   offset: number;
   scope_status?: string;

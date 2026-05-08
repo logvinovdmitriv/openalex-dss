@@ -82,6 +82,7 @@ def local_data_preview(
             direction=direction,
             limit=effective_limit,
             offset=offset,
+            include_total=False,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

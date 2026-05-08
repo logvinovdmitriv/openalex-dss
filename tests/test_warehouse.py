@@ -263,6 +263,26 @@ class WarehouseTests(unittest.TestCase):
         self.assertEqual(table["total"], 1)
         self.assertTrue(table["source_path"].endswith("tables/dump_a/works.parquet"))
 
+    def test_query_registered_table_can_skip_exact_total(self) -> None:
+        with warehouse.duckdb.connect(":memory:") as conn:
+            conn.execute("CREATE TABLE indices(author_id VARCHAR, h INTEGER)")
+            conn.executemany("INSERT INTO indices VALUES (?, ?)", [("A1", 1), ("A2", 2), ("A3", 3)])
+            payload = warehouse._query_registered_table(
+                conn,
+                "indices",
+                ["author_id", "h"],
+                sort="h",
+                direction="asc",
+                limit=2,
+                include_total=False,
+            )
+
+        self.assertIsNone(payload["total"])
+        self.assertEqual(payload["total_exact"], False)
+        self.assertEqual(payload["has_more"], True)
+        self.assertEqual(payload["next_offset"], 2)
+        self.assertEqual([row["author_id"] for row in payload["rows"]], ["A1", "A2"])
+
     def test_run_metric_params_do_not_fallback_to_global_passport_when_run_passport_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
