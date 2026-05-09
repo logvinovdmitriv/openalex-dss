@@ -1669,6 +1669,16 @@ input[aria-invalid="true"] {
   line-height: 1.45;
 }
 
+.run-note {
+  margin-top: 8px;
+  border-left: 3px solid var(--accent);
+  padding: 7px 9px;
+  background: #eef9fb;
+  color: #315767;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .run-card.live {
   border-color: var(--border-strong);
   background: #fbfdff;

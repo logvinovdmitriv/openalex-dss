@@ -35,7 +35,11 @@ export function RunCard({ run }: { run: WorkbenchRun }) {
   const hasFilesCounter = details.files_seen || details.bytes_written;
   const plannedBytes = Number(details.estimated_raw_bytes ?? 0);
   const currentBytes = Number(details.bytes_written ?? 0);
+  const result = (run.result ?? {}) as Record<string, any>;
+  const resultDump = ((result.fetch ?? {}) as Record<string, any>).dump ?? result.dump ?? {};
+  const finalRawBytes = Number(resultDump.bytes_written ?? 0);
   const forecastExceeded = plannedBytes > 0 && currentBytes > plannedBytes;
+  const forecastNoticeClass = run.status === "completed" ? "run-note" : "run-warning";
   const filesSeenCapped = details.files_seen_capped === true || (downloadingExternalFiles && Number(details.files_seen ?? 0) >= 5000);
   const filesSeenLabel = `${filesSeenCapped ? "не менее " : ""}${fmt(details.files_seen)} файлов OpenAlex`;
   const live = runLiveState(run);
@@ -64,14 +68,17 @@ export function RunCard({ run }: { run: WorkbenchRun }) {
           {downloadingExternalFiles && targetWorks > 0 && <span>Ожидается до упаковки: {fmt(targetWorks)} работ</span>}
           {details.page_count ? <span>{fmt(details.page_count)} страниц</span> : null}
           {details.files_seen ? <span>{filesSeenLabel}</span> : null}
-          {hasFilesCounter ? <span>{fmt(bytesToMb(details.bytes_written ?? 0))} МБ на диске</span> : null}
+          {hasFilesCounter ? <span>{fmt(bytesToMb(details.bytes_written ?? 0))} МБ временных файлов</span> : null}
+          {finalRawBytes > 0 ? <span>Файл среза: {fmt(bytesToMb(finalRawBytes))} МБ</span> : null}
           {plannedBytes > 0 ? <span>Ориентир загрузки: {fmt(bytesToMb(plannedBytes))} МБ</span> : null}
           {details.elapsed_seconds ? <span>{formatElapsed(details.elapsed_seconds)}</span> : null}
         </div>
       )}
       {forecastExceeded && (
-        <div className="run-warning">
-          Фактический размер временных файлов уже выше ориентира. Это возможно для загрузчика OpenAlex: он сначала сохраняет файловые части, а точное число работ и итоговый размер появляются после упаковки. Если нужен жесткий предел, задайте лимит размера перед новой загрузкой.
+        <div className={forecastNoticeClass}>
+          {run.status === "completed"
+            ? "Размер временных файлов загрузчика выше ориентира. Итоговый файл среза показан отдельно; ориентир рассчитывается заранее и не является жестким лимитом."
+            : "Фактический размер временных файлов уже выше ориентира. Это возможно для загрузчика OpenAlex: он сначала сохраняет файловые части, а точное число работ и итоговый размер появляются после упаковки. Если нужен жесткий предел, задайте лимит размера перед новой загрузкой."}
         </div>
       )}
       {run.error && <small>{run.error}</small>}
