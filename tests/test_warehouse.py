@@ -203,12 +203,16 @@ class WarehouseTests(unittest.TestCase):
 
     def test_selected_index_rows_recomputes_when_work_level_filters_are_present(self) -> None:
         source_rows = [{"author_id": "A1", "author_display_name": "Author One", "h": 3, "p": 1}]
-        with (
-            patch.object(warehouse, "table_exists", return_value=True),
-            patch.object(warehouse, "query_table") as query_table,
-            patch.object(warehouse, "filtered_indices", return_value=source_rows) as filtered_indices,
-        ):
-            rows = warehouse.selected_index_rows("integer", {"country_code": "RU"}, run_id="run_a")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+                patch.object(warehouse, "table_exists", return_value=True),
+                patch.object(warehouse, "query_table") as query_table,
+                patch.object(warehouse, "filtered_indices", return_value=source_rows) as filtered_indices,
+            ):
+                rows = warehouse.selected_index_rows("integer", {"country_code": "RU"}, run_id="run_a")
 
         self.assertEqual(rows, source_rows)
         query_table.assert_not_called()

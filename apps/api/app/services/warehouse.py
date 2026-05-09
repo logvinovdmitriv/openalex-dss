@@ -10,17 +10,55 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import duckdb
-import yaml
 
-from app.core.paths import DATA, ROOT, SRC, TABLE_KINDS, WAREHOUSE
-from app.services import custom_metrics
+from app.core.paths import DATA, SRC, TABLE_KINDS, WAREHOUSE
+from app.services import cache_engine, custom_metrics, distribution_engine, ranking_engine, storage_paths, table_engine
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from openalex_dss.metrics import assign_iupv_percentiles, g_index, h_index, i10_index, lrdi as lrdi_metric  # noqa: E402
-from openalex_dss.ranking import sort_metric_rows  # noqa: E402
 from openalex_dss.io_utils import write_json, write_parquet_dicts  # noqa: E402
+DUMP_TABLES = storage_paths.DUMP_TABLES
+RUN_JSON_DOCS = storage_paths.RUN_JSON_DOCS
+_safe_id = storage_paths.safe_id
+_ANALYTICS_CACHE_LIMIT = cache_engine.DEFAULT_FILTERED_CACHE_ENTRIES_PER_RUN
+
+
+def _run_dir(run_id: str) -> Path:
+    return storage_paths.run_dir(run_id, data_root=DATA)
+
+
+def _dump_table_path(dump_id: str, table: str) -> Path:
+    return storage_paths.dump_table_path(dump_id, table, data_root=DATA)
+
+
+def _resolve_dump_id(dump_id: str) -> str:
+    return storage_paths.resolve_dump_id(dump_id, data_root=DATA)
+
+
+def _run_table_path(run_id: str, table: str) -> Path | None:
+    return storage_paths.run_table_path(run_id, table, data_root=DATA)
+
+
+def _run_json_path(run_id: str, name: str) -> Path | None:
+    return storage_paths.run_json_path(run_id, name, data_root=DATA)
+
+
+def _dump_id_for_run(run_id: str) -> str:
+    return storage_paths.dump_id_for_run(run_id, data_root=DATA)
+
+
+def _recent_run_for_dump(dump_id: str) -> str:
+    return storage_paths.recent_run_for_dump(dump_id, data_root=DATA)
+
+
+def resolve_analysis_scope(*, run_id: str = "", dump_id: str = "") -> dict[str, str]:
+    return storage_paths.resolve_analysis_scope(run_id=run_id, dump_id=dump_id, data_root=DATA)
+
+
+def resolve_scoped_table_path(table: str, *, run_id: str | None = None, dump_id: str | None = None) -> Path | None:
+    return storage_paths.resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id, data_root=DATA)
 
 INDEX_NUMERIC_FIELDS = {
     "p",
@@ -106,17 +144,7 @@ LINE_CHART_METRICS = EXTENDED_LINE_CHART_METRICS
 
 FilterSet = dict[str, Any]
 _ROW_COUNT_CACHE: dict[str, tuple[int, int, int]] = {}
-_ANALYTICS_CACHE_LIMIT = 10
 _LAST_ANALYTICS_CACHE_INFO: dict[str, Any] = {"status": "not_used", "key": "", "rows": 0}
-
-DUMP_TABLES = {"works", "authorships", "work_topics"}
-RUN_JSON_DOCS = {
-    "fetch_meta": ("passports", "fetch_meta.json"),
-    "quality": ("passports", "quality_report.json"),
-    "checksums": ("passports", "checksums.json"),
-    "pipeline": ("passports", "pipeline_summary.json"),
-}
-
 
 def connect_scope(*, run_id: str = "", dump_id: str = "") -> duckdb.DuckDBPyConnection:
     WAREHOUSE.parent.mkdir(parents=True, exist_ok=True)
@@ -142,46 +170,6 @@ def _register_file_view(conn: duckdb.DuckDBPyConnection, name: str, table_path: 
         SELECT * FROM {reader}('{escaped_path}'{args})
         """
     )
-
-
-def resolve_scoped_table_path(
-    table: str,
-    *,
-    run_id: str | None = None,
-    dump_id: str | None = None,
-) -> Path | None:
-    if table not in TABLE_KINDS:
-        raise ValueError(f"Unknown table: {table}")
-    scope = resolve_analysis_scope(run_id=run_id or "", dump_id=dump_id or "")
-    run_id = scope["run_id"]
-    dump_id = scope["dump_id"]
-
-    if run_id:
-        if table in DUMP_TABLES:
-            if dump_id:
-                return _dump_table_path(dump_id, table)
-            return None
-        run_path = _run_table_path(run_id, table)
-        if run_path:
-            return run_path
-        return None
-
-    if dump_id and table in DUMP_TABLES:
-        return _dump_table_path(dump_id, table)
-
-    return None
-
-
-def resolve_analysis_scope(*, run_id: str = "", dump_id: str = "") -> dict[str, str]:
-    run_id = str(run_id or "").strip()
-    dump_id = _resolve_dump_id(str(dump_id or "").strip())
-    if not run_id and dump_id:
-        run_id = _recent_run_for_dump(dump_id)
-    expected_dump_id = _dump_id_for_run(run_id) if run_id else ""
-    expected_dump_id = _resolve_dump_id(expected_dump_id)
-    if run_id and dump_id and expected_dump_id and _safe_id(dump_id) != _safe_id(expected_dump_id):
-        raise ValueError(f"dump_id={dump_id} is incompatible with run_id={run_id}; expected {expected_dump_id}")
-    return {"run_id": run_id, "dump_id": dump_id or expected_dump_id}
 
 
 def table_exists(name: str, *, run_id: str = "", dump_id: str = "") -> bool:
@@ -1172,101 +1160,7 @@ def _filtered_indices_fields(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def _prune_filtered_indices_cache(run_id: str) -> None:
-    root = _run_dir(run_id) / "analytics" / "filtered"
-    if not root.is_dir():
-        _prune_total_filtered_indices_cache()
-        return
-    entries: list[tuple[str, Path, int]] = []
-    for manifest_path in root.glob("*/manifest.json"):
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        entries.append((str(manifest.get("last_used_at") or manifest.get("created_at") or ""), manifest_path.parent, _dir_size(manifest_path.parent)))
-    limit = _analytics_cache_limit()
-    max_bytes = _analytics_cache_max_bytes_per_run()
-    import shutil
-
-    ordered = sorted(entries)
-    for _, cache_dir, _ in ordered[: max(0, len(entries) - limit)]:
-        shutil.rmtree(cache_dir, ignore_errors=True)
-    remaining = [(stamp, path, size) for stamp, path, size in ordered[max(0, len(entries) - limit):] if path.exists()]
-    total = sum(size for _, _, size in remaining)
-    for _, cache_dir, size in remaining:
-        if total <= max_bytes:
-            break
-        shutil.rmtree(cache_dir, ignore_errors=True)
-        total -= size
-    _prune_total_filtered_indices_cache()
-
-
-def _prune_total_filtered_indices_cache() -> None:
-    max_bytes = _analytics_cache_max_total_bytes()
-    if max_bytes <= 0:
-        return
-    root = DATA / "runs"
-    if not root.is_dir():
-        return
-    entries: list[tuple[str, Path, int]] = []
-    for manifest_path in root.glob("*/analytics/filtered/*/manifest.json"):
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        cache_dir = manifest_path.parent
-        entries.append((str(manifest.get("last_used_at") or manifest.get("created_at") or ""), cache_dir, _dir_size(cache_dir)))
-    total = sum(size for _, _, size in entries)
-    if total <= max_bytes:
-        return
-    import shutil
-
-    for _, cache_dir, size in sorted(entries):
-        if total <= max_bytes:
-            break
-        shutil.rmtree(cache_dir, ignore_errors=True)
-        total -= size
-
-
-def _analytics_cache_limit() -> int:
-    return _storage_policy_int("max_filtered_cache_entries_per_run", _ANALYTICS_CACHE_LIMIT, minimum=1)
-
-
-def _analytics_cache_max_bytes_per_run() -> int:
-    return _storage_policy_int("max_analytics_cache_bytes_per_run", 2 * 1024 * 1024 * 1024, minimum=1)
-
-
-def _analytics_cache_max_total_bytes() -> int:
-    return _storage_policy_int("max_total_cache_bytes", 10 * 1024 * 1024 * 1024, minimum=1)
-
-
-def _storage_policy_int(key: str, default: int, *, minimum: int = 0) -> int:
-    config_path = ROOT / "configs" / "execution_limits.yaml"
-    if config_path.is_file():
-        try:
-            doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-            policy = doc.get("storage_policy") if isinstance(doc, dict) else {}
-            return max(minimum, int((policy or {}).get(key) or default))
-        except (OSError, TypeError, ValueError, yaml.YAMLError):
-            return default
-    return default
-
-
-def _dir_size(path: Path) -> int:
-    if path.is_file():
-        try:
-            return path.stat().st_size
-        except OSError:
-            return 0
-    total = 0
-    if not path.is_dir():
-        return 0
-    for item in path.rglob("*"):
-        if item.is_file():
-            try:
-                total += item.stat().st_size
-            except OSError:
-                pass
-    return total
+    cache_engine.prune_run_filtered_cache(_run_dir(run_id) / "analytics" / "filtered", entry_limit=_ANALYTICS_CACHE_LIMIT, runs_root=DATA / "runs")
 
 
 def _utc_now() -> str:
@@ -1804,20 +1698,9 @@ def metric_ranking_from_rows(
     if not _metric_supported(metric, custom_metric_defs, rows):
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
-    ranked = []
     visible_metrics = _visible_metrics(rows, custom_metric_defs)
-    for row in sort_metric_rows(rows, metric):
-        item = {
-            "author_id": row["author_id"],
-            "author_display_name": row["author_display_name"],
-            "score": _as_float(row.get(metric)),
-        }
-        for field in visible_metrics:
-            item[field] = row.get(field)
-        ranked.append(item)
-    _assign_competition_rank(ranked, "score", "rank_competition")
+    visible_rows, total_rows = ranking_engine.build_metric_ranking_rows(rows, metric, visible_metrics, limit=limit, max_limit=max_limit)
     requested_limit = max(0, min(int(limit or 0), max(1, int(max_limit))))
-    visible_rows = ranked if requested_limit <= 0 else ranked[:requested_limit]
     fields = ["rank_competition", "author_display_name", "score", *visible_metrics, "author_id"]
     return {
         "table": "filtered_rating",
@@ -1831,7 +1714,7 @@ def metric_ranking_from_rows(
         "dump_id": scope["dump_id"],
         "fields": fields,
         "rows": visible_rows,
-        "total": len(ranked),
+        "total": total_rows,
         "limit": requested_limit,
         "offset": 0,
         "custom_metrics": custom_metrics.metric_catalog(custom_metric_defs),
@@ -1887,8 +1770,8 @@ def metric_distribution_from_rows(
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     values = sorted(_as_float(row.get(metric)) for row in rows)
-    summary = _describe(values)
-    summary["histogram"] = _histogram(values, bins=8)
+    summary = distribution_engine.describe(values)
+    summary["histogram"] = distribution_engine.histogram(values, bins=8)
     summary["run_id"] = scope["run_id"]
     summary["dump_id"] = scope["dump_id"]
     summary["metric_scope"] = "filtered_recomputed"
@@ -2030,6 +1913,10 @@ def filter_rows_by_author_ids(rows: list[dict[str, Any]], author_ids: set[str] |
     return [row for row in rows if str(row.get("author_id") or "") in allowed]
 
 
+def sort_metric_rows(rows: list[dict[str, Any]], metric: str) -> list[dict[str, Any]]:
+    return ranking_engine.sort_metric_rows(rows, metric)
+
+
 def read_json_doc(name: str, *, run_id: str = "") -> dict[str, Any] | None:
     if run_id:
         path = _run_json_path(run_id, name)
@@ -2157,31 +2044,10 @@ def work_detail(
     }
 
 
-def _registered_fields(conn: duckdb.DuckDBPyConnection, table: str) -> list[str]:
-    try:
-        return [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
-    except duckdb.Error:
-        return []
-
-
-def _select_existing_sql(fields: list[str], preferred: tuple[str, ...], *, alias: str = "") -> str:
-    selected = [field for field in preferred if field in fields] or list(fields)
-    prefix = f"{alias}." if alias else ""
-    return ", ".join(f"{prefix}{field}" for field in selected)
-
-
-def _order_sql(fields: list[str], preferred: tuple[str, ...], *, alias: str = "", direction: str = "ASC") -> str:
-    selected = [field for field in preferred if field in fields]
-    if not selected:
-        return ""
-    prefix = f"{alias}." if alias else ""
-    safe_direction = "DESC" if str(direction).upper() == "DESC" else "ASC"
-    return "ORDER BY " + ", ".join(f"{prefix}{field} {safe_direction}" for field in selected)
-
-
-def _records(result: duckdb.DuckDBPyConnection) -> list[dict[str, Any]]:
-    columns = [desc[0] for desc in result.description]
-    return [dict(zip(columns, row)) for row in result.fetchall()]
+_registered_fields = table_engine.registered_fields
+_select_existing_sql = table_engine.select_existing_sql
+_order_sql = table_engine.order_sql
+_records = table_engine.records
 
 
 def _clean_filters(filters: FilterSet) -> FilterSet:
@@ -2313,73 +2179,6 @@ def _short_openalex_id(value: Any) -> str:
     return text.rsplit("/", 1)[-1]
 
 
-def _describe(values: list[float]) -> dict[str, Any]:
-    if not values:
-        return {"n": 0, "min": 0, "q1": 0, "median": 0, "mean": 0, "q3": 0, "p90": 0, "max": 0, "stddev": 0}
-    mean = sum(values) / len(values)
-    if len(values) > 1:
-        variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
-    else:
-        variance = 0.0
-    return {
-        "n": len(values),
-        "min": values[0],
-        "q1": _quantile(values, 0.25),
-        "median": _quantile(values, 0.50),
-        "mean": mean,
-        "q3": _quantile(values, 0.75),
-        "p90": _quantile(values, 0.90),
-        "max": values[-1],
-        "stddev": variance**0.5,
-    }
-
-
-def _quantile(values: list[float], q: float) -> float:
-    if not values:
-        return 0.0
-    if len(values) == 1:
-        return values[0]
-    pos = (len(values) - 1) * q
-    lower = int(pos)
-    upper = min(lower + 1, len(values) - 1)
-    weight = pos - lower
-    return values[lower] * (1 - weight) + values[upper] * weight
-
-
-def _histogram(values: list[float], bins: int) -> list[dict[str, Any]]:
-    if not values:
-        return []
-    low = min(values)
-    high = max(values)
-    if high == low:
-        return [{"label": f"{low:.3g}", "min": low, "max": high, "count": len(values)}]
-    width = (high - low) / bins
-    counts = [0] * bins
-    for value in values:
-        index = min(int((value - low) / width), bins - 1)
-        counts[index] += 1
-    return [
-        {
-            "label": f"{low + width * i:.3g}-{low + width * (i + 1):.3g}",
-            "min": low + width * i,
-            "max": low + width * (i + 1),
-            "count": count,
-        }
-        for i, count in enumerate(counts)
-    ]
-
-
-def _assign_competition_rank(rows: list[dict[str, Any]], score_field: str, rank_field: str) -> None:
-    previous_score: float | None = None
-    previous_rank = 0
-    for index, row in enumerate(rows, start=1):
-        score = _as_float(row.get(score_field))
-        if previous_score is None or score != previous_score:
-            previous_rank = index
-            previous_score = score
-        row[rank_field] = previous_rank
-
-
 def _as_float(value: Any) -> float:
     try:
         if value in (None, ""):
@@ -2436,56 +2235,6 @@ def _first_nonempty(values: Any) -> str | None:
     return None
 
 
-def _safe_id(value: str) -> str:
-    return "".join(ch if ch.isalnum() or ch in "_.-" else "_" for ch in str(value).strip())[:140] or "artifact"
-
-
-def _run_dir(run_id: str) -> Path:
-    return DATA / "runs" / _safe_id(run_id)
-
-
-def _dump_table_path(dump_id: str, table: str) -> Path:
-    return DATA / "tables" / _safe_id(_resolve_dump_id(dump_id)) / f"{table}.parquet"
-
-
-def _resolve_dump_id(dump_id: str) -> str:
-    raw = str(dump_id or "").strip()
-    if not raw:
-        return ""
-    safe = _safe_id(raw)
-    if (DATA / "tables" / safe).exists() or (DATA / "dumps" / safe).exists():
-        return raw
-    if not safe.startswith("dump_"):
-        candidate = f"dump_{safe}"
-        if (DATA / "tables" / candidate).exists() or (DATA / "dumps" / candidate).exists():
-            return candidate
-    return raw
-
-
-def _run_table_path(run_id: str, table: str) -> Path | None:
-    run_dir = _run_dir(run_id)
-    candidates: list[Path] = []
-    for suffix in (".parquet", ".csv"):
-        candidates.append(run_dir / "tables" / f"{table}{suffix}")
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _run_json_path(run_id: str, name: str) -> Path | None:
-    run_dir = _run_dir(run_id)
-    mapped = RUN_JSON_DOCS.get(name)
-    if mapped:
-        path = run_dir / mapped[0] / mapped[1]
-        if path.exists():
-            return path
-    fallback = run_dir / "passports" / f"{name}.json"
-    if fallback.exists():
-        return fallback
-    return None
-
-
 def _run_metric_params(run_id: str) -> dict[str, Any]:
     defaults = {"analysis_year": 2026, "lrdi_p0": 5.0, "lrdi_lambda": 0.15, "source": "defaults"}
     candidates: list[tuple[Path, str]] = []
@@ -2510,38 +2259,3 @@ def _run_metric_params(run_id: str) -> dict[str, Any]:
     if run_id:
         defaults["source"] = "defaults_missing_run_calculation_passport"
     return defaults
-
-
-def _dump_id_for_run(run_id: str) -> str:
-    path = _run_dir(run_id) / "metric_run.json"
-    if not path.is_file():
-        return ""
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return ""
-    return str(doc.get("input_dump_id") or doc.get("dump_id") or "")
-
-
-def _recent_run_for_dump(dump_id: str) -> str:
-    target = _safe_id(_resolve_dump_id(str(dump_id or "")))
-    if not target:
-        return ""
-    best_run_id = ""
-    best_mtime = -1.0
-    for metric_run in (DATA / "runs").glob("run_*/metric_run.json"):
-        try:
-            doc = json.loads(metric_run.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        run_dump_id = _safe_id(_resolve_dump_id(str(doc.get("input_dump_id") or doc.get("dump_id") or "")))
-        if run_dump_id != target:
-            continue
-        try:
-            mtime = metric_run.stat().st_mtime
-        except OSError:
-            mtime = 0.0
-        if mtime >= best_mtime:
-            best_mtime = mtime
-            best_run_id = metric_run.parent.name
-    return best_run_id

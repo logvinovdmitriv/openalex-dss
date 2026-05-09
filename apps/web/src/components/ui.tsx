@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from "@tanstack/react-table";
 import type { CellContext, SortingState } from "@tanstack/react-table";
 import type { TableColumnFilter, TableColumnFilters, TableResponse } from "../api";
 import { columnLabel, countryLabel, fmt, languageLabel, modeLabel, metricLabel, sourceTypeLabel, workTypeLabel } from "../domain";
+
+export function Field({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="field"><span>{label}</span>{children}</div>;
+}
 
 export function DataGrid({
   data,

@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from app.core.paths import DATA
+from app.services import metric_registry
 
 
-BASE_NUMERIC_FIELDS = {
+BASE_NUMERIC_FIELDS = metric_registry.computed_metric_ids() | {
     "p",
     "c",
     "c_frac",

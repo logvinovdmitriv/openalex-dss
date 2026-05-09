@@ -25,7 +25,8 @@ def test_workbench_uses_scope_and_data_selection_hooks() -> None:
 
 def test_formula_and_tooltip_ui_stay_in_dedicated_components() -> None:
     main = (ROOT / "apps/web/src/WorkbenchApp.tsx").read_text(encoding="utf-8")
+    formula_component = (ROOT / "apps/web/src/features/formulas/FormulaBuilder.tsx").read_text(encoding="utf-8")
     assert "FormulaBuilderDialog" in main
-    assert "formula-builder" in main
-    assert "InfoPopover" in main
-    assert "modal-backdrop" in main
+    assert "formula-builder" in formula_component
+    assert "MetricInfoPopover" in formula_component
+    assert "modal-backdrop" in formula_component
