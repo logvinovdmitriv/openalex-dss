@@ -9,8 +9,8 @@ for path in (ROOT / "apps/api", ROOT / "src"):
         sys.path.insert(0, str(path))
 
 from app.api.query_contracts import AnalysisFilterQuery, DataSelectionQuery, ScopeQuery
-from app.application import scientometric_workflow
-from app.domain.scientometric_contract import DataSelectionPolicy, RankingUseCase, ScopedAnalysisContext
+from app.application import decision_support_workflow, scientometric_workflow
+from app.domain.scientometric_contract import DataSelectionPolicy, MetricModel, RankingUseCase, ScopedAnalysisContext
 from app.services import catalog, distribution_engine, metric_registry, ranking_engine, workflow
 
 
@@ -100,3 +100,44 @@ def test_application_layer_rejects_unscoped_analytics_before_storage() -> None:
         assert "выбранный расчет или локальный срез" in str(exc)
     else:
         raise AssertionError("unscoped analytics must fail at the application boundary")
+
+
+def test_decision_support_workflow_wraps_ready_ranking_use_case() -> None:
+    use_case = RankingUseCase(
+        context=ScopedAnalysisContext(run_id="run_1", dump_id="dump_1"),
+        primary_metric="h",
+        fraction_mode="strict_authors_count",
+        data_selection=DataSelectionPolicy.from_kwargs(data_search="Ivanov", data_limit=10),
+        metric_models=(MetricModel(id="custom_rating", label="Собственный рейтинг", expression="h + p"),),
+    )
+
+    case = decision_support_workflow.ranking_decision_case(use_case, candidate_ids=["a1", "a2"])
+    run = decision_support_workflow.ranking_decision_run(use_case, candidate_ids=case.candidates)
+    passport = decision_support_workflow.decision_passport(run, input_checksums={"indices": "abc"})
+    same_passport = decision_support_workflow.decision_passport(run, input_checksums={"indices": "abc"})
+
+    assert case.rule_profile_id == "scientometric_ranking"
+    assert case.context["run_id"] == "run_1"
+    assert case.context["dump_id"] == "dump_1"
+    assert case.context["primary_metric"] == "h"
+    assert case.candidates == ("a1", "a2")
+    assert run.input_artifacts["run_id"] == "run_1"
+    assert run.input_artifacts["dump_id"] == "dump_1"
+    assert passport.schema == "decision_passport"
+    assert passport.trace_hash == same_passport.trace_hash
+    assert passport.input_checksums == {"indices": "abc"}
+
+
+def test_decision_support_workflow_rejects_unscoped_case() -> None:
+    use_case = RankingUseCase(
+        context=ScopedAnalysisContext(),
+        primary_metric="h",
+        fraction_mode="strict_authors_count",
+    )
+
+    try:
+        decision_support_workflow.ranking_decision_case(use_case)
+    except ValueError as exc:
+        assert "выбранный расчет или локальный срез" in str(exc)
+    else:
+        raise AssertionError("decision-support scenarios must keep the scoped analysis contract")
