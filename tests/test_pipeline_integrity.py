@@ -605,6 +605,11 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertIsNone(updated["progress_percent"])
         self.assertEqual(updated["progress"]["download_percent"], 60)
         self.assertEqual(updated["progress"]["files_seen"], 10)
+        phases = {phase["id"]: phase for phase in updated["progress_phases"]}
+        self.assertEqual(phases["download"]["percent"], 60)
+        self.assertTrue(phases["download"]["determinate"])
+        self.assertIsNone(phases["pack"]["percent"])
+        self.assertFalse(phases["pack"]["determinate"])
 
     def test_repair_dump_progress_hands_off_to_compute_phase(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

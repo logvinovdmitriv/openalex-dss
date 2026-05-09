@@ -3996,10 +3996,26 @@ type RunPhase = {
   id: string;
   label: string;
   percent: number | null;
+  determinate: boolean;
   state: "pending" | "active" | "done" | "error";
 };
 
 function runProgressPhases(run: WorkbenchRun, details: Record<string, any>): RunPhase[] {
+  if (Array.isArray(run.progress_phases) && run.progress_phases.length > 0) {
+    return run.progress_phases.map((phase, index) => {
+      const state = String(phase.state ?? "pending");
+      const normalizedState: RunPhase["state"] = state === "active" || state === "done" || state === "error" ? state : "pending";
+      const rawPercent = typeof phase.percent === "number" ? Math.max(0, Math.min(100, Math.round(phase.percent))) : null;
+      const determinate = phase.determinate === true && rawPercent !== null;
+      return {
+        id: String(phase.id ?? `phase_${index}`),
+        label: String(phase.label ?? "Этап"),
+        percent: determinate ? rawPercent : null,
+        determinate,
+        state: normalizedState,
+      };
+    });
+  }
   const action = String(run.action ?? "");
   const status = String(run.status ?? "");
   const failed = status === "failed";
@@ -4014,6 +4030,7 @@ function runProgressPhases(run: WorkbenchRun, details: Record<string, any>): Run
     id,
     label,
     percent: completed ? 100 : phasePercent(percentValue),
+    determinate: completed || phasePercent(percentValue) !== null,
     state: failed ? "error" : completed ? "done" : currentStage.includes(label) ? "active" : "pending",
   });
   if (action === "build_from_openalex") {
@@ -4022,6 +4039,7 @@ function runProgressPhases(run: WorkbenchRun, details: Record<string, any>): Run
         id: "download",
         label: "Скачивание файлов",
         percent: completed ? 100 : phasePercent(details.download_percent),
+        determinate: completed || phasePercent(details.download_percent) !== null,
         state: failed ? "error" : completed ? "done" : queued ? "pending" : (currentStage.includes("Загрузка") ? "active" : "pending"),
       },
       phase("pack", "Упаковка среза", details.pack_percent),
@@ -4035,6 +4053,7 @@ function runProgressPhases(run: WorkbenchRun, details: Record<string, any>): Run
         id: "download",
         label: "Скачивание файлов",
         percent: completed ? 100 : phasePercent(details.download_percent),
+        determinate: completed || phasePercent(details.download_percent) !== null,
         state: failed ? "error" : completed ? "done" : queued ? "pending" : "active",
       },
       phase("pack", "Упаковка среза", details.pack_percent),
@@ -4063,10 +4082,10 @@ function PhaseBar({ phase }: { phase: RunPhase }) {
     <div className={`run-phase ${phase.state}`}>
       <div className="progress-meta">
         <span>{phase.label}</span>
-        <b>{phase.percent === null ? phaseStateLabel(phase.state) : `${phase.percent}%`}</b>
+        <b>{phase.determinate && phase.percent !== null ? `${phase.percent}%` : phaseStateLabel(phase.state)}</b>
       </div>
       <div className={`progress-track ${phase.state === "error" ? "error" : ""}`}>
-        <span className={phase.percent === null && phase.state === "active" ? "indeterminate" : ""} style={{ width: phase.percent === null ? (phase.state === "done" ? "100%" : "0%") : `${phase.percent}%` }} />
+        <span className={!phase.determinate && phase.state === "active" ? "indeterminate" : ""} style={{ width: phase.determinate && phase.percent !== null ? `${phase.percent}%` : (phase.state === "done" ? "100%" : "0%") }} />
       </div>
     </div>
   );

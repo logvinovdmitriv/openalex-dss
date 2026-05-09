@@ -154,6 +154,7 @@ export type WorkbenchRun = {
   status?: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed" | string;
   progress_percent?: number | null;
   progress_stage?: string;
+  progress_phases?: Array<{ id?: string; label?: string; state?: string; percent?: number | null; determinate?: boolean }>;
   error?: string | null;
   result?: Record<string, unknown> | null;
 };
@@ -427,8 +428,8 @@ export function progressForRun(run?: WorkbenchRun | null) {
   if (run.status === "running") return { percent: null as number | null, label: humanRunStage(run.progress_stage, run.status, run.action) };
   if (run.status === "cancelling") return { percent: null as number | null, label: "Остановка" };
   if (run.status === "completed") return { percent: 100, label: "Готово" };
-  if (run.status === "cancelled") return { percent: 100, label: "Остановлено" };
-  if (run.status === "failed") return { percent: 100, label: "Ошибка" };
+  if (run.status === "cancelled") return { percent: null as number | null, label: "Остановлено" };
+  if (run.status === "failed") return { percent: null as number | null, label: "Ошибка" };
   return { percent: null as number | null, label: run.status || "Ожидание" };
 }
 

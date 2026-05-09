@@ -133,6 +133,10 @@ def update_progress(run_id: str, percent: int | None, stage: str, extra: dict[st
     doc["progress_percent"] = None if percent is None else max(0, min(100, int(percent)))
     doc["progress_stage"] = stage
     doc["worker_heartbeat_at"] = _now()
+    if percent is not None:
+        phase_id = _phase_id_for_stage(str(doc.get("action") or ""), stage)
+        if phase_id:
+            doc.setdefault("progress", {})[f"{phase_id}_percent"] = doc["progress_percent"]
     if extra:
         doc.setdefault("progress", {}).update(extra)
     _save(doc)
@@ -217,6 +221,7 @@ def _save(doc: dict[str, Any]) -> None:
     run_id = str(doc["run_id"])
     path = _run_path(run_id)
     path.parent.mkdir(parents=True, exist_ok=True)
+    doc["progress_phases"] = _progress_phases(doc)
     payload = json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     with _file_lock(_lock_path(run_id)):
         tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
@@ -255,7 +260,88 @@ def _normalize_loaded_run(doc: dict[str, Any]) -> dict[str, Any]:
         )
         if run_id:
             _save(doc)
+    doc["progress_phases"] = _progress_phases(doc)
     return doc
+
+
+def _progress_phases(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    action = str(doc.get("action") or "")
+    status = str(doc.get("status") or "")
+    progress = doc.get("progress") if isinstance(doc.get("progress"), dict) else {}
+    stage = str(doc.get("progress_stage") or progress.get("stage") or "")
+
+    def percent(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return max(0, min(100, int(value)))
+        except (TypeError, ValueError):
+            return None
+
+    def phase(phase_id: str, label: str, value: Any = None, *stage_tokens: str) -> dict[str, Any]:
+        current_percent = percent(value)
+        if status == "completed":
+            state = "done"
+            current_percent = 100 if current_percent is not None else current_percent
+        elif status in {"failed", "cancelled"}:
+            state = "error"
+        elif status == "queued":
+            state = "pending"
+        elif any(token and token in stage for token in (label, *stage_tokens)):
+            state = "active"
+        else:
+            state = "pending"
+        return {
+            "id": phase_id,
+            "label": label,
+            "state": state,
+            "percent": current_percent,
+            "determinate": current_percent is not None,
+        }
+
+    if action == "build_from_openalex":
+        return [
+            phase("download", "Скачивание файлов", progress.get("download_percent"), "Загрузка"),
+            phase("pack", "Упаковка среза", progress.get("pack_percent"), "Упаковка", "Упаковано"),
+            phase("normalize", "Подготовка таблиц", progress.get("normalize_percent"), "Нормализация", "Подготовка таблиц"),
+            phase("compute", "Расчет индексов", progress.get("compute_percent"), "Расчет"),
+        ]
+    if action == "fetch_slice_dump":
+        return [
+            phase("download", "Скачивание файлов", progress.get("download_percent"), "Загрузка"),
+            phase("pack", "Упаковка среза", progress.get("pack_percent"), "Упаковка", "Упаковано"),
+        ]
+    if action == "repair_dump":
+        return [
+            phase("check", "Проверка файлов", progress.get("check_percent"), "Проверка"),
+            phase("pack", "Упаковка среза", progress.get("pack_percent"), "Упаковка", "Упаковано"),
+            phase("normalize", "Подготовка таблиц", progress.get("normalize_percent"), "Нормализация", "Подготовка таблиц"),
+            phase("compute", "Расчет индексов", progress.get("compute_percent"), "Расчет"),
+        ]
+    if action == "recalculate":
+        return [
+            phase("check", "Проверка таблиц", progress.get("check_percent"), "Проверка"),
+            phase("compute", "Расчет индексов", progress.get("compute_percent"), "Расчет"),
+            phase("report", "Паспорт и отчет", progress.get("report_percent"), "Паспорт", "Отчет"),
+        ]
+    return []
+
+
+def _phase_id_for_stage(action: str, stage: str) -> str:
+    text = str(stage or "")
+    if action in {"build_from_openalex", "fetch_slice_dump"} and "Загрузка" in text:
+        return "download"
+    if "Упаков" in text or "Упаковано" in text:
+        return "pack"
+    if "Нормализация" in text or "Подготовка таблиц" in text:
+        return "normalize"
+    if "Расчет" in text:
+        return "compute"
+    if "Проверка" in text:
+        return "check"
+    if "Паспорт" in text or "Отчет" in text:
+        return "report"
+    return ""
 
 
 def _spawn_worker(run_id: str) -> subprocess.Popen[bytes]:

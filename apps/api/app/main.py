@@ -160,10 +160,17 @@ def _validation_field_label(loc: Any) -> str:
     labels = {
         "limit": "Количество строк",
         "data_limit": "Количество строк в выбранной таблице",
+        "offset": "Начальная строка",
+        "min_cited_by_count": "Минимум цитирований",
+        "from_publication_date": "Дата начала",
+        "to_publication_date": "Дата окончания",
         "top_n": "Количество авторов",
         "rank_top_n": "Количество авторов для сравнения",
         "run_id": "Расчет",
         "dump_id": "Срез",
+        "kind": "Таблица данных",
+        "metric": "Показатель",
+        "fraction_mode": "Учет соавторов",
     }
     return labels.get(parts[-1], parts[-1]) if parts else ""
 
@@ -172,7 +179,11 @@ def _translate_validation_message(message: str) -> str:
     text = message.lower()
     if "greater than or equal" in text:
         return "значение меньше допустимого"
+    if "input should be greater than or equal" in text:
+        return "значение меньше допустимого"
     if "less than or equal" in text:
+        return "значение больше допустимого"
+    if "input should be less than or equal" in text:
         return "значение больше допустимого"
     if "field required" in text:
         return "обязательное поле не заполнено"
