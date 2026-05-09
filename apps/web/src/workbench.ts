@@ -98,6 +98,7 @@ export type EntitySuggestion = {
   country_code?: string;
   ror?: string;
   orcid?: string;
+  doi?: string;
   works_count?: number;
   cited_by_count?: number;
 };
@@ -148,6 +149,97 @@ export type DownloadPolicy = {
   allow_incomplete_preview: boolean;
 };
 
+export type EstimatePayload = {
+  decision?: {
+    status?: string;
+    strategy?: string;
+    can_execute?: boolean;
+    records_to_fetch?: number;
+    estimated_raw_mb?: number;
+    reasons?: string[];
+    warnings?: string[];
+    [key: string]: unknown;
+  };
+  estimate?: {
+    estimate_count?: number;
+    planned_records?: number;
+    api_requests_planned?: number;
+    estimated_cost_usd?: number;
+    estimated_cli_metadata_bytes?: number;
+    estimated_raw_bytes_p90?: number;
+    estimated_raw_bytes?: number;
+    estimated_selected_api_bytes?: number;
+    estimated_cli_metadata_mb?: number;
+    estimated_selected_api_mb?: number;
+    estimated_raw_mb?: number;
+    estimated_raw_mb_p90?: number;
+    estimated_parquet_mb?: number;
+    rate_limit?: { remaining?: number; limit?: number; [key: string]: unknown };
+    facets?: Record<string, { rows?: Array<{ key?: string; label?: string; count?: number }> }>;
+    [key: string]: unknown;
+  };
+  estimate_cache?: { status?: string; [key: string]: unknown };
+  [key: string]: unknown;
+};
+
+export type MaterializationPlanPayload = {
+  materialization_id?: string;
+  profile?: { label?: string; description?: string; [key: string]: unknown };
+  [key: string]: unknown;
+};
+
+export type WorkbenchSlice = SliceDefinitionPayload & {
+  slice_id?: string;
+  state?: string;
+  title?: string;
+  current_estimate?: EstimatePayload | null;
+  current_materialization_plan?: MaterializationPlanPayload | null;
+  [key: string]: unknown;
+};
+
+export type WorkbenchDump = {
+  dump_id?: string;
+  slice_id?: string;
+  title?: string;
+  slice_title?: string;
+  subject_name?: string;
+  records_downloaded?: number;
+  records_expected?: number;
+  bytes_written?: number;
+  raw_size_bytes?: number;
+  updated_at_utc?: string;
+  created_at_utc?: string;
+  created_at?: string;
+  health?: Record<string, unknown>;
+  storage_summary?: Record<string, unknown>;
+  storage?: Record<string, unknown>;
+  signatures?: Record<string, unknown>;
+  filters?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type RateLimitPayload = {
+  daily_remaining_usd?: number;
+  daily_budget_usd?: number;
+  [key: string]: unknown;
+};
+
+export type RegistryPayload = {
+  domain_presets?: Array<Record<string, unknown>>;
+  organization_presets?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+export type CatalogPayload = {
+  metrics?: Array<Record<string, unknown>>;
+  fraction_modes?: Array<Record<string, unknown>>;
+  storage_profiles?: Array<Record<string, unknown>>;
+  ui_options?: Record<string, unknown>;
+  data_sources?: Array<Record<string, unknown>>;
+  openalex_cli?: { api_key_configured?: boolean; [key: string]: unknown };
+  [key: string]: unknown;
+};
+
 export type WorkbenchRun = {
   run_id?: string;
   action?: string;
@@ -156,6 +248,7 @@ export type WorkbenchRun = {
   progress_stage?: string;
   progress_phases?: Array<{ id?: string; label?: string; state?: string; percent?: number | null; determinate?: boolean }>;
   error?: string | null;
+  payload?: Record<string, unknown> | null;
   result?: Record<string, unknown> | null;
 };
 
@@ -183,9 +276,9 @@ export type WorkbenchWorkflow = {
 
 export type WorkbenchState = {
   tables?: Record<string, { rows?: number }>;
-  slices?: Array<Record<string, unknown>>;
-  materializations?: Array<Record<string, unknown>>;
-  dumps?: Array<Record<string, unknown>>;
+  slices?: WorkbenchSlice[];
+  materializations?: MaterializationPlanPayload[];
+  dumps?: WorkbenchDump[];
   workflow?: WorkbenchWorkflow;
   quality?: Record<string, unknown>;
   active_context?: WorkbenchActiveContext;

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.providers import openalex_cli_provider
-from app.services import filesystem, metric_registry, registry, snapshot, warehouse, workflow
+from app.services import filesystem, metric_registry, registry, snapshot, workflow
 from openalex_dss.config import load_config
 
 
@@ -22,7 +22,6 @@ def system_catalog() -> dict[str, Any]:
         "metrics": metric_registry.catalog_metrics(),
         "native_metrics": native_metric_registry,
         "fraction_modes": FRACTION_MODES,
-        "tables": warehouse.list_tables(),
         "data_sources": config_registry.get("data_sources") or [],
         "ranking_profiles": ranking_profiles,
         "execution_limits": config_registry.get("execution_limits") or {},

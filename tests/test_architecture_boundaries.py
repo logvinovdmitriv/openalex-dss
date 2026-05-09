@@ -10,17 +10,26 @@ for path in (ROOT / "apps/api", ROOT / "src"):
 
 from app.api.query_contracts import AnalysisFilterQuery, DataSelectionQuery, ScopeQuery
 from app.application import scientometric_workflow
-from app.services import catalog, distribution_engine, metric_registry, ranking_engine
+from app.services import catalog, distribution_engine, metric_registry, ranking_engine, workflow
 
 
 def test_catalog_uses_shared_metric_registry() -> None:
     registry_metrics = metric_registry.catalog_metrics()
-    catalog_metrics = catalog.system_catalog()["metrics"]
+    system_catalog = catalog.system_catalog()
+    catalog_metrics = system_catalog["metrics"]
 
     assert catalog_metrics == registry_metrics
+    assert "tables" not in system_catalog
     assert registry_metrics
     assert all(item["id"] and item["label"] for item in registry_metrics)
     assert any(item.get("formula") or item.get("algorithm") for item in registry_metrics)
+
+
+def test_workflow_catalog_is_static_and_scoped_state_is_removed() -> None:
+    stage_ids = [item["id"] for item in workflow.STAGE_DEFINITIONS]
+
+    assert stage_ids == ["slice", "ingestion", "flatten", "indices", "analytics", "export"]
+    assert not hasattr(workflow, "state")
 
 
 def test_ranking_and_distribution_engines_keep_service_contracts() -> None:

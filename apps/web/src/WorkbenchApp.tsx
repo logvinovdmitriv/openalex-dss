@@ -52,26 +52,35 @@ import {
   mutationError,
   pageLead,
   pageTitle,
-  progressForRun,
   scientometricsUrl,
   dataSelectionQuery,
   customMetricDefsQuery,
   customMetricModelsUrl,
   sliceSubjectTitle,
   viewFromHash,
+  type CatalogPayload,
   type EntitySuggestion,
+  type EstimatePayload,
   type LocalDataKind,
   type LocalDataSummary,
+  type MaterializationPlanPayload,
+  type RateLimitPayload,
+  type RegistryPayload,
   type ResolverTab,
   type ScientometricAnalysisPayload,
   type ScientometricFinding,
+  type SliceDefinitionPayload,
   type View,
   type WorkbenchActiveContext,
+  type WorkbenchDump,
   type WorkbenchRun,
+  type WorkbenchSlice,
   type WorkbenchState,
 } from "./workbench";
 import { buildWorkflowNav, nextUnlockedNavIndex } from "./features/workflow/workflowNav";
+import { StatusRail } from "./features/workflow/StatusRail";
 import { DataRestrictionChips } from "./features/data/DataRestrictionChips";
+import { EstimateBudget, EstimateFacets, RateLimitPanel } from "./features/slices/EstimatePanels";
 import { DEFAULT_CUSTOM_METRICS } from "./features/formulas/defaultCustomMetrics";
 import { FormulaBuilderDialog, MetricInfoPopover, metricLabelFor } from "./features/formulas/FormulaBuilder";
 import { metricLabelMap as buildMetricLabelMap, rankingMetricOptions } from "./features/metrics/metricCatalog";
@@ -110,6 +119,9 @@ const DATA_ONLY_ANALYSIS_FILTERS: ActiveFilters = {
   to_publication_date: "",
   affiliation_mode: "",
 };
+type ListPayload<T = Record<string, unknown>> = {
+  results?: T[];
+};
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -139,16 +151,16 @@ function Workbench() {
   const [selectedAuthorIds, setSelectedAuthorIds] = useState<string[]>([]);
   const [sourceStrategy, setSourceStrategy] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [sliceDoc, setSliceDoc] = useState<any>(null);
-  const [estimate, setEstimate] = useState<any>(null);
-  const [materialization, setMaterialization] = useState<any>(null);
+  const [sliceDoc, setSliceDoc] = useState<WorkbenchSlice | null>(null);
+  const [estimate, setEstimate] = useState<EstimatePayload | null>(null);
+  const [materialization, setMaterialization] = useState<MaterializationPlanPayload | null>(null);
   const [runId, setRunId] = useState("");
   const [dumpId, setDumpId] = useState("");
   const [resolverOpen, setResolverOpen] = useState(false);
   const [selected, setSelected] = useState<{ kind: "author" | "work"; id: string } | null>(null);
   const [localDataKind, setLocalDataKind] = useState<LocalDataKind>("indices");
   const [dataColumnFilters, setDataColumnFilters] = useState<TableColumnFilters>({});
-  const [dumpInfo, setDumpInfo] = useState<any | null>(null);
+  const [dumpInfo, setDumpInfo] = useState<WorkbenchDump | null>(null);
   const navRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
@@ -177,23 +189,23 @@ function Workbench() {
     window.history.replaceState(null, "", `#${next}`);
   };
 
-  const registry = useQuery({ queryKey: ["registry"], queryFn: () => getJson<any>("/registry") });
-  const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => getJson<any>("/catalog") });
+  const registry = useQuery({ queryKey: ["registry"], queryFn: () => getJson<RegistryPayload>("/registry") });
+  const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => getJson<CatalogPayload>("/catalog") });
   const workbench = useQuery({ queryKey: ["workbench"], queryFn: () => getJson<WorkbenchState>("/workbench") });
-  const dumps = useQuery({ queryKey: ["dumps"], queryFn: () => getJson<any>("/dumps?limit=50") });
-  const countries = useQuery({ queryKey: ["countries"], queryFn: () => getJson<any>("/openalex/countries?limit=50") });
-  const workTypes = useQuery({ queryKey: ["work-types"], queryFn: () => getJson<any>("/openalex/work-types?limit=50") });
+  const dumps = useQuery({ queryKey: ["dumps"], queryFn: () => getJson<{ dumps?: WorkbenchDump[] }>("/dumps?limit=50") });
+  const countries = useQuery({ queryKey: ["countries"], queryFn: () => getJson<ListPayload>("/openalex/countries?limit=50") });
+  const workTypes = useQuery({ queryKey: ["work-types"], queryFn: () => getJson<ListPayload>("/openalex/work-types?limit=50") });
   const rateLimit = useQuery({
     queryKey: ["openalex-rate-limit", apiKey],
-    queryFn: () => getJson<any>(`/openalex/rate-limit?api_key=${encodeURIComponent(apiKey.trim())}`),
+    queryFn: () => getJson<RateLimitPayload>(`/openalex/rate-limit?api_key=${encodeURIComponent(apiKey.trim())}`),
     enabled: Boolean(apiKey.trim()),
   });
   const run = useQuery({
     queryKey: ["run", runId],
-    queryFn: () => getJson<any>(`/runs/${runId}`),
+    queryFn: () => getJson<WorkbenchRun>(`/runs/${runId}`),
     enabled: Boolean(runId),
     refetchInterval: (query) => {
-      const status = (query.state.data as any)?.status;
+      const status = query.state.data?.status;
       return status === "queued" || status === "running" || status === "cancelling" ? 1000 : false;
     },
   });
@@ -271,7 +283,7 @@ function Workbench() {
   const localDataKindKey = localDataKindOptions.map((item) => item.value).join("|");
   const localDataKindAvailable = localDataKindOptions.some((item) => item.value === localDataKind);
   const hasAvailableLocalTables = localDataKindOptions.length > 0;
-  const hasAuthorIndices = Boolean((localDataSummary.data?.tables as any)?.indices?.exists);
+  const hasAuthorIndices = Boolean(localDataSummary.data?.tables?.indices?.exists);
   const hasLocalAnalyticsData = scopeReady && hasAuthorIndices;
   const workflowNav = useMemo(() => buildWorkflowNav({
     view,
@@ -352,7 +364,7 @@ function Workbench() {
       fractionMode,
       dataFilters: dataColumnFilters,
     })),
-    enabled: scopeReady && Boolean((localDataSummary.data?.tables as any)?.indices?.exists),
+    enabled: scopeReady && Boolean(localDataSummary.data?.tables?.indices?.exists),
     placeholderData: (previous) => previous,
     staleTime: 60_000,
   });
@@ -376,7 +388,7 @@ function Workbench() {
   });
   const detail = useQuery({
     queryKey: ["detail", selected, effectiveRunId, effectiveDumpId],
-    queryFn: () => getJson<any>(
+    queryFn: () => getJson<Record<string, unknown>>(
       selected?.kind === "author"
         ? `/authors/${encodeURIComponent(selected.id)}?run_id=${encodeURIComponent(effectiveRunId)}&dump_id=${encodeURIComponent(effectiveDumpId)}`
         : `/works/${encodeURIComponent(selected?.id ?? "")}?run_id=${encodeURIComponent(effectiveRunId)}&dump_id=${encodeURIComponent(effectiveDumpId)}`,
@@ -392,7 +404,7 @@ function Workbench() {
   const workTypeOptions = catalogOptions(workTypes.data?.results ?? []).map((item) => ({ ...item, label: workTypeLabel(item.value) }));
   const storageProfileOptions = configuredOptions(catalog.data?.storage_profiles ?? []);
   const uiOptions = catalog.data?.ui_options ?? {};
-  const topNOptions = configuredOptions(uiOptions.top_n ?? []);
+  const topNOptions = configuredOptions((uiOptions.top_n ?? []) as Array<Record<string, unknown>>);
   const metricCatalogOptions = configuredOptions(catalog.data?.metrics ?? []);
   const primaryMetricOptions = rankingMetricOptions(metricCatalogOptions, CORE_METRIC_OPTIONS);
   const customMetricOptions: SelectOption[] = customMetrics.map((item) => ({
@@ -481,7 +493,7 @@ function Workbench() {
   }, [baselineMetric]);
 
   const createSlice = useMutation({
-    mutationFn: (body: any) => postJson<any>("/slices", body),
+    mutationFn: (body: SliceDefinitionPayload & { title?: string }) => postJson<WorkbenchSlice>("/slices", body),
     onSuccess: (doc) => {
       setSliceDoc(doc);
       qc.invalidateQueries({ queryKey: ["workbench"] });
@@ -489,9 +501,9 @@ function Workbench() {
   });
   const estimateSlice = useMutation({
     mutationFn: async (options: { refresh?: boolean } = {}) => {
-      const doc = await postJson<any>("/slices", { ...slicePayload, title: humanSliceTitle(filters) });
+      const doc = await postJson<WorkbenchSlice>("/slices", { ...slicePayload, title: humanSliceTitle(filters) });
       setSliceDoc(doc);
-      const result = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { download_policy: downloadPolicy, refresh_estimate: Boolean(options.refresh) });
+      const result = await postJson<EstimatePayload>(`/slices/${encodeURIComponent(doc.slice_id ?? "")}/estimate`, { download_policy: downloadPolicy, refresh_estimate: Boolean(options.refresh) });
       return { doc, result };
     },
     onSuccess: ({ doc, result }) => {
@@ -503,9 +515,10 @@ function Workbench() {
   });
   const createMaterialization = useMutation({
     mutationFn: async () => {
-      const doc = sliceDoc ?? (await postJson<any>("/slices", { ...slicePayload, title: humanSliceTitle(filters) }));
+      const doc = sliceDoc ?? (await postJson<WorkbenchSlice>("/slices", { ...slicePayload, title: humanSliceTitle(filters) }));
+      const sliceId = String(doc.slice_id ?? "");
       setSliceDoc(doc);
-      return postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy, download_dir: downloadDir.trim() || undefined });
+      return postJson<MaterializationPlanPayload>(`/slices/${encodeURIComponent(sliceId)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy, download_dir: downloadDir.trim() || undefined });
     },
     onSuccess: (plan) => {
       setMaterialization(plan);
@@ -515,7 +528,8 @@ function Workbench() {
   const runMaterialization = useMutation({
     mutationFn: async () => {
       const plan = materialization ?? (await createMaterialization.mutateAsync());
-      return postJson<any>(`/materializations/${encodeURIComponent(plan.materialization_id)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb));
+      const materializationId = String(plan.materialization_id ?? "");
+      return postJson<{ run?: WorkbenchRun }>(`/materializations/${encodeURIComponent(materializationId)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb));
     },
     onSuccess: (result) => {
       setApiKey("");
@@ -527,9 +541,9 @@ function Workbench() {
   });
   const downloadSlice = useMutation({
     mutationFn: async () => {
-      const doc = await postJson<any>("/slices", { ...slicePayload, title: humanSliceTitle(filters) });
+      const doc = await postJson<WorkbenchSlice>("/slices", { ...slicePayload, title: humanSliceTitle(filters) });
       setSliceDoc(doc);
-      const estimateResult = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { download_policy: downloadPolicy });
+      const estimateResult = await postJson<EstimatePayload>(`/slices/${encodeURIComponent(doc.slice_id ?? "")}/estimate`, { download_policy: downloadPolicy });
       setEstimate(estimateResult);
       setSliceDoc({ ...doc, current_estimate: estimateResult, state: "estimated" });
       const decision = estimateResult?.decision ?? {};
@@ -537,9 +551,10 @@ function Workbench() {
         const reason = [...(decision.reasons ?? []), ...(decision.warnings ?? [])].filter(Boolean).join(" ");
         throw new Error(reason || "OpenAlex не вернул работ для выбранных фильтров.");
       }
-      const plan = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy, download_dir: downloadDir.trim() || undefined });
+      const plan = await postJson<MaterializationPlanPayload>(`/slices/${encodeURIComponent(doc.slice_id ?? "")}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy, download_dir: downloadDir.trim() || undefined });
+      const materializationId = String(plan.materialization_id ?? "");
       setMaterialization(plan);
-      return postJson<any>(`/materializations/${encodeURIComponent(plan.materialization_id)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb));
+      return postJson<{ run?: WorkbenchRun }>(`/materializations/${encodeURIComponent(materializationId)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb));
     },
     onSuccess: (result) => {
       setApiKey("");
@@ -550,7 +565,7 @@ function Workbench() {
     },
   });
   const deleteDownloadedDump = useMutation({
-    mutationFn: (nextDumpId: string) => deleteJson<any>(`/dumps/${encodeURIComponent(nextDumpId)}`),
+    mutationFn: (nextDumpId: string) => deleteJson<{ deleted?: boolean }>(`/dumps/${encodeURIComponent(nextDumpId)}`),
     onSuccess: (_result, nextDumpId) => {
       if (dumpId === nextDumpId || effectiveDumpId === nextDumpId) {
         setDumpId("");
@@ -561,7 +576,7 @@ function Workbench() {
     },
   });
   const selectDownloadedDumpRemote = useMutation({
-    mutationFn: (nextDumpId: string) => postJson<any>(`/dumps/${encodeURIComponent(nextDumpId)}/select`, {}),
+    mutationFn: (nextDumpId: string) => postJson<{ associated_run_id?: string; active_context?: WorkbenchActiveContext; dump?: WorkbenchDump }>(`/dumps/${encodeURIComponent(nextDumpId)}/select`, {}),
     onSuccess: (result, nextDumpId) => {
       const nextRunId = String(result?.associated_run_id ?? result?.active_context?.active_run_id ?? "");
       const selectedDumpId = String(result?.dump?.dump_id ?? result?.active_context?.active_dump_id ?? nextDumpId);
@@ -575,7 +590,7 @@ function Workbench() {
     },
   });
   const repairDownloadedDump = useMutation({
-    mutationFn: (nextDumpId: string) => postJson<any>(`/dumps/${encodeURIComponent(nextDumpId)}/repair`, {}),
+    mutationFn: (nextDumpId: string) => postJson<{ run?: WorkbenchRun & { payload?: Record<string, unknown> }; dump?: WorkbenchDump }>(`/dumps/${encodeURIComponent(nextDumpId)}/repair`, {}),
     onSuccess: (result) => {
       const nextRunId = String(result?.run?.run_id ?? "");
       const nextDumpId = String(result?.dump?.dump_id ?? result?.run?.payload?.dump_id ?? "");
@@ -592,7 +607,7 @@ function Workbench() {
       if (!effectiveDumpId) {
         throw new Error("Для пересчета индексов нужен выбранный локальный срез.");
       }
-      return postJson<any>("/runs", {
+      return postJson<WorkbenchRun>("/runs", {
         action: "recalculate",
         payload: {
           dump_id: effectiveDumpId,
@@ -601,20 +616,20 @@ function Workbench() {
       });
     },
     onSuccess: (result) => {
-      setRunId(result.run_id);
+      setRunId(String(result.run_id ?? ""));
       setDumpId("");
       navigate("rankings");
     },
   });
   const cancelRun = useMutation({
-    mutationFn: (nextRunId: string) => postJson<any>(`/runs/${encodeURIComponent(nextRunId)}/cancel`, {}),
+    mutationFn: (nextRunId: string) => postJson<WorkbenchRun>(`/runs/${encodeURIComponent(nextRunId)}/cancel`, {}),
     onSuccess: (result) => {
       setRunId(String(result?.run_id ?? runId));
       qc.invalidateQueries({ queryKey: ["run", result?.run_id ?? runId] });
     },
   });
   const buildReport = useMutation({
-    mutationFn: () => postJson<any>(`/reports/build?${filterParams(analysisFilters, {
+    mutationFn: () => postJson<Record<string, unknown>>(`/reports/build?${filterParams(analysisFilters, {
       metric,
       fraction_mode: fractionMode,
       run_id: runId,
@@ -635,9 +650,9 @@ function Workbench() {
     }).toString()}`, {}),
     onSuccess: () => qc.invalidateQueries(),
   });
-  const selectDownloadedDump = (dump: any) => {
+  const selectDownloadedDump = (dump: WorkbenchDump) => {
     const nextDumpId = String(dump?.dump_id ?? "");
-    const slice = (workbench.data?.slices ?? []).find((item: any) => String(item.slice_id ?? "") === String(dump?.slice_id ?? ""));
+    const slice = (workbench.data?.slices ?? []).find((item) => String(item.slice_id ?? "") === String(dump?.slice_id ?? ""));
     if (slice) {
       setSliceDoc(slice);
       setFilters(filtersFromSlicePayload((slice?.technical_payload ?? {}) as Record<string, unknown>, filters));
@@ -978,8 +993,8 @@ function SlicesPage({
   workTypeOptions: SelectOption[];
   onOpenResolver: () => void;
   onEstimate: (refresh?: boolean) => void;
-  estimate: any;
-  materialization: any;
+  estimate: EstimatePayload | null | undefined;
+  materialization: MaterializationPlanPayload | null | undefined;
   downloadDir: string;
   setDownloadDir: (value: string) => void;
   maxDownloadMb: string;
@@ -994,17 +1009,17 @@ function SlicesPage({
   effectiveDumpId: string;
   onSelect: (value: { kind: "author" | "work"; id: string }) => void;
   onApplyToSlice: (tab: PointLookupTab, item: EntitySuggestion) => void;
-  rateLimit: any;
+  rateLimit: RateLimitPayload | null | undefined;
   onRun: () => void;
   onCancelRun: () => void;
   estimating: boolean;
   materializing: boolean;
   downloadConfigReady: boolean;
-  run: any;
-  sliceDoc: any;
-  downloadedDumps: any[];
-  onSelectDownloadedDump: (dump: any) => void;
-  onShowDumpInfo: (dump: any) => void;
+  run: WorkbenchRun | undefined;
+  sliceDoc: WorkbenchSlice | null;
+  downloadedDumps: WorkbenchDump[];
+  onSelectDownloadedDump: (dump: WorkbenchDump) => void;
+  onShowDumpInfo: (dump: WorkbenchDump) => void;
   onRepairDownloadedDump: (dumpId: string) => void;
   onDeleteDownloadedDump: (dumpId: string) => void;
   deletingDumpId: string;
@@ -1016,11 +1031,11 @@ function SlicesPage({
   const selectedWorkTypes = splitValues(filters.work_type);
   const visibleWorkTypeOptions = ensureWorkTypeOptions(workTypeOptions.length ? workTypeOptions : [], selectedWorkTypes);
   const decision = estimate?.decision ?? {};
-  const rawEstimate = estimate?.estimate ?? {};
+  const rawEstimate = estimate?.estimate ?? null;
   const estimateCache = estimate?.estimate_cache ?? {};
   const hasEstimate = Boolean(estimate);
   const canRun = hasEstimate && decision.can_execute !== false;
-  const noDataEstimate = hasEstimate && (decision.status === "no_data" || Number(rawEstimate.estimate_count ?? 0) === 0);
+  const noDataEstimate = hasEstimate && (decision.status === "no_data" || Number(rawEstimate?.estimate_count ?? 0) === 0);
   const emptyEstimateValue = hasEstimate ? "0" : "—";
   const apiKeyReady = Boolean(apiKey.trim()) || backendCliApiKeyConfigured;
   const sliceRows = buildDownloadedSliceRows(downloadedDumps).slice(0, 20);
@@ -1166,16 +1181,16 @@ function SlicesPage({
           <button onClick={() => onEstimate(true)} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} {estimating ? "Оцениваем..." : "Обновить оценку"}</button>
         </div>
         <div className="metric-grid">
-          <MetricCard label="Работ найдено" value={hasEstimate ? fmt(rawEstimate.estimate_count ?? 0) : "—"} />
-          <MetricCard label="Полный срез / к загрузке" value={hasEstimate ? `${fmt(rawEstimate.estimate_count ?? 0)} / ${fmt(decision.records_to_fetch ?? rawEstimate.planned_records ?? 0)}` : "—"} />
-          <MetricCard label="API-запросов" value={hasEstimate ? fmt(decision.api_requests_planned ?? rawEstimate.api_requests_planned ?? 0) : "—"} />
-          <MetricCard label="Прогноз загрузки" value={hasEstimate ? `${fmt(rawEstimate.estimated_cli_metadata_mb ?? decision.estimated_raw_mb ?? rawEstimate.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
-          <MetricCard label="Прогноз предпросмотра" value={hasEstimate ? `${fmt(rawEstimate.estimated_selected_api_mb ?? rawEstimate.estimated_raw_mb ?? 0)}–${fmt(rawEstimate.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
-          <MetricCard label="Parquet прогноз" value={hasEstimate ? `${fmt(rawEstimate.estimated_parquet_mb ?? 0)} МБ` : emptyEstimateValue} />
+          <MetricCard label="Работ найдено" value={hasEstimate ? fmt(rawEstimate?.estimate_count ?? 0) : "—"} />
+          <MetricCard label="Полный срез / к загрузке" value={hasEstimate ? `${fmt(rawEstimate?.estimate_count ?? 0)} / ${fmt(decision.records_to_fetch ?? rawEstimate?.planned_records ?? 0)}` : "—"} />
+          <MetricCard label="API-запросов" value={hasEstimate ? fmt(decision.api_requests_planned ?? rawEstimate?.api_requests_planned ?? 0) : "—"} />
+          <MetricCard label="Прогноз загрузки" value={hasEstimate ? `${fmt(rawEstimate?.estimated_cli_metadata_mb ?? decision.estimated_raw_mb ?? rawEstimate?.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
+          <MetricCard label="Прогноз предпросмотра" value={hasEstimate ? `${fmt(rawEstimate?.estimated_selected_api_mb ?? rawEstimate?.estimated_raw_mb ?? 0)}–${fmt(rawEstimate?.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
+          <MetricCard label="Parquet прогноз" value={hasEstimate ? `${fmt(rawEstimate?.estimated_parquet_mb ?? 0)} МБ` : emptyEstimateValue} />
           <MetricCard label="Кэш оценки" value={hasEstimate ? estimateCacheLabel(String(estimateCache.status ?? "")) : "—"} />
         </div>
         <EstimateBudget estimate={rawEstimate} decision={decision} />
-        <EstimateFacets facets={rawEstimate.facets} />
+        <EstimateFacets facets={rawEstimate?.facets} />
         <div className={canRun ? "notice success" : noDataEstimate ? "notice warn" : hasEstimate ? "notice error" : "notice"}>
           <b>{canRun ? "План можно использовать" : noDataEstimate ? "По текущим фильтрам работ не найдено" : hasEstimate ? "План нужно уточнить" : "Сначала оцените объем"}</b>
           <span>
@@ -1266,12 +1281,12 @@ type UnifiedSliceRow = {
   repairAction?: string;
   sliceId: string;
   dumpIds: string[];
-  slice?: any;
-  materialization?: any;
-  dump?: any;
+  slice?: WorkbenchSlice;
+  materialization?: MaterializationPlanPayload;
+  dump?: WorkbenchDump;
 };
 
-function buildDownloadedSliceRows(downloadedDumps: any[]): UnifiedSliceRow[] {
+function buildDownloadedSliceRows(downloadedDumps: WorkbenchDump[]): UnifiedSliceRow[] {
   return downloadedDumps
     .map((dump, index) => {
       const dumpId = String(dump?.dump_id ?? "").trim();
@@ -1304,7 +1319,7 @@ function buildDownloadedSliceRows(downloadedDumps: any[]): UnifiedSliceRow[] {
     .sort((left, right) => left.title.localeCompare(right.title, "ru"));
 }
 
-function dumpHealth(dump: any): { status: string; label: string; tone: "ok" | "warn" | "error" | "info"; reason?: string; repairAction?: string } {
+function dumpHealth(dump: WorkbenchDump): { status: string; label: string; tone: "ok" | "warn" | "error" | "info"; reason?: string; repairAction?: string } {
   const health = dump?.health ?? {};
   const status = String(health.status ?? "").trim();
   const label = String(health.label ?? "").trim();
@@ -1318,10 +1333,11 @@ function dumpHealth(dump: any): { status: string; label: string; tone: "ok" | "w
   return { status: status || "downloaded", label: "скачан", tone: "ok", reason };
 }
 
-function downloadedSliceTitle(dump: any) {
+function downloadedSliceTitle(dump: WorkbenchDump) {
   const title = String(dump?.title ?? dump?.slice_title ?? "").trim();
   if (title) return title;
-  const subject = String(dump?.subject_name ?? dump?.filters?.subject_name ?? "").trim();
+  const filters = (dump?.filters ?? {}) as Record<string, unknown>;
+  const subject = String(dump?.subject_name ?? filters.subject_name ?? "").trim();
   const period = [dump?.from_publication_date, dump?.to_publication_date].map((item) => String(item ?? "").trim()).filter(Boolean).join("–");
   const dumpId = String(dump?.dump_id ?? "").trim();
   return [subject || "Локальный срез", period, dumpId ? dumpId.replace(/^dump_/, "") : ""].filter(Boolean).join(" · ");
@@ -1338,12 +1354,13 @@ function materializationRunPayload(apiKey: string, downloadDir: string, maxDownl
   return payload;
 }
 
-function activeRepairDumpId(run: any, pendingDumpId: unknown) {
+function activeRepairDumpId(run: WorkbenchRun | undefined, pendingDumpId: unknown) {
   const pending = String(pendingDumpId ?? "");
   const status = String(run?.status ?? "");
   const action = String(run?.action ?? "");
   if (action !== "repair_dump" || !["queued", "running", "cancelling"].includes(status)) return pending;
-  return String(run?.payload?.dump_id ?? pending);
+  const payload = (run as { payload?: Record<string, unknown> } | undefined)?.payload ?? {};
+  return String(payload.dump_id ?? pending);
 }
 
 function ArtifactChoice({
@@ -1411,12 +1428,12 @@ function ArtifactChoice({
   );
 }
 
-function DumpInfoModal({ dump, onClose }: { dump: any; onClose: () => void }) {
+function DumpInfoModal({ dump, onClose }: { dump: WorkbenchDump; onClose: () => void }) {
   const health = dumpHealth(dump);
-  const request = dump?.openalex_request ?? {};
-  const storage = dump?.storage_plan ?? {};
-  const storageSummary = dump?.storage ?? {};
-  const signatures = dump?.signatures ?? {};
+  const request = (dump?.openalex_request ?? {}) as Record<string, unknown>;
+  const storage = (dump?.storage_plan ?? {}) as Record<string, unknown>;
+  const storageSummary = (dump?.storage ?? {}) as Record<string, unknown>;
+  const signatures = (dump?.signatures ?? {}) as Record<string, unknown>;
   const rawPath = String(dump?.raw_jsonl ?? "");
   const manifestPath = String(dump?.dump_manifest ?? dump?.manifest_path ?? "");
   const filter = String(request?.filter ?? dump?.openalex_filter ?? "");
@@ -1542,7 +1559,7 @@ function LocalDataPage({
   pageSize: number;
   table?: TableResponse;
   csvUrl: string;
-  run: any;
+  run?: WorkbenchRun;
   running: boolean;
   activeContext?: WorkbenchActiveContext;
   usingActiveContextScope: boolean;
@@ -1552,7 +1569,7 @@ function LocalDataPage({
   onSelect: (value: { kind: "author" | "work"; id: string }) => void;
 }) {
   const missingScope = localDataMissingScopeState({ runId: effectiveRunId, dumpId: effectiveDumpId, activeContext });
-  const availableTables = Object.values(localDataSummary?.tables ?? {}).filter((entry: any) => Boolean(entry?.exists));
+  const availableTables = (Object.values(localDataSummary?.tables ?? {}) as Array<Record<string, unknown>>).filter((entry) => Boolean(entry.exists));
   const hasAvailableTables = localDataKindOptions.length > 0;
   const hasTableRestrictions = Boolean(Object.keys(dataColumnFilters).length || dataSearch.trim() || dataSort || dataDirection !== "desc");
   const hasDataRestrictions = hasTableRestrictions || selectedAuthorIds.length > 0;
@@ -1589,7 +1606,7 @@ function LocalDataPage({
     <div className="stack">
       {availableTables.length > 0 && (
         <section className="metric-grid">
-          {availableTables.map((entry: any) => (
+          {availableTables.map((entry) => (
             <MetricCard key={String(entry.kind)} label={String(entry.label || entry.kind)} value={fmt(entry.rows ?? 0)} />
           ))}
         </section>
@@ -1811,7 +1828,7 @@ function SliceEntityLookup({
   }[tab];
   const lookup = useQuery({
     queryKey: ["slice-entity-lookup", tab, query.trim()],
-    queryFn: () => getJson<any>(`${endpoint}?q=${encodeURIComponent(query.trim())}&limit=10`),
+    queryFn: () => getJson<ListPayload<EntitySuggestion>>(`${endpoint}?q=${encodeURIComponent(query.trim())}&limit=10`),
     enabled: query.trim().length >= 2,
   });
   const results = (lookup.data?.results ?? []) as EntitySuggestion[];
@@ -1863,7 +1880,7 @@ function SliceEntityLookup({
             <button key={`${tab}-${item.openalex_id}-${item.id}-${item.name}`} type="button" onClick={() => selectPoint(item)}>
               <b>{item.name}</b>
               <span>{item.level_label ?? item.level ?? ""} {item.works_count ? `· ${fmt(item.works_count)} работ` : ""} {item.cited_by_count ? `· ${fmt(item.cited_by_count)} цитирований` : ""}</span>
-              <small>{item.openalex_id ?? item.id} {item.ror ? `· ROR: ${item.ror}` : ""} {item.orcid ? `· ORCID: ${item.orcid}` : ""} {(item as any).doi ? `· DOI: ${(item as any).doi}` : ""}</small>
+              <small>{item.openalex_id ?? item.id} {item.ror ? `· ROR: ${item.ror}` : ""} {item.orcid ? `· ORCID: ${item.orcid}` : ""} {item.doi ? `· DOI: ${item.doi}` : ""}</small>
             </button>
           ))}
         </div>
@@ -1875,7 +1892,7 @@ function SliceEntityLookup({
           <div className="materialization-card">
             <b>{picked.name}</b>
             <span>{picked.level_label ?? picked.level ?? "OpenAlex entity"}</span>
-            <small>{picked.openalex_id ?? picked.id} {picked.ror ? `· ROR: ${picked.ror}` : ""} {picked.orcid ? `· ORCID: ${picked.orcid}` : ""} {(picked as any).doi ? `· DOI: ${(picked as any).doi}` : ""}</small>
+            <small>{picked.openalex_id ?? picked.id} {picked.ror ? `· ROR: ${picked.ror}` : ""} {picked.orcid ? `· ORCID: ${picked.orcid}` : ""} {picked.doi ? `· DOI: ${picked.doi}` : ""}</small>
           </div>
         )}
       </section>
@@ -1889,7 +1906,7 @@ function applyEntityToCurrentSlice(
   navigate: (view: View) => void,
 ) {
   const id = String(item.openalex_id || item.id || "").trim();
-  const doi = String((item as any).doi || "").trim();
+  const doi = String(item.doi || "").trim();
   const patch: Partial<ActiveFilters> = {};
   if (tab === "author" && id) {
     patch.author_id = id;
@@ -2982,7 +2999,7 @@ function ResolverDialog({ filters, setFilters, onClose }: { filters: ActiveFilte
   }[tab];
   const suggestions = useQuery({
     queryKey: ["resolver", tab, query],
-    queryFn: () => getJson<any>(`${endpoint}?q=${encodeURIComponent(query)}&limit=10`),
+    queryFn: () => getJson<ListPayload<EntitySuggestion>>(`${endpoint}?q=${encodeURIComponent(query)}&limit=10`),
     enabled: query.trim().length >= 2 || tab === "subject",
   });
   const results = (suggestions.data?.results ?? []) as EntitySuggestion[];
@@ -3095,91 +3112,6 @@ function WorkTypePicker({ options, selected, onChange }: { options: SelectOption
   );
 }
 
-function RateLimitPanel({ rateLimit, apiKeySet, estimate }: { rateLimit: any; apiKeySet: boolean; estimate: any }) {
-  const headerLimit = estimate?.rate_limit ?? {};
-  const dailyRemaining = rateLimit?.daily_remaining_usd;
-  const dailyBudget = rateLimit?.daily_budget_usd;
-  const estimatedCost = estimate?.estimated_cost_usd;
-  return (
-    <div className="metric-grid">
-      <MetricCard label="Ключ OpenAlex" value={apiKeySet ? "задан" : "не задан"} />
-      <MetricCard label="Остаток OpenAlex" value={dailyRemaining !== undefined ? `$${fmt(dailyRemaining)}` : headerLimit.remaining !== undefined ? fmt(headerLimit.remaining) : "нет данных"} />
-      <MetricCard label="Дневной лимит" value={dailyBudget !== undefined ? `$${fmt(dailyBudget)}` : headerLimit.limit !== undefined ? fmt(headerLimit.limit) : "нет данных"} />
-      <MetricCard label="Стоимость оценки" value={estimatedCost !== undefined ? `$${fmt(estimatedCost)}` : "нет данных"} />
-    </div>
-  );
-}
-
-function EstimateBudget({ estimate, decision }: { estimate: any; decision: any }) {
-  const p90 = Number(estimate?.estimated_cli_metadata_bytes ?? estimate?.estimated_raw_bytes_p90 ?? estimate?.estimated_raw_bytes ?? 0);
-  const avg = Number(estimate?.estimated_selected_api_bytes ?? estimate?.estimated_raw_bytes ?? 0);
-  if (!avg && !p90) return null;
-  const baseline = Math.max(avg, p90, 1);
-  const avgPct = Math.min(100, Math.round((avg / baseline) * 100));
-  const p90Pct = Math.min(100, Math.round((p90 / baseline) * 100));
-  return (
-    <div className="estimate-budget">
-      <div className="progress-meta">
-        <span>Прогноз: предпросмотр {fmt(bytesToMb(avg))} МБ, загрузка {fmt(bytesToMb(p90))} МБ</span>
-        <b>{decision?.status ?? "estimate"}</b>
-      </div>
-      <div className="budget-track" aria-label={`Средний прогноз ${avgPct}%, p90 ${p90Pct}%`}>
-        <span className="budget-avg" style={{ width: `${avgPct}%` }} />
-        <span className="budget-p90" style={{ width: `${p90Pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function EstimateFacets({ facets }: { facets: any }) {
-  const groups = [
-    { key: "publication_years", title: "Годы публикаций" },
-    { key: "work_types", title: "Типы публикаций" },
-    { key: "countries", title: "Страны аффилиаций" },
-  ];
-  if (!facets || groups.every((group) => !(facets[group.key]?.rows ?? []).length)) return null;
-  return (
-    <div className="facet-grid">
-      {groups.map((group) => (
-        <FacetBars key={group.key} title={group.title} rows={facets[group.key]?.rows ?? []} />
-      ))}
-    </div>
-  );
-}
-
-function FacetBars({ title, rows }: { title: string; rows: Array<{ key?: string; label?: string; count?: number }> }) {
-  const cleanRows = rows.filter((row) => row.label || row.key).slice(0, 8);
-  const max = Math.max(1, ...cleanRows.map((row) => Number(row.count ?? 0)));
-  return (
-    <section className="facet-card">
-      <b>{title}</b>
-      {cleanRows.length === 0 && <small>Нет данных предпросмотра</small>}
-      {cleanRows.map((row) => {
-        const count = Number(row.count ?? 0);
-        return (
-          <div className="facet-row" key={`${row.key ?? row.label}`}>
-            <span>{row.label || row.key}</span>
-            <i><em style={{ width: `${Math.max(2, Math.round((count / max) * 100))}%` }} /></i>
-            <strong>{fmt(count)}</strong>
-          </div>
-        );
-      })}
-    </section>
-  );
-}
-
-function StatusRail({ state, run, running }: { state: any; run: any; running: boolean }) {
-  const tables = state?.tables ?? {};
-  const progress = progressForRun(run);
-  return (
-    <div className="status-rail">
-      <span><Database size={15} /> Работы: {fmt(tables?.works?.rows ?? 0)}</span>
-      <span><Sigma size={15} /> Авторы: {fmt(tables?.indices?.rows ?? 0)}</span>
-      <span><Gauge size={15} /> {running ? (progress.percent === null ? progress.label : `${progress.label} · ${progress.percent}%`) : run?.status ?? state?.workflow?.active_stage ?? "idle"}</span>
-    </div>
-  );
-}
-
 type SubjectSelection = {
   id: string;
   name: string;
@@ -3213,7 +3145,7 @@ function SubjectInput({
   const queryText = draft.trim();
   const suggestions = useQuery({
     queryKey: ["subject-input", queryText],
-    queryFn: () => getJson<any>(`/openalex/subjects?q=${encodeURIComponent(queryText)}&limit=12`),
+    queryFn: () => getJson<ListPayload<EntitySuggestion>>(`/openalex/subjects?q=${encodeURIComponent(queryText)}&limit=12`),
     enabled: queryText.length >= 2,
   });
   const localOptions = useMemo(() => subjectPresetOptions(presets), [presets]);
@@ -3305,7 +3237,7 @@ function OrganizationInput({
   const queryText = draft.trim();
   const suggestions = useQuery({
     queryKey: ["organization-input", queryText],
-    queryFn: () => getJson<any>(`/openalex/institutions?q=${encodeURIComponent(queryText)}&limit=12`),
+    queryFn: () => getJson<ListPayload<EntitySuggestion>>(`/openalex/institutions?q=${encodeURIComponent(queryText)}&limit=12`),
     enabled: queryText.length >= 2,
   });
   const localOptions = useMemo(() => organizationPresetOptions(presets), [presets]);
@@ -3631,12 +3563,19 @@ function splitValues(value: string) {
   return value.split("|").map((item) => item.trim()).filter(Boolean);
 }
 
-function extractDumpId(run: any) {
+function extractDumpId(run?: WorkbenchRun) {
+  const result = run?.result ?? {};
+  const build = (result.build ?? {}) as Record<string, unknown>;
+  const fetch = (result.fetch ?? {}) as Record<string, unknown>;
+  const archive = (result.archive ?? {}) as Record<string, unknown>;
+  const analysisEligibility = (result.analysis_eligibility ?? {}) as Record<string, unknown>;
+  const buildArchive = (build.archive ?? {}) as Record<string, unknown>;
+  const fetchDump = (fetch.dump ?? {}) as Record<string, unknown>;
   return String(
-    run?.result?.analysis_eligibility?.dump_id
-    ?? run?.result?.build?.archive?.dump_id
-    ?? run?.result?.fetch?.dump?.dump_id
-    ?? run?.result?.archive?.dump_id
+    analysisEligibility.dump_id
+    ?? buildArchive.dump_id
+    ?? fetchDump.dump_id
+    ?? archive.dump_id
     ?? "",
   ).trim();
 }
