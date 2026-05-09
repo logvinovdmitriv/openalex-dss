@@ -36,7 +36,8 @@ export function RunCard({ run }: { run: WorkbenchRun }) {
   const plannedBytes = Number(details.estimated_raw_bytes ?? 0);
   const currentBytes = Number(details.bytes_written ?? 0);
   const forecastExceeded = plannedBytes > 0 && currentBytes > plannedBytes;
-  const filesSeenLabel = `${details.files_seen_capped ? "не менее " : ""}${fmt(details.files_seen)} файлов OpenAlex`;
+  const filesSeenCapped = details.files_seen_capped === true || (downloadingExternalFiles && Number(details.files_seen ?? 0) >= 5000);
+  const filesSeenLabel = `${filesSeenCapped ? "не менее " : ""}${fmt(details.files_seen)} файлов OpenAlex`;
   const live = runLiveState(run);
   const phases = runProgressPhases(run, details);
   return (
@@ -64,13 +65,13 @@ export function RunCard({ run }: { run: WorkbenchRun }) {
           {details.page_count ? <span>{fmt(details.page_count)} страниц</span> : null}
           {details.files_seen ? <span>{filesSeenLabel}</span> : null}
           {hasFilesCounter ? <span>{fmt(bytesToMb(details.bytes_written ?? 0))} МБ на диске</span> : null}
-          {plannedBytes > 0 ? <span>Прогноз загрузки: {fmt(bytesToMb(plannedBytes))} МБ</span> : null}
+          {plannedBytes > 0 ? <span>Ориентир загрузки: {fmt(bytesToMb(plannedBytes))} МБ</span> : null}
           {details.elapsed_seconds ? <span>{formatElapsed(details.elapsed_seconds)}</span> : null}
         </div>
       )}
       {forecastExceeded && (
         <div className="run-warning">
-          Фактический размер временных файлов уже выше прогноза. Это возможно для загрузчика OpenAlex: он сначала сохраняет файловые части, а точное число работ и итоговый размер появляются после упаковки.
+          Фактический размер временных файлов уже выше ориентира. Это возможно для загрузчика OpenAlex: он сначала сохраняет файловые части, а точное число работ и итоговый размер появляются после упаковки. Если нужен жесткий предел, задайте лимит размера перед новой загрузкой.
         </div>
       )}
       {run.error && <small>{run.error}</small>}
