@@ -92,6 +92,27 @@ class LocalDataRouteTests(unittest.TestCase):
             include_total=False,
         )
 
+    def test_local_data_schema_returns_backend_column_contract(self) -> None:
+        with (
+            patch.object(local_data.warehouse, "table_exists", return_value=True),
+            patch.object(
+                local_data.warehouse,
+                "table_column_schema",
+                return_value=[
+                    {"field": "p", "label": "Публикации", "type": "number", "sortable": True, "filterable": True},
+                    {"field": "author_display_name", "label": "Автор", "type": "text", "sortable": True, "filterable": True},
+                ],
+            ) as table_column_schema,
+        ):
+            payload = local_data.local_data_schema(kind="indices", run_id="run_a", dump_id="dump_a")
+
+        self.assertEqual(payload["kind"], "indices")
+        self.assertEqual(payload["label"], "Авторы и индексы")
+        self.assertEqual(payload["columns"][0]["field"], "p")
+        self.assertEqual(payload["columns"][0]["type"], "number")
+        self.assertEqual(payload["scope_status"], "explicit_scope")
+        table_column_schema.assert_called_once_with("indices", run_id="run_a", dump_id="dump_a")
+
     def test_local_data_preview_zero_limit_uses_safe_preview_page(self) -> None:
         with (
             patch.object(local_data.warehouse, "table_exists", return_value=True),

@@ -15,6 +15,27 @@ export type TableResponse = {
   warnings?: string[];
 };
 
+export type TableColumnSchema = {
+  field: string;
+  label: string;
+  description?: string;
+  type: "text" | "number" | "boolean" | "date" | string;
+  physical_type?: string;
+  sortable?: boolean;
+  filterable?: boolean;
+};
+
+export type TableSchemaResponse = {
+  kind: string;
+  label: string;
+  columns: TableColumnSchema[];
+  run_id?: string;
+  dump_id?: string;
+  scope_status?: string;
+  reproducible?: boolean;
+  warnings?: string[];
+};
+
 export type TableColumnFilter = {
   contains?: string;
   min?: string;

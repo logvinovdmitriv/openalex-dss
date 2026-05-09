@@ -573,6 +573,13 @@ export function localDataSummaryUrl(runId = "", dumpId = "") {
   return `/local-data/summary${query ? `?${query}` : ""}`;
 }
 
+export function localDataSchemaUrl(kind: LocalDataKind, runId = "", dumpId = "") {
+  const params = new URLSearchParams({ kind });
+  if (runId) params.set("run_id", runId);
+  if (dumpId) params.set("dump_id", dumpId);
+  return `/local-data/schema?${params.toString()}`;
+}
+
 export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number; offset?: number; sort?: string; direction?: string; fractionMode?: string; dataFilters?: TableColumnFilters } = {}) {
   const query = new URLSearchParams({ kind });
   if (params.q?.trim()) query.set("q", params.q.trim());

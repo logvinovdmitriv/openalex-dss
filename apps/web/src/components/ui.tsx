@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { createPortal } from "react-dom";
 import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from "@tanstack/react-table";
 import type { CellContext, SortingState } from "@tanstack/react-table";
-import { CheckCircle2, Download } from "lucide-react";
-import type { TableColumnFilter, TableColumnFilters, TableResponse } from "../api";
+import { CheckCircle2, Download, ListFilter } from "lucide-react";
+import type { TableColumnFilter, TableColumnFilters, TableColumnSchema, TableResponse } from "../api";
 import { columnLabel, countryLabel, fmt, languageLabel, modeLabel, metricLabel, sourceTypeLabel, workTypeLabel } from "../domain";
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -50,6 +50,7 @@ export function DataGrid({
   enableColumnFilters = false,
   columnFilters,
   onColumnFiltersChange,
+  columnSchema = [],
   fieldLabels = {},
 }: {
   data?: TableResponse;
@@ -66,6 +67,7 @@ export function DataGrid({
   enableColumnFilters?: boolean;
   columnFilters?: TableColumnFilters;
   onColumnFiltersChange?: (value: TableColumnFilters) => void;
+  columnSchema?: TableColumnSchema[];
   fieldLabels?: Record<string, string>;
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -74,6 +76,7 @@ export function DataGrid({
   const [columnMenuPosition, setColumnMenuPosition] = useState<ColumnMenuPosition | null>(null);
   const columnMenuRef = useRef<HTMLDivElement | null>(null);
   const fields = (data?.fields ?? []).filter((field) => !hiddenFields.includes(field));
+  const columnSchemaByField = useMemo(() => new Map(columnSchema.map((column) => [column.field, column])), [columnSchema]);
   const rows = data?.rows ?? [];
   const selectedSet = useMemo(() => new Set(selectedIds.map(String)), [selectedIds.join("|")]);
   const effectiveColumnFilters = columnFilters ?? localColumnFilters;
@@ -195,25 +198,30 @@ export function DataGrid({
             )}
             {hg.headers.map((h) => {
               const field = String(h.column.id);
+              const schema = columnSchemaByField.get(field);
               const active = hasColumnFilter(effectiveColumnFilters[field]) || sortField === field;
               return (
               <th key={h.id} className={active ? "column-active" : undefined}>
                 <div className="table-header-controls">
-                  <button type="button" className="table-sort-button" onClick={() => toggleSort(field)} aria-label={`Сортировать столбец ${String(h.column.columnDef.header)}`}>
+                  <button type="button" className="table-sort-button" disabled={schema?.sortable === false} onClick={() => toggleSort(field)} aria-label={`Сортировать столбец ${String(h.column.columnDef.header)}`}>
                     <span>{flexRender(h.column.columnDef.header, h.getContext())}</span>
                     <SortMark value={sortField === field ? sortDirection : h.column.getIsSorted()} />
                   </button>
-                  <button type="button" className="column-filter-button" onClick={(event) => toggleColumnMenu(field, event.currentTarget.getBoundingClientRect())} aria-label={`Фильтр столбца ${String(h.column.columnDef.header)}`}>
-                    {hasColumnFilter(effectiveColumnFilters[String(h.column.id)]) ? <span className="filter-mark" aria-label="Есть ограничение">●</span> : "⋯"}
-                  </button>
+                  {enableColumnFilters && schema?.filterable !== false && (
+                    <button type="button" className="column-filter-button" onClick={(event) => toggleColumnMenu(field, event.currentTarget.getBoundingClientRect())} aria-label={`Фильтр столбца ${String(h.column.columnDef.header)}`}>
+                      <ListFilter size={14} />
+                      {hasColumnFilter(effectiveColumnFilters[String(h.column.id)]) && <span className="filter-mark" aria-label="Есть ограничение" />}
+                    </button>
+                  )}
                 </div>
                 {openColumn === String(h.column.id) && (
                   <ColumnMenu
                     menuRef={columnMenuRef}
                     field={String(h.column.id)}
                     label={String(h.column.columnDef.header)}
+                    description={schema?.description ?? ""}
                     filter={effectiveColumnFilters[String(h.column.id)] ?? {}}
-                    numeric={rows.some((row) => isFiniteTableNumber((row as Record<string, unknown>)[String(h.column.id)]))}
+                    type={schema?.type ?? (rows.some((row) => isFiniteTableNumber((row as Record<string, unknown>)[String(h.column.id)])) ? "number" : "text")}
                     enableFilters={enableColumnFilters}
                     position={columnMenuPosition}
                     onSort={applySort}
@@ -293,8 +301,9 @@ function ColumnMenu({
   menuRef,
   field,
   label,
+  description,
   filter,
-  numeric,
+  type,
   enableFilters,
   position,
   onSort,
@@ -305,8 +314,9 @@ function ColumnMenu({
   menuRef: RefObject<HTMLDivElement | null>;
   field: string;
   label: string;
+  description: string;
   filter: TableColumnFilter;
-  numeric: boolean;
+  type: string;
   enableFilters: boolean;
   position: ColumnMenuPosition | null;
   onSort: (field: string, direction: "asc" | "desc") => void;
@@ -320,14 +330,17 @@ function ColumnMenu({
   return createPortal(
     <div ref={menuRef} className={`column-menu ${position?.placement ?? "bottom"}`} style={style} role="dialog" aria-label={`Настройка столбца ${label}`}>
       <div className="column-menu-head">
-        <b>{label}</b>
+        <div>
+          <b>{label}</b>
+          {description && <small>{description}</small>}
+        </div>
         <button type="button" className="icon-mini" onClick={onClose} aria-label="Закрыть">×</button>
       </div>
       <button type="button" onClick={() => onSort(field, "asc")}>По возрастанию</button>
       <button type="button" onClick={() => onSort(field, "desc")}>По убыванию</button>
       {enableFilters && (
         <div className="column-filter-form">
-          {numeric ? (
+          {type === "number" ? (
             <>
               <label>
                 <span>От</span>

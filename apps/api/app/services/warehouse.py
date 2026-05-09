@@ -14,7 +14,7 @@ from typing import Any, Iterator
 import duckdb
 
 from app.core.paths import DATA, SRC, TABLE_KINDS, WAREHOUSE
-from app.services import cache_engine, custom_metrics, distribution_engine, ranking_engine, storage_paths, table_engine
+from app.services import cache_engine, custom_metrics, distribution_engine, metric_registry, ranking_engine, storage_paths, table_engine
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -151,6 +151,52 @@ FilterSet = dict[str, Any]
 _ROW_COUNT_CACHE: dict[str, tuple[int, int, int]] = {}
 _LAST_ANALYTICS_CACHE_INFO: dict[str, Any] = {"status": "not_used", "key": "", "rows": 0}
 
+_COLUMN_LABELS: dict[str, str] = {
+    "run_id": "ID расчета",
+    "dump_id": "ID среза",
+    "fraction_mode": "Учет вклада авторов",
+    "author_id": "ID автора",
+    "author_display_name": "Автор",
+    "work_id": "ID работы",
+    "display_name": "Название",
+    "doi": "DOI",
+    "type": "Тип публикации",
+    "publication_year": "Год",
+    "publication_date": "Дата публикации",
+    "cited_by_count": "Цитирования",
+    "source_display_name": "Источник",
+    "primary_topic_display_name": "Основная тема",
+    "author_seq": "Позиция автора",
+    "country_codes_csv": "Страны автора",
+    "institution_ids_csv": "Организации автора",
+    "institution_display_names_csv": "Организации автора",
+    "raw_affiliation_strings_csv": "Аффилиации как в источнике",
+    "authors_count_used": "Авторов учтено",
+    "credit_weight": "Доля вклада",
+    "cited_credit": "Долевые цитирования",
+    "single_authored_flag": "Один автор",
+    "qf_any": "Есть предупреждение качества",
+    "qf_authorship_truncated": "Список авторов обрезан",
+    "n_flagged_works": "Работ с предупреждениями",
+    "n_truncated_works": "Работ с обрезанным авторством",
+    "metric_name": "Показатель",
+    "rank_competition": "Место",
+    "rank_dense": "Место без пропусков",
+    "score": "Значение",
+}
+
+_COLUMN_DESCRIPTIONS: dict[str, str] = {
+    "author_id": "Внутренний идентификатор автора OpenAlex.",
+    "author_display_name": "Имя автора из локального среза.",
+    "work_id": "Идентификатор работы OpenAlex.",
+    "publication_year": "Год публикации работы.",
+    "cited_by_count": "Количество цитирований работы в OpenAlex.",
+    "credit_weight": "Доля вклада автора в публикацию в выбранном режиме учета.",
+    "cited_credit": "Цитирования публикации, умноженные на долю вклада автора.",
+    "qf_any": "Признак предупреждения качества для строки автор-работа.",
+    "qf_authorship_truncated": "Признак того, что список авторов публикации был обрезан источником.",
+}
+
 def connect_scope(*, run_id: str = "", dump_id: str = "") -> duckdb.DuckDBPyConnection:
     WAREHOUSE.parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(":memory:")
@@ -258,6 +304,70 @@ def table_schema(table: str, *, run_id: str = "", dump_id: str = "") -> list[str
         return []
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
         return [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
+
+
+def table_column_schema(table: str, *, run_id: str = "", dump_id: str = "") -> list[dict[str, Any]]:
+    if not table_exists(table, run_id=run_id, dump_id=dump_id):
+        return []
+    metric_by_id = {str(item.get("id")): item for item in metric_registry.catalog_metrics()}
+    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
+        rows = conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+    schema: list[dict[str, Any]] = []
+    for row in rows:
+        field = str(row[1])
+        physical_type = str(row[2] or "")
+        metric = metric_by_id.get(field)
+        label = str(metric.get("label") or "") if metric else ""
+        description = str(metric.get("warning") or metric.get("formula") or metric.get("algorithm") or "") if metric else ""
+        schema.append(
+            {
+                "field": field,
+                "label": label or _COLUMN_LABELS.get(field) or _humanize_field(field),
+                "description": description or _COLUMN_DESCRIPTIONS.get(field, ""),
+                "type": _filter_type_for_duckdb_type(physical_type, field),
+                "physical_type": physical_type,
+                "sortable": True,
+                "filterable": True,
+            }
+        )
+    return schema
+
+
+def _filter_type_for_duckdb_type(physical_type: str, field: str) -> str:
+    upper = physical_type.upper()
+    if upper in {"BOOLEAN", "BOOL"} or field.endswith("_flag") or field.startswith("qf_"):
+        return "boolean"
+    if any(token in upper for token in ("INT", "DOUBLE", "FLOAT", "DECIMAL", "NUMERIC", "REAL", "HUGEINT", "UBIGINT", "UINTEGER", "USMALLINT", "UTINYINT")):
+        return "number"
+    if "DATE" in upper or "TIMESTAMP" in upper or field.endswith("_date"):
+        return "date"
+    return "text"
+
+
+def _humanize_field(field: str) -> str:
+    words = {
+        "id": "ID",
+        "author": "автор",
+        "authors": "авторы",
+        "work": "работа",
+        "works": "работы",
+        "topic": "тема",
+        "field": "область",
+        "source": "источник",
+        "display": "отображаемое",
+        "name": "название",
+        "count": "число",
+        "cited": "цитирования",
+        "publication": "публикация",
+        "year": "год",
+        "mode": "режим",
+        "rank": "место",
+        "score": "значение",
+        "fraction": "доля",
+    }
+    parts = [words.get(part, part) for part in str(field or "").replace("_csv", "").split("_") if part]
+    text = " ".join(parts)
+    return text[:1].upper() + text[1:] if text else field
 
 
 def query_table(

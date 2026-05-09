@@ -46,6 +46,25 @@ def local_data_summary(run_id: str = "", dump_id: str = "") -> dict[str, Any]:
     return _annotate_local_data_payload(payload, run_id=run_id, dump_id=dump_id)
 
 
+@router.get("/local-data/schema")
+def local_data_schema(kind: str, run_id: str = "", dump_id: str = "") -> dict[str, Any]:
+    table = _local_data_kind(kind)
+    _require_local_data_scope(run_id=run_id, dump_id=dump_id)
+    _require_existing_table(table, run_id=run_id, dump_id=dump_id)
+    try:
+        columns = warehouse.table_column_schema(table, run_id=run_id, dump_id=dump_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    payload = {
+        "kind": table,
+        "label": LOCAL_DATA_KINDS[table],
+        "columns": columns,
+        "run_id": run_id,
+        "dump_id": dump_id,
+    }
+    return _annotate_local_data_payload(payload, run_id=run_id, dump_id=dump_id)
+
+
 @router.get("/local-data/preview")
 def local_data_preview(
     kind: str,

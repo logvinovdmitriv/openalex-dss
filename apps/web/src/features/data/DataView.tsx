@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Loader2 } from "lucide-react";
-import type { TableColumnFilters, TableResponse } from "../../api";
+import type { TableColumnFilters, TableResponse, TableSchemaResponse } from "../../api";
 import { RunCard } from "../../components/JobProgress";
 import { DataGrid, EmptyState, Field, MetricCard } from "../../components/ui";
 import { fmt, type SelectOption } from "../../domain";
@@ -32,6 +32,8 @@ type DataViewProps = {
   setDataOffset: (value: number) => void;
   pageSize: number;
   table?: TableResponse;
+  tableSchema?: TableSchemaResponse;
+  tableLoading?: boolean;
   csvUrl: string;
   run?: WorkbenchRun;
   running: boolean;
@@ -62,6 +64,8 @@ export function DataView({
   setDataOffset,
   pageSize,
   table,
+  tableSchema,
+  tableLoading = false,
   csvUrl,
   run,
   running,
@@ -110,6 +114,11 @@ export function DataView({
     setDataDirection("desc");
     setSelectedAuthorIds([]);
   };
+  const schemaColumns = tableSchema?.columns ?? [];
+  const fieldLabels = useMemo(
+    () => Object.fromEntries(schemaColumns.map((column) => [column.field, column.label])),
+    [schemaColumns],
+  );
 
   return (
     <div className="stack">
@@ -222,6 +231,11 @@ export function DataView({
           />
         ) : (
           <>
+            <div className="table-status-row">
+              <span>{tableLoading ? "Применяются параметры таблицы..." : "Сортировка и ограничения применяются на сервере ко всему выбранному срезу."}</span>
+              {!totalExact && <span>Точное число строк не считается, чтобы таблица отвечала быстрее.</span>}
+            </div>
+            {tableLoading && <div className="table-loading-line" aria-label="Обновление таблицы" />}
             <DataGrid
               data={table}
               onSelect={onSelect}
@@ -235,6 +249,8 @@ export function DataView({
               enableColumnFilters
               columnFilters={dataColumnFilters}
               onColumnFiltersChange={setDataColumnFilters}
+              columnSchema={schemaColumns}
+              fieldLabels={fieldLabels}
               selectableRows={localDataKind === "indices"}
               selectedIds={selectedAuthorIds}
               selectionField="author_id"

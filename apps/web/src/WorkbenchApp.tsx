@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { Area, Brush, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
-import { API_BASE, deleteJson, getJson, postJson, type CustomMetricDefinition, type TableColumnFilters, type TableResponse } from "./api";
+import { API_BASE, deleteJson, getJson, postJson, type CustomMetricDefinition, type TableColumnFilters, type TableResponse, type TableSchemaResponse } from "./api";
 import {
   DEFAULT_FILTERS,
   CORE_METRIC_OPTIONS,
@@ -44,6 +44,7 @@ import {
   humanSliceTitle,
   localDataPreviewCsvUrl,
   localDataPreviewUrl,
+  localDataSchemaUrl,
   localDataSummaryUrl,
   mutationError,
   pageLead,
@@ -200,7 +201,10 @@ function Workbench() {
   const dumps = useQuery({
     queryKey: ["dumps"],
     queryFn: () => getJson<{ dumps?: WorkbenchDump[] }>("/dumps?limit=50"),
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      const active = (query.state.data?.dumps ?? []).some((dump) => ["materializing", "downloading", "repairing", "partial"].includes(String(dump.status ?? "")));
+      return active ? 5000 : 30000;
+    },
     refetchOnWindowFocus: true,
   });
   const countries = useQuery({ queryKey: ["countries"], queryFn: () => getJson<ListPayload>("/openalex/countries?limit=50") });
@@ -346,6 +350,12 @@ function Workbench() {
     enabled: dataViewActive && scopeReady && localDataKindAvailable,
     placeholderData: (previous) => previous,
     staleTime: 60_000,
+  });
+  const tableSchema = useQuery({
+    queryKey: ["local-data-schema", localDataKind, effectiveRunId, effectiveDumpId],
+    queryFn: ({ signal }) => getJson<TableSchemaResponse>(localDataSchemaUrl(localDataKind, effectiveRunId, effectiveDumpId), { signal }),
+    enabled: dataViewActive && scopeReady && localDataKindAvailable,
+    staleTime: 5 * 60_000,
   });
   const ranking = useQuery({
     queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, debouncedDataSearch, debouncedDataFilterKey, dataSort, dataDirection, customMetricKey],
@@ -855,6 +865,8 @@ function Workbench() {
             setDataOffset={setDataOffset}
             pageSize={DATA_PREVIEW_PAGE_SIZE}
             table={table.data}
+            tableSchema={tableSchema.data}
+            tableLoading={table.isFetching || tableSchema.isFetching}
             csvUrl={`${API_BASE}${localDataPreviewCsvUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: 100_000, offset: 0, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })}`}
             run={run.data}
             running={running}

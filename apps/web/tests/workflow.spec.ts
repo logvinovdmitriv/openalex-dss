@@ -82,6 +82,19 @@ async function mockApi(page: Page, calls: string[] = []) {
         tables: { indices: { exists: true, rows: 2 }, works: { exists: true, rows: 2 } },
       });
     }
+    if (path === "/local-data/schema") {
+      return json({
+        kind: "indices",
+        label: "Авторы и индексы",
+        columns: [
+          { field: "author_display_name", label: "Автор", type: "text", sortable: true, filterable: true },
+          { field: "h", label: "Индекс Хирша", type: "number", sortable: true, filterable: true },
+          { field: "p", label: "Публикации", type: "number", sortable: true, filterable: true },
+          { field: "c", label: "Цитирования", type: "number", sortable: true, filterable: true },
+          { field: "author_id", label: "ID автора", type: "text", sortable: true, filterable: true },
+        ],
+      });
+    }
     if (path === "/local-data/preview") {
       return json(tablePayload("indices"));
     }
