@@ -571,10 +571,10 @@ function Workbench() {
     },
   });
   const estimateSlice = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (options: { refresh?: boolean } = {}) => {
       const doc = await postJson<any>("/slices", { ...slicePayload, title: humanSliceTitle(filters) });
       setSliceDoc(doc);
-      const result = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { download_policy: downloadPolicy });
+      const result = await postJson<any>(`/slices/${encodeURIComponent(doc.slice_id)}/estimate`, { download_policy: downloadPolicy, refresh_estimate: Boolean(options.refresh) });
       return { doc, result };
     },
     onSuccess: ({ doc, result }) => {
@@ -851,7 +851,7 @@ function Workbench() {
             countryOptions={countryOptions}
             workTypeOptions={workTypeOptions}
             onOpenResolver={() => setResolverOpen(true)}
-            onEstimate={() => estimateSlice.mutate()}
+            onEstimate={(refresh = false) => estimateSlice.mutate({ refresh })}
             estimate={estimate ?? sliceDoc?.current_estimate}
             materialization={materialization ?? sliceDoc?.current_materialization_plan}
             downloadDir={downloadDir}
@@ -1057,7 +1057,7 @@ function SlicesPage({
   countryOptions: SelectOption[];
   workTypeOptions: SelectOption[];
   onOpenResolver: () => void;
-  onEstimate: () => void;
+  onEstimate: (refresh?: boolean) => void;
   estimate: any;
   materialization: any;
   downloadDir: string;
@@ -1097,6 +1097,7 @@ function SlicesPage({
   const visibleWorkTypeOptions = ensureWorkTypeOptions(workTypeOptions.length ? workTypeOptions : [], selectedWorkTypes);
   const decision = estimate?.decision ?? {};
   const rawEstimate = estimate?.estimate ?? {};
+  const estimateCache = estimate?.estimate_cache ?? {};
   const hasEstimate = Boolean(estimate);
   const canRun = hasEstimate && decision.can_execute !== false;
   const noDataEstimate = hasEstimate && (decision.status === "no_data" || Number(rawEstimate.estimate_count ?? 0) === 0);
@@ -1219,7 +1220,7 @@ function SlicesPage({
           {dateInvalid && <div className="notice error"><b>Проверьте период</b><span>Дата начала не должна быть позже даты окончания.</span></div>}
         <div className="action-row">
           <button onClick={onOpenResolver}><Settings2 size={16} /> Тонкая настройка</button>
-          <button className="primary" onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} {estimating ? "Оцениваем..." : "Оценить объем"}</button>
+          <button className="primary" onClick={() => onEstimate(false)} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} {estimating ? "Оцениваем..." : "Оценить объем"}</button>
         </div>
         </section>
 
@@ -1242,7 +1243,7 @@ function SlicesPage({
             <h2>План локального среза</h2>
             <p>Система оценивает объем через OpenAlex API, а уже скачанные срезы выбираются без API. Новый срез скачивается отдельным действием через установленный загрузчик; если ему нужен ключ, система покажет это до запуска.</p>
           </div>
-          <button onClick={onEstimate} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} {estimating ? "Оцениваем..." : "Обновить оценку"}</button>
+          <button onClick={() => onEstimate(true)} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} {estimating ? "Оцениваем..." : "Обновить оценку"}</button>
         </div>
         <div className="metric-grid">
           <MetricCard label="Работ найдено" value={hasEstimate ? fmt(rawEstimate.estimate_count ?? 0) : "—"} />
@@ -1251,6 +1252,7 @@ function SlicesPage({
           <MetricCard label="Прогноз загрузки" value={hasEstimate ? `${fmt(rawEstimate.estimated_cli_metadata_mb ?? decision.estimated_raw_mb ?? rawEstimate.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
           <MetricCard label="Прогноз предпросмотра" value={hasEstimate ? `${fmt(rawEstimate.estimated_selected_api_mb ?? rawEstimate.estimated_raw_mb ?? 0)}–${fmt(rawEstimate.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
           <MetricCard label="Parquet прогноз" value={hasEstimate ? `${fmt(rawEstimate.estimated_parquet_mb ?? 0)} МБ` : emptyEstimateValue} />
+          <MetricCard label="Кэш оценки" value={hasEstimate ? estimateCacheLabel(String(estimateCache.status ?? "")) : "—"} />
         </div>
         <EstimateBudget estimate={rawEstimate} decision={decision} />
         <EstimateFacets facets={rawEstimate.facets} />
@@ -1493,6 +1495,7 @@ function DumpInfoModal({ dump, onClose }: { dump: any; onClose: () => void }) {
   const health = dumpHealth(dump);
   const request = dump?.openalex_request ?? {};
   const storage = dump?.storage_plan ?? {};
+  const storageSummary = dump?.storage ?? {};
   const signatures = dump?.signatures ?? {};
   const rawPath = String(dump?.raw_jsonl ?? "");
   const manifestPath = String(dump?.dump_manifest ?? dump?.manifest_path ?? "");
@@ -1512,7 +1515,10 @@ function DumpInfoModal({ dump, onClose }: { dump: any; onClose: () => void }) {
           <KeyValue label="Идентификатор среза" value={String(dump?.dump_id ?? "—")} />
           <KeyValue label="Работ" value={fmt(Number(dump?.records_downloaded ?? 0))} />
           <KeyValue label="Ожидалось работ" value={dump?.records_expected ? fmt(Number(dump.records_expected)) : "—"} />
-          <KeyValue label="Размер файла" value={`${fmt(bytesToMb(Number(dump?.bytes_written ?? 0)))} МБ`} />
+          <KeyValue label="Размер исходных данных" value={`${fmt(bytesToMb(Number(storageSummary?.raw_bytes ?? dump?.bytes_written ?? 0)))} МБ`} />
+          <KeyValue label="Размер таблиц" value={`${fmt(bytesToMb(Number(storageSummary?.tables_bytes ?? 0)))} МБ`} />
+          <KeyValue label="Кэш аналитики" value={`${fmt(bytesToMb(Number(storageSummary?.analytics_cache_bytes ?? 0)))} МБ`} />
+          <KeyValue label="Всего на диске" value={`${fmt(bytesToMb(Number(storageSummary?.total_known_bytes ?? dump?.bytes_written ?? 0)))} МБ`} />
           <KeyValue label="Скачан" value={String(dump?.created_at_utc ?? dump?.download_finished_at_utc ?? "—")} />
           <KeyValue label="Время загрузки" value={dump?.elapsed_seconds ? `${fmt(Number(dump.elapsed_seconds))} сек.` : "—"} />
           <KeyValue label="Полнота" value={dumpCompletenessLabel(String(dump?.scientific_completeness ?? ""))} />
@@ -4444,6 +4450,15 @@ function decisionStrategyLabel(value: string) {
     do_not_fetch: "не запускать загрузку",
   };
   return labels[value] ?? (value || "оценка еще не выполнена");
+}
+
+function estimateCacheLabel(value: string) {
+  const labels: Record<string, string> = {
+    hit: "использована сохраненная оценка",
+    miss: "оценка рассчитана заново",
+    refresh: "оценка обновлена вручную",
+  };
+  return labels[value] ?? "не используется";
 }
 
 function decisionMessageLabel(value: string) {

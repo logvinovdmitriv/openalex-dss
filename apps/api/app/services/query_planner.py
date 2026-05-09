@@ -3,19 +3,22 @@ from __future__ import annotations
 import math
 import os
 import sys
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timedelta, timezone
 
 import yaml
 
-from app.core.paths import ROOT, SRC
+from app.core.paths import DATA, ROOT, SRC
 from app.services import author_slice
 from app.services.work_type_labels import format_work_types
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from openalex_dss.openalex import build_filter, estimate_works  # noqa: E402
+from openalex_dss.openalex import build_filter, cli_download_signature, corpus_signature, estimate_works  # noqa: E402
 
 
 CONFIG_PATH = ROOT / "configs/execution_limits.yaml"
@@ -25,18 +28,8 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
     cfg = author_slice.config_from_payload({**payload, "workflow_mode": "strict_works"})
     limits = load_execution_limits()
     download_policy = _download_policy(payload, limits)
-
-    api_key = str(payload.get("api_key") or "").strip()
-    old_api_key = os.environ.get(cfg.api_key_env)
-    try:
-        if api_key:
-            os.environ[cfg.api_key_env] = api_key
-        estimate = estimate_works(cfg)
-    finally:
-        if old_api_key is None:
-            os.environ.pop(cfg.api_key_env, None)
-        else:
-            os.environ[cfg.api_key_env] = old_api_key
+    refresh_requested = bool(payload.get("refresh_estimate"))
+    estimate, estimate_cache = _cached_estimate(cfg, limits, refresh=refresh_requested, api_key=str(payload.get("api_key") or "").strip())
 
     decision = choose_strategy(
         estimate_count=int(estimate["estimate_count"]),
@@ -70,11 +63,80 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "openalex_filter": build_filter(cfg),
         "estimate": estimate,
+        "estimate_cache": estimate_cache,
         "decision": decision,
         "download_policy": download_policy,
         "limits": limits,
         "filter_classes": classify_filters(cfg),
     }
+
+
+def _cached_estimate(cfg: Any, limits: dict[str, Any], *, refresh: bool = False, api_key: str = "") -> tuple[dict[str, Any], dict[str, Any]]:
+    key = _estimate_cache_key(cfg)
+    path = _estimate_cache_path(key)
+    ttl_hours = _estimate_cache_ttl_hours(limits)
+    if not refresh and path.is_file():
+        cached = _read_json(path)
+        created = _parse_dt(str(cached.get("created_at") or ""))
+        estimate = cached.get("estimate") if isinstance(cached.get("estimate"), dict) else None
+        if estimate and created and datetime.now(timezone.utc) - created <= timedelta(hours=ttl_hours):
+            return estimate, {"status": "hit", "key": key, "ttl_hours": ttl_hours, "created_at": cached.get("created_at")}
+
+    estimate = _fetch_estimate(cfg, api_key=api_key)
+    doc = {"schema": "openalex_estimate_cache", "key": key, "created_at": datetime.now(timezone.utc).isoformat(), "estimate": estimate}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    return estimate, {"status": "refresh" if refresh else "miss", "key": key, "ttl_hours": ttl_hours, "created_at": doc["created_at"]}
+
+
+def _fetch_estimate(cfg: Any, *, api_key: str = "") -> dict[str, Any]:
+    old_api_key = os.environ.get(cfg.api_key_env)
+    try:
+        if api_key:
+            os.environ[cfg.api_key_env] = api_key
+        return estimate_works(cfg)
+    finally:
+        if old_api_key is None:
+            os.environ.pop(cfg.api_key_env, None)
+        else:
+            os.environ[cfg.api_key_env] = old_api_key
+
+
+def _estimate_cache_key(cfg: Any) -> str:
+    payload = {
+        "corpus_signature": corpus_signature(cfg),
+        "download_signature": cli_download_signature(cfg),
+        "filter": build_filter(cfg),
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:24]
+
+
+def _estimate_cache_path(key: str) -> Path:
+    return DATA / "cache" / "estimates" / f"{key}.json"
+
+
+def _estimate_cache_ttl_hours(limits: dict[str, Any]) -> int:
+    policy = limits.get("storage_policy") if isinstance(limits.get("storage_policy"), dict) else {}
+    try:
+        return max(1, int(policy.get("estimate_cache_ttl_hours") or 24))
+    except (TypeError, ValueError):
+        return 24
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _parse_dt(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def choose_strategy(

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 API = ROOT / "apps/api"
@@ -11,6 +13,7 @@ for path in (API, SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from app.services import query_planner  # noqa: E402
 from app.services.query_planner import choose_strategy  # noqa: E402
 
 
@@ -65,6 +68,31 @@ class QueryPlannerTests(unittest.TestCase):
         )
         self.assertEqual(decision["status"], "no_data")
         self.assertFalse(decision["can_execute"])
+
+    def test_estimate_cache_hits_until_refresh_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            calls = {"count": 0}
+
+            def fake_fetch(_cfg: object, *, api_key: str = "") -> dict[str, int]:
+                calls["count"] += 1
+                return {"estimate_count": calls["count"], "api_requests_planned": 1, "estimated_raw_bytes": 10, "estimated_cli_metadata_bytes": 10}
+
+            with (
+                patch.object(query_planner, "DATA", root),
+                patch.object(query_planner, "_estimate_cache_key", return_value="cache_key"),
+                patch.object(query_planner, "_fetch_estimate", side_effect=fake_fetch),
+            ):
+                first, first_cache = query_planner._cached_estimate(object(), LIMITS, refresh=False)
+                second, second_cache = query_planner._cached_estimate(object(), LIMITS, refresh=False)
+                third, third_cache = query_planner._cached_estimate(object(), LIMITS, refresh=True)
+
+        self.assertEqual(first["estimate_count"], 1)
+        self.assertEqual(first_cache["status"], "miss")
+        self.assertEqual(second["estimate_count"], 1)
+        self.assertEqual(second_cache["status"], "hit")
+        self.assertEqual(third["estimate_count"], 2)
+        self.assertEqual(third_cache["status"], "refresh")
 
 
 if __name__ == "__main__":

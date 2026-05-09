@@ -40,6 +40,7 @@ class SliceCreateRequest(SliceDefinitionRequest):
 
 class SliceEstimateRequest(BaseModel):
     download_policy: "DownloadPolicy" = Field(default_factory=lambda: DownloadPolicy())
+    refresh_estimate: bool = False
 
 
 class DownloadPolicy(BaseModel):

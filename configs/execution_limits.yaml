@@ -7,6 +7,11 @@ execution_limits:
   max_memory_mb: 4096
   require_estimate_before_fetch: true
   require_passport_before_analysis: true
+storage_policy:
+  max_filtered_cache_entries_per_run: 10
+  estimate_cache_ttl_hours: 24
+  delete_complete_download_parts_after_pack: true
+  keep_partial_download_parts_for_repair: true
 planner_thresholds:
   # Информационные пороги для UI. Они не блокируют скачивание.
   small_slice_works: 50000

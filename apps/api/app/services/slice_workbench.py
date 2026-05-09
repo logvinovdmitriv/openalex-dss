@@ -771,7 +771,8 @@ def _merged_dump_records(limit: int = 250) -> list[dict[str, Any]]:
 
 
 def _with_dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
-    return {**dump, "health": _dump_health(dump_id, dump)}
+    health = _dump_health(dump_id, dump)
+    return {**dump, "health": health, "storage": _dump_storage_summary(dump_id, dump, health)}
 
 
 def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
@@ -1046,6 +1047,66 @@ def _path_size(path: str) -> int:
         return Path(path).stat().st_size
     except OSError:
         return 0
+
+
+def _dump_storage_summary(dump_id: str, dump: dict[str, Any], health: dict[str, Any]) -> dict[str, int | str]:
+    safe_dump_id = _safe_id(str(dump_id or dump.get("dump_id") or ""))
+    raw_jsonl = str(dump.get("raw_jsonl") or "")
+    raw_bytes = _path_size(raw_jsonl)
+    if raw_bytes <= 0:
+        raw_bytes = int(health.get("bytes_written") or dump.get("bytes_written") or 0)
+    tables_bytes = _dir_size(DATA / "tables" / safe_dump_id)
+    dump_meta_bytes = _dir_size(DATA / "dumps" / safe_dump_id)
+    run_bytes = 0
+    analytics_cache_bytes = 0
+    for run_id in _run_ids_for_dump(safe_dump_id):
+        run_dir = DATA / "runs" / run_id
+        run_bytes += _dir_size(run_dir)
+        analytics_cache_bytes += _dir_size(run_dir / "analytics")
+    total = raw_bytes + tables_bytes + dump_meta_bytes + run_bytes
+    return {
+        "raw_bytes": raw_bytes,
+        "tables_bytes": tables_bytes,
+        "dump_metadata_bytes": dump_meta_bytes,
+        "runs_bytes": run_bytes,
+        "analytics_cache_bytes": analytics_cache_bytes,
+        "total_known_bytes": total,
+        "raw_path": raw_jsonl,
+        "tables_path": str(DATA / "tables" / safe_dump_id),
+        "dump_path": str(DATA / "dumps" / safe_dump_id),
+    }
+
+
+def _dir_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    total = 0
+    for child in path.rglob("*"):
+        if not child.is_file():
+            continue
+        try:
+            total += child.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _run_ids_for_dump(dump_id: str) -> list[str]:
+    target = _safe_id(str(dump_id or ""))
+    if not target:
+        return []
+    run_ids: list[str] = []
+    for metric_run in (DATA / "runs").glob("run_*/metric_run.json"):
+        manifest = _read_json(metric_run)
+        manifest_dump_id = _safe_id(str(manifest.get("dump_id") or manifest.get("input_dump_id") or ""))
+        if manifest_dump_id == target:
+            run_ids.append(metric_run.parent.name)
+    return run_ids
 
 
 def _recent_run_for_dump(dump_id: str) -> str:

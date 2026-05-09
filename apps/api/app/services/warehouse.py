@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import duckdb
+import yaml
 
-from app.core.paths import DATA, SRC, TABLE_KINDS, WAREHOUSE
+from app.core.paths import DATA, ROOT, SRC, TABLE_KINDS, WAREHOUSE
 from app.services import custom_metrics
 
 if str(SRC) not in sys.path:
@@ -1182,12 +1183,25 @@ def _prune_filtered_indices_cache(run_id: str) -> None:
         except (OSError, json.JSONDecodeError):
             continue
         entries.append((str(manifest.get("last_used_at") or manifest.get("created_at") or ""), manifest_path.parent))
-    if len(entries) <= _ANALYTICS_CACHE_LIMIT:
+    limit = _analytics_cache_limit()
+    if len(entries) <= limit:
         return
     import shutil
 
-    for _, cache_dir in sorted(entries)[: max(0, len(entries) - _ANALYTICS_CACHE_LIMIT)]:
+    for _, cache_dir in sorted(entries)[: max(0, len(entries) - limit)]:
         shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def _analytics_cache_limit() -> int:
+    config_path = ROOT / "configs" / "execution_limits.yaml"
+    if config_path.is_file():
+        try:
+            doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            policy = doc.get("storage_policy") if isinstance(doc, dict) else {}
+            return max(1, int((policy or {}).get("max_filtered_cache_entries_per_run") or _ANALYTICS_CACHE_LIMIT))
+        except (OSError, TypeError, ValueError, yaml.YAMLError):
+            return _ANALYTICS_CACHE_LIMIT
+    return _ANALYTICS_CACHE_LIMIT
 
 
 def _utc_now() -> str:
