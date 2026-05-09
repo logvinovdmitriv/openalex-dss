@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from app.domain.scientometric_contract import DataSelectionPolicy, RankingUseCase, ScopedAnalysisContext
 from app.services import custom_metrics, reports, scientometrics, warehouse
 
 
@@ -22,16 +23,23 @@ def metric_bundle(
     custom_metric_defs: list[dict[str, str]] | None = None,
     **data_selection: Any,
 ) -> dict[str, Any]:
-    return warehouse.metric_bundle(
-        fraction_mode,
-        metric,
-        filters,
-        limit=limit,
+    use_case = _ranking_use_case(
         run_id=run_id,
         dump_id=dump_id,
+        fraction_mode=fraction_mode,
+        metric=metric,
+        data_selection=data_selection,
+    )
+    return warehouse.metric_bundle(
+        use_case.fraction_mode,
+        use_case.primary_metric,
+        filters,
+        limit=limit,
+        run_id=use_case.context.run_id,
+        dump_id=use_case.context.dump_id,
         author_ids=author_ids,
         custom_metric_defs=custom_metric_defs,
-        **data_selection,
+        **use_case.data_selection.to_query_kwargs(),
     )
 
 
@@ -46,15 +54,22 @@ def metric_distribution(
     custom_metric_defs: list[dict[str, str]] | None = None,
     **data_selection: Any,
 ) -> dict[str, Any]:
-    return warehouse.metric_distribution(
-        fraction_mode,
-        metric,
-        filters,
+    use_case = _ranking_use_case(
         run_id=run_id,
         dump_id=dump_id,
+        fraction_mode=fraction_mode,
+        metric=metric,
+        data_selection=data_selection,
+    )
+    return warehouse.metric_distribution(
+        use_case.fraction_mode,
+        use_case.primary_metric,
+        filters,
+        run_id=use_case.context.run_id,
+        dump_id=use_case.context.dump_id,
         author_ids=author_ids,
         custom_metric_defs=custom_metric_defs,
-        **data_selection,
+        **use_case.data_selection.to_query_kwargs(),
     )
 
 
@@ -71,17 +86,24 @@ def metric_ranking(
     custom_metric_defs: list[dict[str, str]] | None = None,
     **data_selection: Any,
 ) -> dict[str, Any]:
+    use_case = _ranking_use_case(
+        run_id=run_id,
+        dump_id=dump_id,
+        fraction_mode=fraction_mode,
+        metric=metric,
+        data_selection=data_selection,
+    )
     return warehouse.metric_ranking(
-        fraction_mode,
-        metric,
+        use_case.fraction_mode,
+        use_case.primary_metric,
         filters,
         limit=limit,
         max_limit=max_limit,
-        run_id=run_id,
-        dump_id=dump_id,
+        run_id=use_case.context.run_id,
+        dump_id=use_case.context.dump_id,
         author_ids=author_ids,
         custom_metric_defs=custom_metric_defs,
-        **data_selection,
+        **use_case.data_selection.to_query_kwargs(),
     )
 
 
@@ -98,17 +120,24 @@ def iter_metric_ranking_csv(
     custom_metric_defs: list[dict[str, str]] | None = None,
     **data_selection: Any,
 ) -> Iterable[str]:
+    use_case = _ranking_use_case(
+        run_id=run_id,
+        dump_id=dump_id,
+        fraction_mode=fraction_mode,
+        metric=metric,
+        data_selection=data_selection,
+    )
     return warehouse.iter_metric_ranking_csv(
-        fraction_mode,
-        metric,
+        use_case.fraction_mode,
+        use_case.primary_metric,
         filters,
         limit=limit,
         max_limit=max_limit,
-        run_id=run_id,
-        dump_id=dump_id,
+        run_id=use_case.context.run_id,
+        dump_id=use_case.context.dump_id,
         author_ids=author_ids,
         custom_metric_defs=custom_metric_defs,
-        **data_selection,
+        **use_case.data_selection.to_query_kwargs(),
     )
 
 
@@ -130,3 +159,19 @@ def build_report_bundle(**kwargs: Any) -> dict[str, Any]:
 
 def report_bundle_json(**kwargs: Any) -> dict[str, Any]:
     return reports.report_bundle_json(**kwargs)
+
+
+def _ranking_use_case(
+    *,
+    run_id: str,
+    dump_id: str,
+    fraction_mode: str,
+    metric: str,
+    data_selection: dict[str, Any],
+) -> RankingUseCase:
+    return RankingUseCase(
+        context=ScopedAnalysisContext(run_id=run_id, dump_id=dump_id),
+        primary_metric=metric,
+        fraction_mode=fraction_mode,
+        data_selection=DataSelectionPolicy.from_kwargs(**data_selection),
+    ).require_ready()

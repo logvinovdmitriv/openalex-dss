@@ -97,7 +97,19 @@ class AnalyticsRouteTests(unittest.TestCase):
         self.assertEqual(captured["metric"], "h")
         self.assertEqual(
             captured["kwargs"],
-            {"limit": 25, "max_limit": analytics_routes.JSON_RESULT_MAX_ROWS, "run_id": "run_a", "dump_id": "dump_a", "author_ids": None, "custom_metric_defs": []},
+            {
+                "limit": 25,
+                "max_limit": analytics_routes.JSON_RESULT_MAX_ROWS,
+                "run_id": "run_a",
+                "dump_id": "dump_a",
+                "author_ids": None,
+                "custom_metric_defs": [],
+                "data_search": "",
+                "data_sort": "",
+                "data_direction": "desc",
+                "data_limit": 0,
+                "data_filters": {},
+            },
         )
         self.assertEqual(filters["country_code"], "RU")
         self.assertEqual(filters["filter_mode"], "keyword")

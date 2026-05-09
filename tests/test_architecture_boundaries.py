@@ -10,6 +10,7 @@ for path in (ROOT / "apps/api", ROOT / "src"):
 
 from app.api.query_contracts import AnalysisFilterQuery, DataSelectionQuery, ScopeQuery
 from app.application import scientometric_workflow
+from app.domain.scientometric_contract import DataSelectionPolicy, RankingUseCase, ScopedAnalysisContext
 from app.services import catalog, distribution_engine, metric_registry, ranking_engine, workflow
 
 
@@ -67,3 +68,35 @@ def test_application_layer_exposes_scientometric_use_cases() -> None:
     assert callable(scientometric_workflow.iter_metric_ranking_csv)
     assert callable(scientometric_workflow.build_scientometric_analysis)
     assert callable(scientometric_workflow.build_report_bundle)
+
+
+def test_domain_scoped_context_guards_future_use_cases() -> None:
+    selection = DataSelectionPolicy.from_kwargs(data_search=" Ivanov ", data_sort="h", data_direction="asc", data_limit=25)
+    use_case = RankingUseCase(
+        context=ScopedAnalysisContext(run_id=" run_1 "),
+        primary_metric=" h ",
+        fraction_mode="",
+        data_selection=selection,
+    ).require_ready()
+
+    assert use_case.context.run_id == "run_1"
+    assert use_case.primary_metric == "h"
+    assert use_case.fraction_mode == "strict_authors_count"
+    assert use_case.data_selection.to_query_kwargs()["data_limit"] == 25
+
+
+def test_application_layer_rejects_unscoped_analytics_before_storage() -> None:
+    try:
+        scientometric_workflow.metric_ranking(
+            "strict_authors_count",
+            "h",
+            {},
+            limit=10,
+            max_limit=100,
+            run_id="",
+            dump_id="",
+        )
+    except ValueError as exc:
+        assert "выбранный расчет или локальный срез" in str(exc)
+    else:
+        raise AssertionError("unscoped analytics must fail at the application boundary")
