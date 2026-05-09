@@ -86,7 +86,7 @@ class DataSelectionPolicy:
 
 @dataclass(frozen=True)
 class RankingUseCase:
-    """Explicit use-case envelope for current MVP rankings and later DSS rules."""
+    """Explicit use-case envelope for current rankings and later DSS rules."""
 
     context: ScopedAnalysisContext
     primary_metric: str
