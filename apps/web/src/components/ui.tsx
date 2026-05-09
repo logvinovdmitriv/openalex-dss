@@ -2,11 +2,37 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { createPortal } from "react-dom";
 import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from "@tanstack/react-table";
 import type { CellContext, SortingState } from "@tanstack/react-table";
+import { CheckCircle2, Download } from "lucide-react";
 import type { TableColumnFilter, TableColumnFilters, TableResponse } from "../api";
 import { columnLabel, countryLabel, fmt, languageLabel, modeLabel, metricLabel, sourceTypeLabel, workTypeLabel } from "../domain";
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return <div className="field"><span>{label}</span>{children}</div>;
+}
+
+export function JsonPanel({ title, value }: { title: string; value: unknown }) {
+  return (
+    <section className="panel json-panel">
+      <h2>{title}</h2>
+      <pre>{JSON.stringify(value ?? {}, null, 2)}</pre>
+    </section>
+  );
+}
+
+export function DownloadLink({ href, label, compact = false }: { href: string; label: string; compact?: boolean }) {
+  return <a className={compact ? "download-action compact" : "download-action"} href={href}><Download size={15} /> {label}</a>;
+}
+
+export function MetricCard({ label, value }: { label: string; value: string | number }) {
+  return <div className="metric-card"><span>{label}</span><b>{value}</b></div>;
+}
+
+export function KeyValue({ label, value }: { label: string; value: string }) {
+  return <div className="key-value"><span>{label}</span><b>{value || "не задано"}</b></div>;
+}
+
+export function CheckPill({ active, label }: { active: boolean; label: string }) {
+  return <span className={active ? "check-pill active" : "check-pill"}>{active && <CheckCircle2 size={14} />}{label}</span>;
 }
 
 export function DataGrid({

@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   CheckCircle2,
   Database,
-  Download,
   Gauge,
   Info,
   Lock,
@@ -22,12 +21,9 @@ import {
   DEFAULT_FILTERS,
   CORE_METRIC_OPTIONS,
   FRACTION_MODE_OPTIONS,
-  columnLabel,
   countryLabel,
   filterParams,
   fmt,
-  metricDescription,
-  metricFormula,
   modeLabel,
   resolveCountryInput,
   metricLabel,
@@ -37,7 +33,7 @@ import {
   type ResearchAreaPreset,
   type SelectOption,
 } from "./domain";
-import { DataGrid, DetailDrawer, EmptyState, Field } from "./components/ui";
+import { CheckPill, DataGrid, DetailDrawer, DownloadLink, EmptyState, Field, KeyValue, MetricCard } from "./components/ui";
 import { ProgressPanel, RunCard, runActionTitle, runCompletedTitle } from "./components/JobProgress";
 import { useDataSelection } from "./hooks/useDataSelection";
 import { useWorkbenchScope } from "./hooks/useWorkbenchScope";
@@ -75,9 +71,13 @@ import {
   type WorkbenchState,
 } from "./workbench";
 import { buildWorkflowNav, nextUnlockedNavIndex } from "./features/workflow/workflowNav";
+import { DataRestrictionChips } from "./features/data/DataRestrictionChips";
 import { DEFAULT_CUSTOM_METRICS } from "./features/formulas/defaultCustomMetrics";
 import { FormulaBuilderDialog, MetricInfoPopover, metricLabelFor } from "./features/formulas/FormulaBuilder";
+import { metricLabelMap as buildMetricLabelMap, rankingMetricOptions } from "./features/metrics/metricCatalog";
 import { TOAST_EVENT, emitToast, type ToastItem, type ToastPayload } from "./features/notifications/toast";
+import { ToastViewport } from "./features/notifications/ToastViewport";
+import { ReportsPage } from "./features/reports/ReportsView";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -102,7 +102,6 @@ const queryClient = new QueryClient({
   },
 });
 
-const COMMON_RANKING_METRICS = new Set(["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "f5", "fm5", "iupv", "islv", "lrdi"]);
 const DATA_PREVIEW_PAGE_SIZE = 100;
 const DATA_ONLY_ANALYSIS_FILTERS: ActiveFilters = {
   ...DEFAULT_FILTERS,
@@ -395,10 +394,7 @@ function Workbench() {
   const uiOptions = catalog.data?.ui_options ?? {};
   const topNOptions = configuredOptions(uiOptions.top_n ?? []);
   const metricCatalogOptions = configuredOptions(catalog.data?.metrics ?? []);
-  const configuredPrimaryMetricOptions = metricCatalogOptions
-    .filter((item) => COMMON_RANKING_METRICS.has(item.value))
-    .map((item) => ({ ...item, label: item.label || metricLabel(item.value), description: item.description || metricDescription(item.value), formula: item.formula || metricFormula(item.value) }));
-  const primaryMetricOptions = configuredPrimaryMetricOptions.length ? configuredPrimaryMetricOptions : CORE_METRIC_OPTIONS;
+  const primaryMetricOptions = rankingMetricOptions(metricCatalogOptions, CORE_METRIC_OPTIONS);
   const customMetricOptions: SelectOption[] = customMetrics.map((item) => ({
     value: item.id,
     label: item.label,
@@ -407,7 +403,7 @@ function Workbench() {
     custom: true,
   }));
   const allMetricOptions = [...primaryMetricOptions, ...customMetricOptions];
-  const metricLabelMap = Object.fromEntries(allMetricOptions.map((item) => [item.value, item.label]));
+  const metricLabelMap = buildMetricLabelMap(allMetricOptions);
   const fractionModeOptions = configuredOptions(catalog.data?.fraction_modes ?? []);
   const displayFractionModeOptions = fractionModeOptions.length ? fractionModeOptions : FRACTION_MODE_OPTIONS;
   const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
@@ -1748,76 +1744,6 @@ function LocalDataPage({
   );
 }
 
-function DataRestrictionChips({
-  filters,
-  sortField,
-  sortDirection,
-  search,
-  selectedAuthorIds,
-  limit,
-  onResetSearch,
-  onRemoveFilter,
-  onResetSort,
-}: {
-  filters: TableColumnFilters;
-  sortField: string;
-  sortDirection: "asc" | "desc";
-  search: string;
-  selectedAuthorIds: string[];
-  limit: number;
-  onResetSearch: () => void;
-  onRemoveFilter: (field: string) => void;
-  onResetSort: () => void;
-}) {
-  const filterEntries = Object.entries(filters);
-  const hasSearch = Boolean(search.trim());
-  const hasSelectedAuthors = selectedAuthorIds.length > 0;
-  if (!filterEntries.length && !sortField && !hasSearch && !hasSelectedAuthors) {
-    return (
-      <div className="selection-summary">
-        <span>Ограничений по столбцам нет</span>
-        <span>{limitLabel(limit)}</span>
-      </div>
-    );
-  }
-  return (
-    <div className="selection-summary active" aria-live="polite">
-      <b>Активная выборка</b>
-      {sortField && (
-        <button type="button" className="selection-chip" onClick={onResetSort}>
-          Сортировка: {columnLabel(sortField)} {sortDirection === "asc" ? "по возрастанию" : "по убыванию"} ×
-        </button>
-      )}
-      {hasSearch && (
-        <button type="button" className="selection-chip" onClick={onResetSearch}>
-          Поиск: “{search.trim()}” ×
-        </button>
-      )}
-      {hasSelectedAuthors && (
-        <span className="selection-chip passive">Точки на графиках: {fmt(selectedAuthorIds.length)}</span>
-      )}
-      {filterEntries.map(([field, filter]) => (
-        <button key={field} type="button" className="selection-chip" onClick={() => onRemoveFilter(field)}>
-          {columnLabel(field)}: {columnFilterSummary(filter)} ×
-        </button>
-      ))}
-      <span>{limit > 0 ? `${limitLabel(limit)} после сортировки и ограничений` : "Берутся все строки после сортировки и ограничений"}</span>
-    </div>
-  );
-}
-
-function columnFilterSummary(filter: { contains?: string; min?: string; max?: string }) {
-  const parts: string[] = [];
-  if (filter.contains) parts.push(`содержит “${filter.contains}”`);
-  if (filter.min) parts.push(`от ${filter.min}`);
-  if (filter.max) parts.push(`до ${filter.max}`);
-  return parts.join(", ") || "ограничение";
-}
-
-function limitLabel(limit: number) {
-  return Number(limit) > 0 ? `Берется до ${fmt(limit)} строк` : "Берутся все строки";
-}
-
 function authorCountText(count: number) {
   const value = Math.abs(Number(count) || 0);
   const mod10 = value % 10;
@@ -3045,143 +2971,6 @@ function ConclusionDraftPanel({ payload, metricLabels }: { payload: Scientometri
   );
 }
 
-function ReportsPage({
-  filters,
-  metric,
-  fractionMode,
-  runId,
-  dumpId,
-  topN,
-  scientometricMetrics,
-  baselineMetric,
-  rankTopN,
-  dataFilters,
-  dataSort,
-  dataDirection,
-  customMetrics,
-  metricLabels,
-  onBuild,
-  building,
-  state,
-  sliceDoc,
-  estimate,
-  materialization,
-}: {
-  filters: ActiveFilters;
-  metric: string;
-  fractionMode: string;
-  runId: string;
-  dumpId: string;
-  topN: number;
-  scientometricMetrics: string[];
-  baselineMetric: string;
-  rankTopN: number;
-  dataFilters: TableColumnFilters;
-  dataSort: string;
-  dataDirection: "asc" | "desc";
-  customMetrics: CustomMetricDefinition[];
-  metricLabels: Record<string, string>;
-  onBuild: () => void;
-  building: boolean;
-  state: any;
-  sliceDoc: any;
-  estimate: any;
-  materialization: any;
-}) {
-  const [section, setSection] = useState<"exports" | "passports">("exports");
-  const selectionQuery = dataSelectionQuery({ filters: dataFilters, sort: dataSort, direction: dataDirection, limit: topN });
-  const activeRestrictionCount = Object.keys(dataFilters).length;
-  const reportParams = filterParams(filters, {
-    fraction_mode: fractionMode,
-    metric,
-    limit: topN,
-    run_id: runId,
-    dump_id: dumpId,
-    scientometric_metrics: scientometricMetrics.join(","),
-    baseline_metric: baselineMetric,
-    rank_top_n: rankTopN,
-    custom_metric_defs: customMetricDefsQuery(customMetrics),
-    ...selectionQuery,
-  });
-  const rankingUrl = `${API_BASE}/analytics/ranking.csv?${reportParams.toString()}`;
-  const bundleUrl = `${API_BASE}/reports/bundle.json?${reportParams.toString()}`;
-  const hasReportDataScope = Boolean(runId || dumpId);
-  const localIndicesUrl = `${API_BASE}${localDataPreviewCsvUrl("indices", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, fractionMode, dataFilters })}`;
-  const localWorksUrl = `${API_BASE}${localDataPreviewCsvUrl("works", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, dataFilters })}`;
-  const localAuthorshipsUrl = `${API_BASE}${localDataPreviewCsvUrl("authorships", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, dataFilters })}`;
-  const localWorkTopicsUrl = `${API_BASE}${localDataPreviewCsvUrl("work_topics", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, dataFilters })}`;
-  return (
-    <div className="stack">
-      <section className="panel">
-        <div className="panel-head split">
-          <div>
-            <span className="step-badge">Отчет</span>
-            <h2>Отчеты и пакет воспроизводимости</h2>
-            <p>Отчет фиксирует срез исследования, локальную загрузку, текущую выборку из “Данных”, расчет индексов, ограничения и паспорта.</p>
-          </div>
-          <button onClick={onBuild} disabled={building}>{building ? <Loader2 size={16} className="spin" /> : <Download size={16} />} Собрать HTML</button>
-        </div>
-        <div className="choice-grid compact section-tabs" role="tablist" aria-label="Разделы отчетов">
-          {[
-            ["exports", "Пакет и таблицы"],
-            ["passports", "Паспорта"],
-          ].map(([id, label]) => (
-            <button key={id} type="button" role="tab" aria-selected={section === id} className={section === id ? "choice-pill active" : "choice-pill"} onClick={() => setSection(id as "exports" | "passports")}>
-              {label}
-            </button>
-          ))}
-        </div>
-        {section === "exports" && (
-          <>
-          <div className="download-grid">
-            {hasReportDataScope && <DownloadLink href={rankingUrl} label="Рейтинг авторов" />}
-          <DownloadLink href={bundleUrl} label="Пакет отчета" />
-          {hasReportDataScope && (
-            <>
-              <DownloadLink href={localIndicesUrl} label="Авторы и индексы" />
-              <DownloadLink href={localWorksUrl} label="Работы" />
-              <DownloadLink href={localAuthorshipsUrl} label="Авторство в работах" />
-              <DownloadLink href={localWorkTopicsUrl} label="Темы работ" />
-            </>
-          )}
-          <DownloadLink href={`${API_BASE}/workbench`} label="Состояние системы" />
-          <DownloadLink href={`${API_BASE}/catalog`} label="Каталог настроек" />
-        </div>
-        {!hasReportDataScope && (
-          <div className="notice warn">
-            <b>Выгрузка требует выбранный срез</b>
-            <span>Выберите расчет или локальный срез: ссылки на локальные таблицы не показываются без выбранной области анализа.</span>
-          </div>
-        )}
-          </>
-        )}
-        {section === "passports" && (
-          <ReportPassportsSection state={state} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
-        )}
-        <div className="notice">
-          <b>Параметры пакета</b>
-          <span>Показатели: {scientometricMetrics.map((item) => metricLabelFor(item, metricLabels)).join(", ")}. Основной показатель: {metricLabelFor(baselineMetric, metricLabels)}. Строк из “Данных”: {rankTopN > 0 ? fmt(rankTopN) : "все"}. Ограничений по столбцам: {activeRestrictionCount}.</span>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function DownloadLink({ href, label, compact = false }: { href: string; label: string; compact?: boolean }) {
-  return <a className={compact ? "download-action compact" : "download-action"} href={href}><Download size={15} /> {label}</a>;
-}
-
-function ReportPassportsSection({ state, sliceDoc, estimate, materialization }: { state: any; sliceDoc: any; estimate: any; materialization: any }) {
-  return (
-    <div className="passport-grid">
-      <JsonPanel title="Паспорт среза" value={sliceDoc ?? state?.workflow?.current_slice ?? {}} />
-      <JsonPanel title="Паспорт оценки" value={estimate ?? sliceDoc?.current_estimate ?? {}} />
-      <JsonPanel title="Паспорт загрузки и хранения" value={materialization ?? sliceDoc?.current_materialization_plan ?? {}} />
-      <JsonPanel title="Паспорт качества данных" value={state?.quality ?? {}} />
-    </div>
-  );
-}
-
 function ResolverDialog({ filters, setFilters, onClose }: { filters: ActiveFilters; setFilters: (value: ActiveFilters) => void; onClose: () => void }) {
   const [tab, setTab] = useState<ResolverTab>("subject");
   const [query, setQuery] = useState("");
@@ -3269,25 +3058,6 @@ function ResolverDialog({ filters, setFilters, onClose }: { filters: ActiveFilte
           ))}
         </div>
       </section>
-    </div>
-  );
-}
-
-function ToastViewport({ toasts, onClose }: { toasts: ToastItem[]; onClose: (id: string) => void }) {
-  if (toasts.length === 0) return null;
-  return (
-    <div className="toast-viewport" role="status" aria-live="polite">
-      {toasts.map((toast) => (
-        <section key={toast.id} className={`toast-card ${toast.tone}`}>
-          <div>
-            <b>{toast.title}</b>
-            <span>{toast.message}</span>
-          </div>
-          <button type="button" aria-label="Закрыть уведомление" onClick={() => onClose(toast.id)}>
-            <X size={15} />
-          </button>
-        </section>
-      ))}
     </div>
   );
 }
@@ -3407,15 +3177,6 @@ function StatusRail({ state, run, running }: { state: any; run: any; running: bo
       <span><Sigma size={15} /> Авторы: {fmt(tables?.indices?.rows ?? 0)}</span>
       <span><Gauge size={15} /> {running ? (progress.percent === null ? progress.label : `${progress.label} · ${progress.percent}%`) : run?.status ?? state?.workflow?.active_stage ?? "idle"}</span>
     </div>
-  );
-}
-
-function JsonPanel({ title, value }: { title: string; value: unknown }) {
-  return (
-    <section className="panel json-panel">
-      <h2>{title}</h2>
-      <pre>{JSON.stringify(value ?? {}, null, 2)}</pre>
-    </section>
   );
 }
 
@@ -4064,16 +3825,4 @@ function activeContextSourceLabel(source?: string) {
   if (source === "recalculate") return "пересчет индексов";
   if (source === "import_local_file") return "локальный файл";
   return source || "не задан";
-}
-
-function MetricCard({ label, value }: { label: string; value: string | number }) {
-  return <div className="metric-card"><span>{label}</span><b>{value}</b></div>;
-}
-
-function KeyValue({ label, value }: { label: string; value: string }) {
-  return <div className="key-value"><span>{label}</span><b>{value || "не задано"}</b></div>;
-}
-
-function CheckPill({ active, label }: { active: boolean; label: string }) {
-  return <span className={active ? "check-pill active" : "check-pill"}>{active && <CheckCircle2 size={14} />}{label}</span>;
 }

@@ -5,8 +5,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from app.services.analysis_filters import build_analysis_filters
-from app.services import cohorts, custom_metrics, reports, warehouse
+from app.application import scientometric_workflow
+from app.api.query_contracts import AnalysisFilterQuery
+from app.services import cohorts, custom_metrics, warehouse
 
 
 router = APIRouter(tags=["reports"])
@@ -56,7 +57,7 @@ def build_report(
     data_limit: int = Query(0, ge=0, le=500_000),
     custom_metric_defs: str = "",
 ) -> dict[str, Any]:
-    filters = build_analysis_filters(
+    filters = AnalysisFilterQuery(
         country_code=country_code,
         filter_mode=filter_mode,
         subject_level=subject_level,
@@ -80,9 +81,9 @@ def build_report(
         from_publication_date=from_publication_date,
         to_publication_date=to_publication_date,
         work_type=work_type,
-    )
+    ).to_filters()
     try:
-        return reports.build_report_bundle(
+        return scientometric_workflow.build_report_bundle(
             metric=metric,
             fraction_mode=fraction_mode,
             limit=limit,
@@ -150,7 +151,7 @@ def report_bundle(
     data_limit: int = Query(0, ge=0, le=500_000),
     custom_metric_defs: str = "",
 ) -> Response:
-    filters = build_analysis_filters(
+    filters = AnalysisFilterQuery(
         country_code=country_code,
         filter_mode=filter_mode,
         subject_level=subject_level,
@@ -174,9 +175,9 @@ def report_bundle(
         from_publication_date=from_publication_date,
         to_publication_date=to_publication_date,
         work_type=work_type,
-    )
+    ).to_filters()
     try:
-        payload = reports.report_bundle_json(
+        payload = scientometric_workflow.report_bundle_json(
             metric=metric,
             fraction_mode=fraction_mode,
             limit=limit,

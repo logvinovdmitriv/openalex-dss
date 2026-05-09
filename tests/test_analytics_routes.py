@@ -352,7 +352,7 @@ class AnalyticsRouteTests(unittest.TestCase):
             captured.update(kwargs)
             return {"schema": "scientometric_analysis", "n_authors": 2}
 
-        with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", side_effect=fake_analysis):
+        with patch.object(analytics_routes.scientometric_workflow, "build_scientometric_analysis", side_effect=fake_analysis):
             payload = analytics_routes.scientometric_analysis(
                 run_id="run_a",
                 dump_id="dump_a",
@@ -386,7 +386,7 @@ class AnalyticsRouteTests(unittest.TestCase):
             "warnings": [],
             "n_authors": 0,
         }
-        with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload):
+        with patch.object(analytics_routes.scientometric_workflow, "build_scientometric_analysis", return_value=payload):
             with self.assertRaises(analytics_routes.HTTPException) as raised:
                 analytics_routes.scientometric_analysis(fraction_mode="integer", metrics="h", baseline_metric="h", top_n=100)
 
@@ -476,8 +476,8 @@ class AnalyticsRouteTests(unittest.TestCase):
         ]
 
         with (
-            patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload),
-            patch.object(analytics_routes.scientometrics, "build_outlier_export_rows", return_value=full_outlier_rows),
+            patch.object(analytics_routes.scientometric_workflow, "build_scientometric_analysis", return_value=payload),
+            patch.object(analytics_routes.scientometric_workflow, "build_outlier_export_rows", return_value=full_outlier_rows),
         ):
             descriptive = analytics_routes.scientometric_descriptive_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g", baseline_metric="h", top_n=20))
             correlations = analytics_routes.scientometric_correlations_csv(_request(run_id="run_a", dump_id="dump_a", metrics="h,g"))
@@ -513,7 +513,7 @@ class AnalyticsRouteTests(unittest.TestCase):
             "descriptive": {},
             "warnings": [],
         }
-        with patch.object(analytics_routes.scientometrics, "build_scientometric_analysis", return_value=payload):
+        with patch.object(analytics_routes.scientometric_workflow, "build_scientometric_analysis", return_value=payload):
             with self.assertRaises(analytics_routes.HTTPException) as raised:
                 analytics_routes.scientometric_descriptive_csv(_request(metrics="h"))
 

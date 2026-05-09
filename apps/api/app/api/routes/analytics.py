@@ -8,8 +8,9 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
-from app.services import cohorts, custom_metrics, scientometrics, warehouse
-from app.services.analysis_filters import build_analysis_filters
+from app.application import scientometric_workflow
+from app.api.query_contracts import AnalysisFilterQuery, DataSelectionQuery, ScopeQuery
+from app.services import cohorts, custom_metrics, warehouse
 
 
 router = APIRouter(tags=["analytics"])
@@ -98,7 +99,7 @@ def analytics(
         filters = cohort_ctx["filters"]
         filter_warnings = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
         parsed_data_filters = warehouse.parse_column_filters(data_filters)
-        bundle = warehouse.metric_bundle(
+        bundle = scientometric_workflow.metric_bundle(
             fraction_mode,
             metric,
             filters,
@@ -255,7 +256,7 @@ def distribution(
         _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
         parsed_data_filters = warehouse.parse_column_filters(data_filters)
-        payload = warehouse.metric_distribution(
+        payload = scientometric_workflow.metric_distribution(
             fraction_mode,
             metric,
             filters,
@@ -364,7 +365,7 @@ def ranking_json(
         _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
         parsed_data_filters = warehouse.parse_column_filters(data_filters)
-        payload = warehouse.metric_ranking(
+        payload = scientometric_workflow.metric_ranking(
             fraction_mode,
             metric,
             filters,
@@ -475,7 +476,7 @@ def ranking_csv(
         _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
         parsed_data_filters = warehouse.parse_column_filters(data_filters)
-        stream = warehouse.iter_metric_ranking_csv(
+        stream = scientometric_workflow.iter_metric_ranking_csv(
             fraction_mode,
             metric,
             filters,
@@ -584,7 +585,7 @@ def scientometric_analysis(
         q=q,
     )
     try:
-        payload = scientometrics.build_scientometric_analysis(
+        payload = scientometric_workflow.build_scientometric_analysis(
             fraction_mode=fraction_mode,
             metrics=_metric_list(metrics),
             baseline_metric=baseline_metric,
@@ -684,7 +685,7 @@ def scientometric_correlations_csv(request: Request) -> Response:
 def scientometric_outliers_csv(request: Request) -> Response:
     try:
         payload = _scientometric_export_payload_from_request(request)
-        rows = scientometrics.build_outlier_export_rows(**_scientometric_kwargs_from_request(request))
+        rows = scientometric_workflow.build_outlier_export_rows(**_scientometric_kwargs_from_request(request))
     except cohorts.CohortNotFound as exc:
         raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
@@ -725,7 +726,7 @@ def scientometric_conclusion_markdown(request: Request) -> Response:
         raise HTTPException(status_code=404, detail="Группа авторов не найдена") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    markdown = scientometrics.scientometric_conclusion_markdown(payload)
+    markdown = scientometric_workflow.scientometric_conclusion_markdown(payload)
     return Response(
         content=markdown,
         media_type="text/markdown; charset=utf-8",
@@ -763,7 +764,7 @@ def _slice_filters(
     work_type: str = "",
     q: str = "",
 ) -> dict[str, str]:
-    return build_analysis_filters(
+    return AnalysisFilterQuery(
         country_code=country_code,
         filter_mode=filter_mode,
         subject_level=subject_level,
@@ -788,7 +789,7 @@ def _slice_filters(
         to_publication_date=to_publication_date,
         work_type=work_type,
         q=q,
-    )
+    ).to_filters()
 
 
 def _metric_list(metrics: str) -> list[str] | None:
@@ -819,7 +820,7 @@ def _combined_author_ids(scope_author_ids: Any, requested_author_ids: str | list
 
 def _scientometric_payload_from_request(request: Request) -> dict[str, Any]:
     kwargs = _scientometric_kwargs_from_request(request)
-    payload = scientometrics.build_scientometric_analysis(**kwargs)
+    payload = scientometric_workflow.build_scientometric_analysis(**kwargs)
     _annotate_scope_payload(
         payload,
         requested_run_id=str(kwargs.get("run_id") or ""),
@@ -895,18 +896,14 @@ def _data_selection_kwargs(
     data_direction: str = "desc",
     data_limit: int = 0,
 ) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    if data_filters:
-        out["data_filters"] = data_filters
-    if str(data_search or "").strip():
-        out["data_search"] = str(data_search or "").strip()
-    if str(data_sort or "").strip():
-        out["data_sort"] = str(data_sort or "").strip()
-        out["data_direction"] = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
-    limit = _int_query(data_limit, 0)
-    if limit > 0:
-        out["data_limit"] = max(1, min(limit, EXPORT_RESULT_MAX_ROWS))
-    return out
+    return DataSelectionQuery(
+        data_filters=data_filters,
+        data_search=str(data_search or ""),
+        data_sort=str(data_sort or ""),
+        data_direction=str(data_direction or "desc"),
+        data_limit=_int_query(data_limit, 0),
+        max_limit=EXPORT_RESULT_MAX_ROWS,
+    ).to_kwargs()
 
 
 def _csv_response(fields: list[str], rows: list[dict[str, Any]], *, filename: str, headers: dict[str, str] | None = None) -> Response:
@@ -1017,10 +1014,11 @@ def _scope_metadata(
     resolved_run_id = str(resolved_run_id or "").strip()
     resolved_dump_id = str(resolved_dump_id or "").strip()
     cohort_id = str(cohort_id or "").strip()
-    if requested_run_id or requested_dump_id:
+    scope_query = ScopeQuery(run_id=requested_run_id, dump_id=requested_dump_id, cohort_id=cohort_id)
+    if scope_query.has_direct_scope:
         _require_analysis_scope(run_id=resolved_run_id or requested_run_id, dump_id=resolved_dump_id or requested_dump_id)
         return {"scope_status": "explicit_scope", "reproducible": True}
-    if cohort_id and (resolved_run_id or resolved_dump_id):
+    if scope_query.cohort_id and (resolved_run_id or resolved_dump_id):
         _require_analysis_scope(run_id=resolved_run_id, dump_id=resolved_dump_id)
         return {"scope_status": "cohort_resolved_scope", "reproducible": True}
     raise ValueError("run_id or dump_id is required for analytics access.")
