@@ -398,7 +398,9 @@ def _run_compute(
     run_tables.mkdir(parents=True, exist_ok=True)
 
     author_work_csv = run_tables / "author_work.csv"
+    author_work_parquet = author_work_csv.with_suffix(".parquet")
     indices_csv = run_tables / "indices.csv"
+    indices_parquet = indices_csv.with_suffix(".parquet")
     ratings_csv = run_tables / "ratings.csv"
 
     step(0.18, "Формирование авторского уровня данных")
@@ -412,7 +414,7 @@ def _run_compute(
     )
     step(0.48, "Расчет наукометрических показателей")
     compute_indices(
-        author_work_csv,
+        author_work_parquet if author_work_parquet.exists() else author_work_csv,
         indices_csv,
         cfg.lrdi_p0,
         cfg.lrdi_lambda,
@@ -420,7 +422,7 @@ def _run_compute(
         return_rows=False,
     )
     step(0.72, "Построение рейтингов")
-    build_ratings(indices_csv, ratings_csv, return_rows=False)
+    build_ratings(indices_parquet if indices_parquet.exists() else indices_csv, ratings_csv, return_rows=False)
     run_table_outputs = {
         "author_work": author_work_csv,
         "indices": indices_csv,

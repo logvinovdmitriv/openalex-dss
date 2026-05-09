@@ -109,6 +109,9 @@ class OpenAlexCliProviderTests(unittest.TestCase):
 
         self.assertFalse(manifest["used_api_key"])
         self.assertNotIn("--api-key", commands[0])
+        self.assertIn("--resume", commands[0])
+        self.assertIn("--workers", commands[0])
+        self.assertEqual(commands[0][commands[0].index("--workers") + 1], "4")
 
     def test_cli_dump_without_accepted_signatures_is_not_final_analysis_eligible(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -155,6 +158,7 @@ class OpenAlexCliProviderTests(unittest.TestCase):
             self.assertFalse(manifest["signatures"]["accepted_estimate_signature_verified"])
             self.assertFalse(manifest["signatures"]["download_signature_verified"])
             self.assertIn("--api-key", commands[0])
+            self.assertIn("--resume", commands[0])
 
     def test_cancelled_cli_download_packs_partial_dump(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -197,6 +201,95 @@ class OpenAlexCliProviderTests(unittest.TestCase):
         self.assertEqual(manifest["scientific_completeness"], "partial")
         self.assertFalse(manifest["allowed_for_final_analysis"])
         self.assertTrue(manifest["usable_for_exploratory_analysis"])
+
+    def test_rate_limited_cli_download_packs_partial_dump_without_leaking_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = replace_config(
+                load_config(ROOT / "config/slice.yaml"),
+                slice_name="cli_rate_limited",
+                filter_mode="primary_topic",
+                entity_level="subfield",
+                entity_id_short="1706",
+            )
+
+            def fake_run(command: list[str], **_: object) -> SimpleNamespace:
+                if command[1:] == ["--version"]:
+                    return SimpleNamespace(stdout="openalex 0.test", stderr="", returncode=0)
+                return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+            def fake_cli_download(command: list[str], *, files_dir: Path, stderr_path: Path, **_: object) -> tuple[SimpleNamespace, str]:
+                files_dir.mkdir(parents=True, exist_ok=True)
+                (files_dir / "W1.json").write_text(json.dumps(_work("W1")), encoding="utf-8")
+                stderr_path.write_text(
+                    "Failed to fetch metadata: 429, url='https://api.openalex.org/works/W1?api_key=test-secret'",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(returncode=1), "cli_completed"
+
+            with (
+                patch.object(openalex_cli_provider, "cli_status", return_value={"available": True, "executable": "/tmp/openalex"}),
+                patch.object(openalex_cli_provider.subprocess, "run", side_effect=fake_run),
+                patch.object(openalex_cli_provider, "_run_cli_download", side_effect=fake_cli_download),
+            ):
+                manifest = openalex_cli_provider.download_works_metadata(
+                    cfg,
+                    api_key="test-secret",
+                    out_dir=root / "raw",
+                    estimate={
+                        "estimate_signature": corpus_signature(cfg),
+                        "download_signature": cli_download_signature(cfg),
+                        "estimate_count": 10,
+                    },
+                )
+
+        self.assertEqual(manifest["stop_reason"], "api_rate_limited")
+        self.assertEqual(manifest["records_downloaded"], 1)
+        self.assertEqual(manifest["scientific_completeness"], "partial")
+        self.assertNotIn("test-secret", json.dumps(manifest, ensure_ascii=False))
+
+    def test_rate_limited_cli_download_without_files_raises_localized_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = replace_config(
+                load_config(ROOT / "config/slice.yaml"),
+                slice_name="cli_rate_limited_empty",
+                filter_mode="primary_topic",
+                entity_level="subfield",
+                entity_id_short="1706",
+            )
+
+            def fake_run(command: list[str], **_: object) -> SimpleNamespace:
+                if command[1:] == ["--version"]:
+                    return SimpleNamespace(stdout="openalex 0.test", stderr="", returncode=0)
+                return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+            def fake_cli_download(command: list[str], *, stderr_path: Path, **_: object) -> tuple[SimpleNamespace, str]:
+                stderr_path.write_text(
+                    "Failed to fetch metadata: 429, url='https://api.openalex.org/works/W1?api_key=test-secret'",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(returncode=1), "cli_completed"
+
+            with (
+                patch.object(openalex_cli_provider, "cli_status", return_value={"available": True, "executable": "/tmp/openalex"}),
+                patch.object(openalex_cli_provider.subprocess, "run", side_effect=fake_run),
+                patch.object(openalex_cli_provider, "_run_cli_download", side_effect=fake_cli_download),
+            ):
+                with self.assertRaises(RuntimeError) as ctx:
+                    openalex_cli_provider.download_works_metadata(
+                        cfg,
+                        api_key="test-secret",
+                        out_dir=root / "raw",
+                        estimate={
+                            "estimate_signature": corpus_signature(cfg),
+                            "download_signature": cli_download_signature(cfg),
+                            "estimate_count": 10,
+                        },
+                    )
+
+        self.assertIn("OpenAlex ограничил запросы к API", str(ctx.exception))
+        self.assertNotIn("test-secret", str(ctx.exception))
 
     def test_malformed_cli_output_writes_failed_dump_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

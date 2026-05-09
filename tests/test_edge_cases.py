@@ -113,6 +113,28 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertEqual(len(ratings), 2)
         self.assertEqual([row["author_id"] for row in ratings], ["https://openalex.org/A1", "https://openalex.org/A2"])
 
+    def test_optimized_indices_read_quoted_author_names_from_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            author_work = root / "author_work.csv"
+            author_work.write_text(
+                "\n".join(
+                    [
+                        "run_id,fraction_mode,work_id,author_id,author_display_name,publication_year,cited_by_count,authors_count_used,credit_weight,cited_credit,single_authored_flag,qf_any,qf_authorship_truncated,qf_null_omission,omitted_author_fraction",
+                        'run_a,integer,W1,A1,"M.Ed., B.Ed., Independent Researcher",2026,1.0,1.0,1.0,1.0,true,false,false,false,',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            compute_indices(author_work, root / "indices.csv", return_rows=False)
+            rows = read_table_dicts(root / "indices.csv")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["author_display_name"], "M.Ed., B.Ed., Independent Researcher")
+        self.assertEqual(rows[0]["p"], "1")
+
     def test_parquet_writer_stabilizes_mixed_openalex_column_types(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

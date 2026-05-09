@@ -81,6 +81,11 @@ export function DataView({
   const missingScope = localDataMissingScopeState({ runId: effectiveRunId, dumpId: effectiveDumpId, activeContext });
   const availableTables = (Object.values(localDataSummary?.tables ?? {}) as Array<Record<string, unknown>>).filter((entry) => Boolean(entry.exists));
   const hasAvailableTables = localDataKindOptions.length > 0;
+  const materializationActions = new Set(["build_from_openalex", "fetch_slice_dump", "repair_dump"]);
+  const runAction = String(run?.action ?? "");
+  const runStatus = String(run?.status ?? "");
+  const slicePreparationActive = materializationActions.has(runAction) && ["queued", "running", "cancelling"].includes(runStatus);
+  const slicePreparationFailed = materializationActions.has(runAction) && runStatus === "failed";
   const hasTableRestrictions = Boolean(Object.keys(dataColumnFilters).length || dataSearch.trim() || dataSort || dataDirection !== "desc");
   const hasDataRestrictions = hasTableRestrictions || selectedAuthorIds.length > 0;
   const rowsOnPage = table?.rows?.length ?? 0;
@@ -136,8 +141,14 @@ export function DataView({
       )}
       {!missingScope.missing && !hasAvailableTables && (
         <section className="notice warn">
-          <b>В выбранном срезе нет доступных локальных таблиц</b>
-          <span>Вкладка “Данные” показывает только файлы, которые реально существуют в скачанном срезе или созданном расчете. Выберите другой срез или запустите расчет индексов.</span>
+          <b>{slicePreparationActive ? "Срез еще готовится" : slicePreparationFailed ? "Срез не подготовлен" : "В выбранном срезе нет доступных локальных таблиц"}</b>
+          <span>
+            {slicePreparationActive
+              ? "Таблицы появятся после скачивания, упаковки и расчета индексов. Следите за этапами ниже."
+              : slicePreparationFailed
+                ? "Подготовка завершилась ошибкой. Если часть файлов уже скачана, используйте восстановление или продолжение загрузки во вкладке “Срезы”."
+                : "Вкладка “Данные” показывает только файлы, которые реально существуют в скачанном срезе или созданном расчете. Выберите другой срез или запустите расчет индексов."}
+          </span>
         </section>
       )}
       <section className="panel table-panel">
@@ -230,7 +241,16 @@ export function DataView({
         {missingScope.missing ? (
           <EmptyState title="Нет выбранного локального среза" detail="Предпросмотр появится после выбора расчета, локального среза или после загрузки нового среза." />
         ) : !hasAvailableTables ? (
-          <EmptyState title="Нет локальных таблиц" detail="В выбранном срезе пока нет скачанных таблиц или результатов расчета, которые можно показать." />
+          <EmptyState
+            title={slicePreparationActive ? "Таблицы еще создаются" : slicePreparationFailed ? "Таблицы не созданы" : "Нет локальных таблиц"}
+            detail={
+              slicePreparationActive
+                ? "Данные будут доступны автоматически после завершения подготовки среза."
+                : slicePreparationFailed
+                  ? "Откройте вкладку “Срезы”, восстановите частичный срез или запустите загрузку повторно."
+                  : "В выбранном срезе пока нет скачанных таблиц или результатов расчета, которые можно показать."
+            }
+          />
         ) : (
           <>
             <DataGrid
@@ -307,8 +327,8 @@ function ActiveContextPanel({
 }
 
 function activeContextEligibility(value: boolean | null | undefined) {
-  if (value === true) return { label: "Финальный анализ разрешен", className: "status-chip ok" };
-  if (value === false) return { label: "Финальный анализ запрещен", className: "status-chip warn" };
+  if (value === true) return { label: "Готов для финального отчета", className: "status-chip ok" };
+  if (value === false) return { label: "Предварительный срез", className: "status-chip warn" };
   return { label: "Пригодность не определена", className: "status-chip" };
 }
 

@@ -17,6 +17,7 @@ from app.services import cache_engine, custom_metrics, distribution_engine, rank
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from openalex_dss.duckdb_io import table_expression  # noqa: E402
 from openalex_dss.metrics import assign_iupv_percentiles, g_index, h_index, i10_index, lrdi as lrdi_metric  # noqa: E402
 from openalex_dss.io_utils import write_json, write_parquet_dicts  # noqa: E402
 DUMP_TABLES = storage_paths.DUMP_TABLES
@@ -161,13 +162,10 @@ def register_views(conn: duckdb.DuckDBPyConnection, *, run_id: str = "", dump_id
 
 
 def _register_file_view(conn: duckdb.DuckDBPyConnection, name: str, table_path: Path) -> None:
-    escaped_path = str(table_path).replace("'", "''")
-    reader = "read_parquet" if table_path.suffix.lower() == ".parquet" else "read_csv_auto"
-    args = "" if reader == "read_parquet" else ", header=true, ignore_errors=true"
     conn.execute(
         f"""
         CREATE OR REPLACE VIEW {name} AS
-        SELECT * FROM {reader}('{escaped_path}'{args})
+        SELECT * FROM {table_expression(table_path)}
         """
     )
 

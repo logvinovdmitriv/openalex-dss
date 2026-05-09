@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -20,6 +21,9 @@ if str(SRC) not in sys.path:
 
 from openalex_dss.io_utils import ensure_dir, sha256_file, write_json  # noqa: E402
 from openalex_dss.openalex import build_filter, cli_download_signature, corpus_signature, download_consistency  # noqa: E402
+
+
+DEFAULT_DOWNLOAD_WORKERS = 4
 
 
 def cli_status(api_key_env: str = "OPENALEX_API_KEY") -> dict[str, Any]:
@@ -73,6 +77,9 @@ def download_works_metadata(
         str(files_dir),
         "--filter",
         filter_value,
+        "--workers",
+        str(_download_workers()),
+        "--resume",
     ]
     if api_key.strip():
         command[2:2] = ["--api-key", api_key.strip()]
@@ -115,11 +122,17 @@ def download_works_metadata(
         completed, stop_reason = download_result
     else:  # Test doubles and older internal callers may return only a CompletedProcess-like object.
         completed, stop_reason = download_result, "cli_completed"
-    partial_stop = stop_reason in {"user_cancelled", "size_limit_reached"}
+    if completed.returncode != 0 and stop_reason == "cli_completed":
+        stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
+        stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
+        rate_reason = _download_failure_stop_reason(f"{stderr_text}\n{stdout_text}")
+        if rate_reason and _cli_download_snapshot(files_dir)["files_seen"] > 0:
+            stop_reason = rate_reason
+    partial_stop = stop_reason in {"user_cancelled", "size_limit_reached", "api_rate_limited", "api_credits_exhausted"}
     if completed.returncode != 0 and not partial_stop:
-        stderr_text = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
-        stdout_text = stdout_path.read_text(encoding="utf-8") if stdout_path.exists() else ""
-        raise RuntimeError((stderr_text or stdout_text or "Загрузка OpenAlex завершилась ошибкой").strip())
+        stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
+        stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
+        raise RuntimeError(_sanitize_download_error(stderr_text or stdout_text or "Загрузка OpenAlex завершилась ошибкой").strip())
 
     if progress_callback:
         progress_callback({"percent": 0, "stage": "Упаковка файлов OpenAlex", "fetched": 0, "progress_scope": "pack"})
@@ -234,6 +247,7 @@ def download_works_metadata(
             "checkpointing": True,
             "adaptive_rate_limiting": True,
             "parallel_downloads": True,
+            "download_workers": _download_workers(),
             "estimate_signature_verified": estimate_signature_verified,
             "accepted_estimate_signature_verified": accepted_estimate_signature_verified,
             "download_signature_verified": download_signature_verified,
@@ -370,6 +384,33 @@ def _run_cli_download(
                 })
         return_code = process.wait()
     return subprocess.CompletedProcess(command, return_code), stop_reason
+
+
+def _download_workers() -> int:
+    raw = os.environ.get("OPENALEX_DSS_DOWNLOAD_WORKERS", str(DEFAULT_DOWNLOAD_WORKERS))
+    try:
+        return max(1, min(8, int(raw)))
+    except (TypeError, ValueError):
+        return DEFAULT_DOWNLOAD_WORKERS
+
+
+def _download_failure_stop_reason(text: str) -> str:
+    lower = text.lower()
+    if "credits exhausted" in lower:
+        return "api_credits_exhausted"
+    if "rate limited" in lower or " 429" in lower or "429," in lower:
+        return "api_rate_limited"
+    return ""
+
+
+def _sanitize_download_error(text: str) -> str:
+    cleaned = re.sub(r"([?&]api_key=)[^\s'\"&]+", r"\1***", text)
+    if _download_failure_stop_reason(cleaned):
+        return (
+            "OpenAlex ограничил запросы к API. Уже скачанные файлы сохранены; "
+            "повторите скачивание позже или восстановите частичный срез."
+        )
+    return cleaned
 
 
 def _terminate_process_group(process: subprocess.Popen[str]) -> None:

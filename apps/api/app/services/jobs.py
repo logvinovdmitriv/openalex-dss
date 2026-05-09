@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -181,12 +182,13 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
             "artifacts": _artifact_links(action, run_id, result),
         })
     except Exception as exc:  # pragma: no cover - defensive job boundary
-        materialization_jobs.mark_failed(run_id, action, str(exc), payload)
+        error_text = _safe_error_text(str(exc))
+        materialization_jobs.mark_failed(run_id, action, error_text, payload)
         doc = _current_doc(run_id, fallback=doc)
         if cancel_requested(run_id):
-            doc.update({"status": "cancelled", "progress_percent": None, "progress_stage": "cancelled", "finished_at": _now(), "worker_heartbeat_at": _now(), "error": str(exc)})
+            doc.update({"status": "cancelled", "progress_percent": None, "progress_stage": "cancelled", "finished_at": _now(), "worker_heartbeat_at": _now(), "error": error_text})
         else:
-            doc.update({"status": "failed", "progress_percent": None, "progress_stage": "failed", "finished_at": _now(), "worker_heartbeat_at": _now(), "error": str(exc)})
+            doc.update({"status": "failed", "progress_percent": None, "progress_stage": "failed", "finished_at": _now(), "worker_heartbeat_at": _now(), "error": error_text})
     _save(doc)
     if str(doc.get("status") or "") in {"completed", "failed", "cancelled"}:
         _cancel_path(run_id).unlink(missing_ok=True)
@@ -284,7 +286,13 @@ def _progress_phases(doc: dict[str, Any]) -> list[dict[str, Any]]:
             state = "done"
             current_percent = 100 if current_percent is not None else current_percent
         elif status in {"failed", "cancelled"}:
-            state = "error"
+            is_current = any(token and token in stage for token in (label, *stage_tokens))
+            if current_percent == 100:
+                state = "done"
+            elif is_current or (current_percent is not None and current_percent > 0):
+                state = "error"
+            else:
+                state = "pending"
         elif status == "queued":
             state = "pending"
         elif any(token and token in stage for token in (label, *stage_tokens)):
@@ -647,6 +655,16 @@ def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if "api_key" in clean:
         clean["api_key"] = "***" if str(clean.get("api_key") or "").strip() else ""
     return clean
+
+
+def _safe_error_text(text: str) -> str:
+    cleaned = re.sub(r"([?&]api_key=)[^\s'\"&]+", r"\1***", text)
+    if "Credits exhausted" in cleaned or "Rate limited" in cleaned or "429" in cleaned:
+        return (
+            "OpenAlex ограничил запросы к API. Уже скачанные файлы сохранены; "
+            "повторите скачивание позже или восстановите частичный срез."
+        )
+    return cleaned
 
 
 def _stage_for_action(action: str) -> str:

@@ -15,7 +15,10 @@ def table_expression(path: str | Path) -> str:
     literal = sql_literal(p)
     if p.suffix == ".parquet":
         return f"read_parquet({literal})"
-    return f"read_csv_auto({literal}, header=true)"
+    return (
+        f"read_csv_auto({literal}, header=true, sample_size=-1, "
+        "quote='\"', escape='\"')"
+    )
 
 
 def copy_query(query: str, csv_path: str | Path, parquet_path: str | Path | None = None) -> None:
