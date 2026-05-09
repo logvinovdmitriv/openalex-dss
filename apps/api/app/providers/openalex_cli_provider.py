@@ -369,6 +369,7 @@ def _run_cli_download(
             if progress_callback:
                 percent = _cli_download_percent(snapshot["bytes_written"], max_download_bytes)
                 stage = _cli_download_stage(snapshot["files_seen"], snapshot["bytes_written"], elapsed)
+                forecast_exceeded = planned_raw_bytes > 0 and snapshot["bytes_written"] > planned_raw_bytes
                 if stop_reason == "user_cancelled":
                     stage = "Остановка по запросу пользователя; готовим частичный срез"
                 elif stop_reason == "size_limit_reached":
@@ -377,10 +378,13 @@ def _run_cli_download(
                     "stage": stage,
                     "fetched": 0,
                     "files_seen": snapshot["files_seen"],
+                    "files_seen_capped": snapshot.get("files_seen_capped", False),
                     "bytes_written": snapshot["bytes_written"],
                     "elapsed_seconds": elapsed,
                     "target_records": planned_records or None,
                     "estimated_raw_bytes": planned_raw_bytes or None,
+                    "forecast_exceeded": forecast_exceeded,
+                    "forecast_ratio": round(snapshot["bytes_written"] / planned_raw_bytes, 4) if planned_raw_bytes else None,
                     "max_download_bytes": max_download_bytes or None,
                     "stop_reason": stop_reason,
                     "progress_scope": "download",
@@ -434,9 +438,11 @@ def _terminate_process_group(process: subprocess.Popen[str]) -> None:
 
 def _cli_download_snapshot(files_dir: Path) -> dict[str, int]:
     if not files_dir.exists():
-        return {"files_seen": 0, "bytes_written": 0}
+        return {"files_seen": 0, "files_seen_capped": False, "bytes_written": 0}
+    files_seen = _bounded_file_count(files_dir, max_files=5000)
     return {
-        "files_seen": _bounded_file_count(files_dir, max_files=5000),
+        "files_seen": files_seen,
+        "files_seen_capped": files_seen >= 5000,
         "bytes_written": _directory_size_bytes(files_dir),
     }
 

@@ -1659,6 +1659,16 @@ input[aria-invalid="true"] {
   overflow-wrap: anywhere;
 }
 
+.run-warning {
+  margin-top: 8px;
+  border-left: 3px solid #b98200;
+  padding: 7px 9px;
+  background: #fff8e8;
+  color: #6e4f00;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .run-card.live {
   border-color: var(--border-strong);
   background: #fbfdff;
