@@ -88,6 +88,7 @@ def _cached_estimate(cfg: Any, limits: dict[str, Any], *, refresh: bool = False,
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(path)
+    _prune_estimate_cache(limits)
     return estimate, {"status": "refresh" if refresh else "miss", "key": key, "ttl_hours": ttl_hours, "created_at": doc["created_at"]}
 
 
@@ -123,6 +124,25 @@ def _estimate_cache_ttl_hours(limits: dict[str, Any]) -> int:
         return max(1, int(policy.get("estimate_cache_ttl_hours") or 24))
     except (TypeError, ValueError):
         return 24
+
+
+def _prune_estimate_cache(limits: dict[str, Any]) -> None:
+    root = DATA / "cache" / "estimates"
+    if not root.is_dir():
+        return
+    policy = limits.get("storage_policy") if isinstance(limits.get("storage_policy"), dict) else {}
+    try:
+        limit = max(1, int(policy.get("max_estimate_cache_entries") or 200))
+    except (TypeError, ValueError):
+        limit = 200
+    entries = sorted(root.glob("*.json"), key=lambda path: path.stat().st_mtime if path.exists() else 0)
+    if len(entries) <= limit:
+        return
+    for path in entries[: len(entries) - limit]:
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def _read_json(path: Path) -> dict[str, Any]:

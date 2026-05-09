@@ -5,7 +5,7 @@ import json
 from io import StringIO
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from app.services import cohorts, custom_metrics, scientometrics, warehouse
@@ -147,6 +147,34 @@ def analytics(
         cohort_id=cohort_id,
     )
     return payload
+
+
+@router.get("/analytics/custom-metrics")
+def list_custom_metric_models(run_id: str = "") -> dict[str, Any]:
+    try:
+        models = custom_metrics.list_metric_models(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"run_id": run_id, "models": models}
+
+
+@router.post("/analytics/custom-metrics")
+def save_custom_metric_model(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        run_id = str(payload.get("run_id") or "").strip()
+        model = custom_metrics.save_metric_model(run_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc), "action": "Исправьте формулу и повторите сохранение."}) from exc
+    return {"run_id": run_id, "model": model}
+
+
+@router.delete("/analytics/custom-metrics/{model_id}")
+def delete_custom_metric_model(model_id: str, run_id: str = "") -> dict[str, Any]:
+    try:
+        result = custom_metrics.delete_metric_model(run_id, model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"run_id": run_id, **result}
 
 
 @router.get("/analytics/distribution")
@@ -447,7 +475,7 @@ def ranking_csv(
         _require_analysis_scope(run_id=run_id, dump_id=dump_id)
         filters = cohort_ctx["filters"]
         parsed_data_filters = warehouse.parse_column_filters(data_filters)
-        payload = warehouse.metric_ranking(
+        stream = warehouse.iter_metric_ranking_csv(
             fraction_mode,
             metric,
             filters,
@@ -459,11 +487,7 @@ def ranking_csv(
             custom_metric_defs=_custom_metric_defs(custom_metric_defs),
             **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
         )
-        payload["cohort"] = cohort_ctx["cohort"]
-        payload["data_filters"] = parsed_data_filters
-        payload["data_search"] = data_search
-        payload["selected_author_ids"] = _author_ids_query(author_ids)
-        payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
+        payload = {"run_id": run_id, "dump_id": dump_id}
         _annotate_scope_payload(
             payload,
             requested_run_id=requested_run_id,
@@ -479,7 +503,7 @@ def ranking_csv(
     except HTTPException:
         raise
     return StreamingResponse(
-        _iter_dict_csv(payload["fields"], payload["rows"]),
+        stream,
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": 'attachment; filename="openalex_dss_filtered_rating.csv"',
@@ -1019,6 +1043,9 @@ def _annotate_scope_payload(
         cohort_id=cohort_id,
     )
     payload.update(metadata)
+    metric_run_id = str(resolved_run_id or payload.get("run_id") or "").strip()
+    if metric_run_id and "metric_models" not in payload:
+        payload["metric_models"] = custom_metrics.list_metric_models(metric_run_id)
     scope = payload.get("scope")
     if isinstance(scope, dict):
         scope["scope_status"] = metadata["scope_status"]

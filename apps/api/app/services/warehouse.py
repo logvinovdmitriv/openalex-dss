@@ -979,8 +979,8 @@ def filtered_indices(
     cached = _filtered_indices_cache_hit(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
     if cached:
         return _read_cached_index_rows(cached["indices_path"])
-    rows = _filtered_work_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
-    _write_filtered_indices_cache(fraction_mode, filters, rows, run_id=run_id, dump_id=dump_id)
+    rows, author_work_rows = _filtered_work_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id, return_author_work=True)
+    _write_filtered_indices_cache(fraction_mode, filters, rows, run_id=run_id, dump_id=dump_id, author_work_rows=author_work_rows)
     return rows
 
 
@@ -1047,6 +1047,7 @@ def _write_filtered_indices_cache(
     *,
     run_id: str,
     dump_id: str,
+    author_work_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     if not scope["run_id"]:
@@ -1065,10 +1066,7 @@ def _write_filtered_indices_cache(
     author_work_path = tmp_dir / "author_work.parquet"
     try:
         write_parquet_dicts(indices_path, rows, fields)
-        # Work-level filtered rows can be added later without changing the
-        # manifest contract; keep an empty artifact so cache consumers can rely
-        # on stable filenames.
-        write_parquet_dicts(author_work_path, [], AUTHOR_WORK_DETAIL_FIELDS)
+        write_parquet_dicts(author_work_path, author_work_rows or [], AUTHOR_WORK_DETAIL_FIELDS)
         manifest = {
             "schema": "filtered_analytics_cache",
             "key": key,
@@ -1079,6 +1077,7 @@ def _write_filtered_indices_cache(
             "metric_params": _run_metric_params(scope["run_id"]),
             "source_signatures": _filtered_source_signatures(scope["run_id"], scope["dump_id"]),
             "rows": len(rows),
+            "author_work_rows": len(author_work_rows or []),
             "created_at": _utc_now(),
             "last_used_at": _utc_now(),
             "artifacts": {
@@ -1175,33 +1174,99 @@ def _filtered_indices_fields(rows: list[dict[str, Any]]) -> list[str]:
 def _prune_filtered_indices_cache(run_id: str) -> None:
     root = _run_dir(run_id) / "analytics" / "filtered"
     if not root.is_dir():
+        _prune_total_filtered_indices_cache()
         return
-    entries: list[tuple[str, Path]] = []
+    entries: list[tuple[str, Path, int]] = []
     for manifest_path in root.glob("*/manifest.json"):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        entries.append((str(manifest.get("last_used_at") or manifest.get("created_at") or ""), manifest_path.parent))
+        entries.append((str(manifest.get("last_used_at") or manifest.get("created_at") or ""), manifest_path.parent, _dir_size(manifest_path.parent)))
     limit = _analytics_cache_limit()
-    if len(entries) <= limit:
+    max_bytes = _analytics_cache_max_bytes_per_run()
+    import shutil
+
+    ordered = sorted(entries)
+    for _, cache_dir, _ in ordered[: max(0, len(entries) - limit)]:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+    remaining = [(stamp, path, size) for stamp, path, size in ordered[max(0, len(entries) - limit):] if path.exists()]
+    total = sum(size for _, _, size in remaining)
+    for _, cache_dir, size in remaining:
+        if total <= max_bytes:
+            break
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        total -= size
+    _prune_total_filtered_indices_cache()
+
+
+def _prune_total_filtered_indices_cache() -> None:
+    max_bytes = _analytics_cache_max_total_bytes()
+    if max_bytes <= 0:
+        return
+    root = DATA / "runs"
+    if not root.is_dir():
+        return
+    entries: list[tuple[str, Path, int]] = []
+    for manifest_path in root.glob("*/analytics/filtered/*/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        cache_dir = manifest_path.parent
+        entries.append((str(manifest.get("last_used_at") or manifest.get("created_at") or ""), cache_dir, _dir_size(cache_dir)))
+    total = sum(size for _, _, size in entries)
+    if total <= max_bytes:
         return
     import shutil
 
-    for _, cache_dir in sorted(entries)[: max(0, len(entries) - limit)]:
+    for _, cache_dir, size in sorted(entries):
+        if total <= max_bytes:
+            break
         shutil.rmtree(cache_dir, ignore_errors=True)
+        total -= size
 
 
 def _analytics_cache_limit() -> int:
+    return _storage_policy_int("max_filtered_cache_entries_per_run", _ANALYTICS_CACHE_LIMIT, minimum=1)
+
+
+def _analytics_cache_max_bytes_per_run() -> int:
+    return _storage_policy_int("max_analytics_cache_bytes_per_run", 2 * 1024 * 1024 * 1024, minimum=1)
+
+
+def _analytics_cache_max_total_bytes() -> int:
+    return _storage_policy_int("max_total_cache_bytes", 10 * 1024 * 1024 * 1024, minimum=1)
+
+
+def _storage_policy_int(key: str, default: int, *, minimum: int = 0) -> int:
     config_path = ROOT / "configs" / "execution_limits.yaml"
     if config_path.is_file():
         try:
             doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
             policy = doc.get("storage_policy") if isinstance(doc, dict) else {}
-            return max(1, int((policy or {}).get("max_filtered_cache_entries_per_run") or _ANALYTICS_CACHE_LIMIT))
+            return max(minimum, int((policy or {}).get(key) or default))
         except (OSError, TypeError, ValueError, yaml.YAMLError):
-            return _ANALYTICS_CACHE_LIMIT
-    return _ANALYTICS_CACHE_LIMIT
+            return default
+    return default
+
+
+def _dir_size(path: Path) -> int:
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    total = 0
+    if not path.is_dir():
+        return 0
+    for item in path.rglob("*"):
+        if item.is_file():
+            try:
+                total += item.stat().st_size
+            except OSError:
+                pass
+    return total
 
 
 def _utc_now() -> str:
@@ -1216,13 +1281,14 @@ def _filtered_work_indices(
     *,
     run_id: str = "",
     dump_id: str = "",
-) -> list[dict[str, Any]]:
+    return_author_work: bool = False,
+) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if not (
         table_exists("author_work", run_id=run_id, dump_id=dump_id)
         and table_exists("works", run_id=run_id, dump_id=dump_id)
         and table_exists("authorships", run_id=run_id, dump_id=dump_id)
     ):
-        return []
+        return ([], []) if return_author_work else []
 
     filters = _clean_filters(filters or {})
     metric_params = _run_metric_params(run_id)
@@ -1395,6 +1461,7 @@ def _filtered_work_indices(
             conn.execute(
                 f"""
                 SELECT
+                  aw.fraction_mode,
                   aw.author_id,
                   aw.author_display_name,
                   aw.work_id,
@@ -1427,6 +1494,18 @@ def _filtered_work_indices(
             )
         )
 
+    out = _indices_from_filtered_author_work_rows(rows, fraction_mode=fraction_mode, run_id=run_id, dump_id=dump_id, metric_params=metric_params)
+    return (out, rows) if return_author_work else out
+
+
+def _indices_from_filtered_author_work_rows(
+    rows: list[dict[str, Any]],
+    *,
+    fraction_mode: str,
+    run_id: str,
+    dump_id: str,
+    metric_params: dict[str, Any],
+) -> list[dict[str, Any]]:
     groups: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         groups[str(row["author_id"])].append(row)
@@ -1532,6 +1611,182 @@ def metric_ranking(
     )
     payload["analytics_cache"] = analytics_cache_info()
     return payload
+
+
+def iter_metric_ranking_csv(
+    fraction_mode: str,
+    metric: str,
+    filters: FilterSet | None = None,
+    *,
+    limit: int = 100_000,
+    max_limit: int = 500_000,
+    run_id: str = "",
+    dump_id: str = "",
+    author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+    data_filters: dict[str, Any] | None = None,
+    data_search: str = "",
+    data_sort: str = "",
+    data_direction: str = "desc",
+    data_limit: int = 0,
+    custom_metric_defs: list[dict[str, str]] | None = None,
+    chunk_size: int = 2_000,
+) -> Iterator[str]:
+    """Stream a ranking CSV from DuckDB without materializing the full payload."""
+    if not _metric_supported(metric, custom_metric_defs):
+        raise ValueError(f"Unsupported metric: {metric}")
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
+    source_path: Path | None = None
+    source_is_cached = False
+    if _can_use_precomputed_indices(filters, run_id=run_id, dump_id=dump_id):
+        _set_analytics_cache_info({"status": "not_used", "key": "", "rows": count_rows("indices", run_id=run_id, dump_id=dump_id)})
+    else:
+        cached = _filtered_indices_cache_hit(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+        if not cached:
+            filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+            cached = _filtered_indices_cache_hit(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+        if not cached:
+            return iter(())
+        source_path = cached["indices_path"]
+        source_is_cached = True
+
+    def generate() -> Iterator[str]:
+        if source_is_cached and source_path is not None:
+            conn = duckdb.connect(":memory:")
+            escaped = str(source_path).replace("'", "''")
+            conn.execute(f"CREATE VIEW ranking_indices AS SELECT * FROM read_parquet('{escaped}')")
+        else:
+            conn = connect_scope(run_id=run_id, dump_id=dump_id)
+            conn.execute("CREATE OR REPLACE VIEW ranking_indices AS SELECT * FROM indices")
+        try:
+            fields = _registered_fields(conn, "ranking_indices")
+            table_name = "ranking_indices"
+            if custom_metric_defs:
+                table_name, field_set = _register_custom_metric_view(conn, "ranking_indices", "ranking_indices_with_custom_metrics", fields, custom_metric_defs)
+                fields = list(field_set)
+            if metric not in set(fields):
+                raise ValueError(f"Unsupported metric: {metric}")
+            sql, args, csv_fields = _metric_ranking_csv_query(
+                table_name,
+                fields,
+                fraction_mode=fraction_mode,
+                metric=metric,
+                limit=limit,
+                max_limit=max_limit,
+                author_ids=author_ids,
+                data_filters=parse_column_filters(data_filters),
+                data_search=data_search,
+                data_sort=data_sort,
+                data_direction=data_direction,
+                data_limit=data_limit,
+                custom_metric_defs=custom_metric_defs,
+            )
+            result = conn.execute(sql, args)
+            output = StringIO()
+            writer = csv.writer(output)
+            writer.writerow(csv_fields)
+            yield output.getvalue()
+            while True:
+                chunk = result.fetchmany(chunk_size)
+                if not chunk:
+                    break
+                output.seek(0)
+                output.truncate(0)
+                writer.writerows(chunk)
+                yield output.getvalue()
+        finally:
+            conn.close()
+
+    return generate()
+
+
+def _metric_ranking_csv_query(
+    table_name: str,
+    fields: list[str],
+    *,
+    fraction_mode: str,
+    metric: str,
+    limit: int,
+    max_limit: int,
+    author_ids: set[str] | list[str] | tuple[str, ...] | None,
+    data_filters: dict[str, Any],
+    data_search: str,
+    data_sort: str,
+    data_direction: str,
+    data_limit: int,
+    custom_metric_defs: list[dict[str, str]] | None,
+) -> tuple[str, list[Any], list[str]]:
+    field_set = set(fields)
+    where: list[str] = []
+    args: list[Any] = []
+    if fraction_mode and "fraction_mode" in field_set:
+        where.append("fraction_mode = ?")
+        args.append(fraction_mode)
+    search = str(data_search or "").strip()
+    if search:
+        expr = " OR ".join([f"CAST({_quote_sql_identifier(field)} AS VARCHAR) ILIKE ?" for field in fields])
+        where.append(f"({expr})")
+        args.extend([f"%{search}%"] * len(fields))
+    ids = _author_id_values(author_ids)
+    if ids and "author_id" in field_set:
+        where.append(f"author_id IN ({', '.join('?' for _ in ids)})")
+        args.extend(ids)
+    _append_column_filter_clauses(where, args, fields, data_filters)
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+    source_args = list(args)
+    source_sql = f"SELECT * FROM {table_name} {where_sql}"
+    normalized_data_limit = max(0, min(int(data_limit or 0), 500_000))
+    if normalized_data_limit > 0:
+        if data_sort and data_sort in field_set:
+            direction = "ASC" if str(data_direction or "").lower() == "asc" else "DESC"
+            source_sql = f"{source_sql} ORDER BY {_quote_sql_identifier(data_sort)} {direction} LIMIT ?"
+        else:
+            source_sql = f"{source_sql} LIMIT ?"
+        source_args.append(normalized_data_limit)
+    visible_metrics = _visible_metric_fields(fields, custom_metric_defs)
+    csv_fields = ["rank_competition", "author_display_name", "score", *visible_metrics, "author_id"]
+    select_exprs = [
+        "rank_competition",
+        "author_display_name",
+        "score",
+        *[_quote_sql_identifier(field) for field in visible_metrics],
+        "author_id",
+    ]
+    score_expr = f"COALESCE(TRY_CAST({_quote_sql_identifier(metric)} AS DOUBLE), 0.0)"
+    requested_limit = max(0, min(int(limit or 0), max(1, int(max_limit))))
+    limit_sql = "LIMIT ?" if requested_limit > 0 else ""
+    if requested_limit > 0:
+        source_args.append(requested_limit)
+    sql = f"""
+        SELECT {", ".join(select_exprs)}
+        FROM (
+          SELECT
+            *,
+            {score_expr} AS score,
+            RANK() OVER (ORDER BY {score_expr} DESC, author_display_name ASC, author_id ASC) AS rank_competition
+          FROM ({source_sql}) selected_indices
+        ) ranked_indices
+        ORDER BY rank_competition ASC, author_display_name ASC, author_id ASC
+        {limit_sql}
+    """
+    return sql, source_args, csv_fields
+
+
+def _visible_metric_fields(fields: list[str], custom_metric_defs: list[dict[str, str]] | None = None) -> list[str]:
+    field_set = set(fields)
+    custom_ids = [definition["id"] for definition in custom_metric_defs or []]
+    return [metric for metric in (*EXTENDED_LINE_CHART_METRICS, *custom_ids) if metric in field_set]
+
+
+def _author_id_values(author_ids: set[str] | list[str] | tuple[str, ...] | None) -> list[str]:
+    if author_ids is None:
+        return []
+    return sorted({str(value).strip() for value in author_ids if str(value).strip()})
+
+
+def _quote_sql_identifier(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
 
 
 def metric_ranking_from_rows(

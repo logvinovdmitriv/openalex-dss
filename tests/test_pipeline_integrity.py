@@ -248,7 +248,7 @@ class PipelineIntegrityTests(unittest.TestCase):
                 cancelled = jobs.cancel_run(run["run_id"])
 
         self.assertEqual(cancelled["status"], "cancelled")
-        self.assertEqual(cancelled["progress_percent"], 100)
+        self.assertIsNone(cancelled["progress_percent"])
 
     def test_stale_running_run_is_marked_failed_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

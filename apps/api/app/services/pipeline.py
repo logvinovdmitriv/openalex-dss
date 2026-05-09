@@ -504,7 +504,7 @@ def _write_precompute_manifest(*, run_id: str, dump_id: str, report: dict[str, A
         "report_scope_hash": scope_hash,
         "report_bundle": str(DATA / "runs" / _safe_id(run_id) / "reports" / f"report_{_safe_id(scope_hash)}.json") if scope_hash else "",
         "retention": {
-            "report_bundles_per_run": reports.REPORT_BUNDLE_KEEP,
+            "report_bundles_per_run": reports.report_bundle_keep(),
             "scientometric_cache_files_per_run": reports.scientometrics.ANALYSIS_CACHE_KEEP,
             "runs_per_dump": 3,
             "transient_dump_staging": ["normalized", "parquet"],

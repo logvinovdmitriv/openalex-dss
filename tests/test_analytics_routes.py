@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import urlencode
@@ -145,12 +146,12 @@ class AnalyticsRouteTests(unittest.TestCase):
     def test_ranking_csv_keeps_export_scale_limit(self) -> None:
         captured: dict[str, object] = {}
 
-        def fake_ranking(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> dict[str, object]:
+        def fake_stream(fraction_mode: str, metric: str, filters: dict[str, str], **kwargs: object) -> list[str]:
             captured["kwargs"] = kwargs
-            return {"fields": ["author_id", "score"], "rows": [{"author_id": "A1", "score": 1}], "total": 1}
+            return ["author_id,score\n", "A1,1\n"]
 
         with (
-            patch.object(analytics_routes.warehouse, "metric_ranking", side_effect=fake_ranking),
+            patch.object(analytics_routes.warehouse, "iter_metric_ranking_csv", side_effect=fake_stream),
             patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
         ):
             response = analytics_routes.ranking_csv(run_id="run_a", dump_id="dump_a", metric="h", limit=100_000)
@@ -286,7 +287,7 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         with (
             patch.object(analytics_routes.cohorts, "resolve_cohort_context", return_value=cohort),
-            patch.object(analytics_routes.warehouse, "metric_ranking", return_value={"fields": ["author_id", "score"], "rows": [], "total": 0}),
+            patch.object(analytics_routes.warehouse, "iter_metric_ranking_csv", return_value=["author_id,score\n"]),
             patch.object(analytics_routes.warehouse, "analysis_filter_warnings", return_value=[]),
         ):
             response = analytics_routes.ranking_csv(cohort_id="cohort_empty", fraction_mode="integer", metric="h", limit=100)
@@ -309,6 +310,33 @@ class AnalyticsRouteTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("run_id or dump_id is required", str(raised.exception.detail))
+
+    def test_custom_metric_models_can_be_saved_listed_and_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(analytics_routes.custom_metrics, "DATA", Path(tmp)):
+                saved = analytics_routes.save_custom_metric_model(
+                    {
+                        "run_id": "run_a",
+                        "id": "my_rating",
+                        "label": "Мой рейтинг",
+                        "description": "Проверочная формула",
+                        "expression": "100 * pr_h",
+                    }
+                )
+                listed = analytics_routes.list_custom_metric_models(run_id="run_a")
+                deleted = analytics_routes.delete_custom_metric_model("custom_my_rating", run_id="run_a")
+
+        self.assertEqual(saved["model"]["id"], "custom_my_rating")
+        self.assertEqual(listed["models"][0]["label"], "Мой рейтинг")
+        self.assertTrue(deleted["deleted"])
+
+    def test_custom_metric_model_invalid_formula_returns_controlled_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.object(analytics_routes.custom_metrics, "DATA", Path(tmp)):
+            with self.assertRaises(analytics_routes.HTTPException) as raised:
+                analytics_routes.save_custom_metric_model({"run_id": "run_a", "label": "Bad", "expression": "unknown + 1"})
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("Неизвестное поле", str(raised.exception.detail))
 
     def test_unknown_cohort_returns_controlled_error(self) -> None:
         with patch.object(analytics_routes.cohorts, "resolve_cohort_context", side_effect=analytics_routes.cohorts.CohortNotFound("Unknown cohort_id: nope")):

@@ -116,7 +116,7 @@ def _error_payload(
 ) -> dict[str, Any]:
     resolved_message = message or _detail_message(detail) or _http_error_title(status_code)
     encoded_detail = jsonable_encoder(detail)
-    return {
+    payload = {
         "detail": encoded_detail,
         "error": {
             "status": status_code,
@@ -126,6 +126,24 @@ def _error_payload(
             "path": path,
         },
     }
+    field_errors = _field_errors(encoded_detail)
+    if field_errors:
+        payload["error"]["field_errors"] = field_errors
+    return payload
+
+
+def _field_errors(detail: Any) -> list[dict[str, str]]:
+    if not isinstance(detail, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in detail:
+        if not isinstance(item, dict):
+            continue
+        field = _validation_field_label(item.get("loc"))
+        message = _translate_validation_message(str(item.get("msg") or ""))
+        if field and message:
+            out.append({"field": field, "message": message})
+    return out
 
 
 def _detail_message(detail: Any) -> str:

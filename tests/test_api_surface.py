@@ -46,6 +46,7 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertEqual(validation_payload["error"]["title"], "Некорректные параметры запроса")
         self.assertIn("Количество строк", validation_payload["error"]["message"])
         self.assertIn("Проверьте", validation_payload["error"]["action"])
+        self.assertEqual(validation_payload["error"]["field_errors"][0]["field"], "Количество строк")
 
         scoped_response = asyncio.run(
             http_exception_handler(

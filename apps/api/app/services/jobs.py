@@ -101,7 +101,7 @@ def cancel_run(run_id: str) -> dict[str, Any]:
     doc["cancel_requested"] = True
     if status == "queued":
         doc["status"] = "cancelled"
-        doc["progress_percent"] = 100
+        doc["progress_percent"] = None
         doc["progress_stage"] = "cancelled"
         doc["finished_at"] = _now()
         _save(doc)
@@ -184,9 +184,9 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
         materialization_jobs.mark_failed(run_id, action, str(exc), payload)
         doc = _current_doc(run_id, fallback=doc)
         if cancel_requested(run_id):
-            doc.update({"status": "cancelled", "progress_percent": 100, "progress_stage": "cancelled", "finished_at": _now(), "worker_heartbeat_at": _now(), "error": str(exc)})
+            doc.update({"status": "cancelled", "progress_percent": None, "progress_stage": "cancelled", "finished_at": _now(), "worker_heartbeat_at": _now(), "error": str(exc)})
         else:
-            doc.update({"status": "failed", "progress_percent": 100, "progress_stage": "failed", "finished_at": _now(), "worker_heartbeat_at": _now(), "error": str(exc)})
+            doc.update({"status": "failed", "progress_percent": None, "progress_stage": "failed", "finished_at": _now(), "worker_heartbeat_at": _now(), "error": str(exc)})
     _save(doc)
     if str(doc.get("status") or "") in {"completed", "failed", "cancelled"}:
         _cancel_path(run_id).unlink(missing_ok=True)
@@ -251,7 +251,7 @@ def _normalize_loaded_run(doc: dict[str, Any]) -> dict[str, Any]:
             return recovered
         doc = dict(doc)
         doc["status"] = "failed"
-        doc["progress_percent"] = 100
+        doc["progress_percent"] = None
         doc["progress_stage"] = "failed"
         doc["finished_at"] = doc.get("finished_at") or _now()
         doc["error"] = (

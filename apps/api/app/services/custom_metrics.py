@@ -6,7 +6,11 @@ import math
 import re
 from bisect import bisect_right
 from collections import defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+from app.core.paths import DATA
 
 
 BASE_NUMERIC_FIELDS = {
@@ -149,6 +153,80 @@ def metric_catalog(definitions: list[dict[str, str]] | None) -> list[dict[str, s
     ]
 
 
+def list_metric_models(run_id: str) -> list[dict[str, Any]]:
+    run_id = _safe_run_id(run_id)
+    if not run_id:
+        raise ValueError("Для сохраненных формул нужен выбранный расчет.")
+    root = _metric_models_dir(run_id)
+    if not root.is_dir():
+        return []
+    items: list[dict[str, Any]] = []
+    for path in root.glob("*.json"):
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(doc, dict) and doc.get("id") and doc.get("expression"):
+            items.append(doc)
+    return sorted(items, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+
+
+def save_metric_model(run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    run_id = _safe_run_id(run_id)
+    if not run_id:
+        raise ValueError("Выберите расчет, к которому нужно сохранить формулу.")
+    definition = parse_custom_metrics([payload])
+    if not definition:
+        raise ValueError("Введите формулу перед сохранением.")
+    item = definition[0]
+    now = _utc_now()
+    path = _metric_model_path(run_id, item["id"])
+    created_at = now
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            created_at = str(existing.get("created_at") or now)
+        except (OSError, json.JSONDecodeError):
+            created_at = now
+    doc = {
+        "schema": "custom_metric_model",
+        "id": item["id"],
+        "label": item["label"],
+        "description": item.get("description") or "Пользовательская формула, рассчитанная по текущей выборке.",
+        "expression": item["expression"],
+        "enabled": bool(payload.get("enabled", True)),
+        "created_at": created_at,
+        "updated_at": now,
+    }
+    _write_json(path, doc)
+    return doc
+
+
+def delete_metric_model(run_id: str, model_id: str) -> dict[str, Any]:
+    run_id = _safe_run_id(run_id)
+    model_id = _metric_id(model_id, 1)
+    if not run_id:
+        raise ValueError("Выберите расчет, из которого нужно удалить формулу.")
+    path = _metric_model_path(run_id, model_id)
+    if path.is_file():
+        path.unlink()
+        return {"deleted": True, "id": model_id}
+    return {"deleted": False, "id": model_id}
+
+
+def metric_models_as_definitions(run_id: str) -> list[dict[str, str]]:
+    return [
+        {
+            "id": str(item["id"]),
+            "label": str(item["label"]),
+            "description": str(item.get("description") or ""),
+            "expression": str(item["expression"]),
+        }
+        for item in list_metric_models(run_id)
+        if item.get("enabled", True)
+    ]
+
+
 def duckdb_percentile_expressions(definitions: list[dict[str, str]] | None, available_fields: set[str]) -> list[str]:
     expressions: list[str] = []
     for field in sorted(_percentile_fields(definitions or [])):
@@ -158,6 +236,27 @@ def duckdb_percentile_expressions(definitions: list[dict[str, str]] | None, avai
         else:
             expressions.append(f"COALESCE(percent_rank() OVER (ORDER BY TRY_CAST({_quote_identifier(field)} AS DOUBLE)), 0.0) AS {alias}")
     return expressions
+
+
+def _metric_models_dir(run_id: str) -> Path:
+    return DATA / "runs" / _safe_run_id(run_id) / "metric_models"
+
+
+def _metric_model_path(run_id: str, model_id: str) -> Path:
+    return _metric_models_dir(run_id) / f"{_metric_id(model_id, 1)}.json"
+
+
+def _safe_run_id(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip()).strip("._-")
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _write_json(path: Path, doc: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def duckdb_metric_expressions(definitions: list[dict[str, str]] | None, available_fields: set[str]) -> list[str]:

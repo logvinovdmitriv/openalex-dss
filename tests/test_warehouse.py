@@ -261,11 +261,14 @@ class WarehouseTests(unittest.TestCase):
                 first = warehouse.metric_ranking("integer", "h", {"country_code": "RU"}, run_id="run_a")
                 second = warehouse.metric_ranking("integer", "h", {"country_code": "RU"}, run_id="run_a")
                 cache_dirs = list((root / "runs" / "run_a" / "analytics" / "filtered").glob("*/manifest.json"))
+                cached_author_work = cache_dirs[0].parent / "author_work.parquet"
+                cached_author_work_rows = warehouse._count_parquet_rows(cached_author_work)
 
             self.assertEqual(first["analytics_cache"]["status"], "miss")
             self.assertEqual(second["analytics_cache"]["status"], "hit")
             self.assertEqual(second["analytics_cache"]["rows"], 1)
             self.assertEqual(len(cache_dirs), 1)
+            self.assertEqual(cached_author_work_rows, 1)
 
     def test_run_scoped_metric_ranking_uses_requested_run_tables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

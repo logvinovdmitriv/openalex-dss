@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from app.core.paths import DATA
+import yaml
+
+from app.core.paths import DATA, ROOT
 from app.services import cohorts, custom_metrics, scientometrics, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
@@ -14,7 +16,7 @@ from app.services.analysis_filters import clean_analysis_filters
 REPORT_BUNDLE_SCHEMA = "report_bundle"
 REPORT_SCOPE_SCHEMA = "report_scope"
 DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "cpp", "h", "i10", "g")
-REPORT_BUNDLE_KEEP = 12
+REPORT_BUNDLE_KEEP = 5
 
 
 def build_report_bundle(
@@ -371,7 +373,7 @@ def _report_bundle_path(run_id: str, scope_hash: str) -> Path:
 def _write_report_bundle(run_id: str, scope_hash: str, report: dict[str, Any]) -> Path:
     path = _report_bundle_path(run_id, scope_hash)
     _write_json(path, report)
-    _prune_report_bundles(run_id)
+    _prune_report_bundles(run_id, keep=report_bundle_keep())
     return path
 
 
@@ -390,6 +392,17 @@ def _prune_report_bundles(run_id: str, *, keep: int = REPORT_BUNDLE_KEEP) -> lis
         except OSError:
             continue
     return removed
+
+
+def report_bundle_keep() -> int:
+    config_path = ROOT / "configs" / "execution_limits.yaml"
+    try:
+        doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        policy = doc.get("storage_policy") if isinstance(doc, dict) else {}
+        value = int((policy or {}).get("max_retained_report_bundles_per_run", REPORT_BUNDLE_KEEP))
+    except Exception:
+        value = REPORT_BUNDLE_KEEP
+    return max(1, value)
 
 
 def _path_mtime(path: Path) -> float:

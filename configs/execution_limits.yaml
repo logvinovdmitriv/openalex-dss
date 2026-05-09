@@ -9,7 +9,11 @@ execution_limits:
   require_passport_before_analysis: true
 storage_policy:
   max_filtered_cache_entries_per_run: 10
+  max_analytics_cache_bytes_per_run: 2147483648
+  max_total_cache_bytes: 10737418240
+  max_retained_report_bundles_per_run: 5
   estimate_cache_ttl_hours: 24
+  max_estimate_cache_entries: 200
   delete_complete_download_parts_after_pack: true
   keep_partial_download_parts_for_repair: true
 planner_thresholds:
