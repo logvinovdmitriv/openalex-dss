@@ -733,12 +733,67 @@ def _selected_precomputed_index_rows(
     select_fields: list[str] | tuple[str, ...] | set[str] | None,
 ) -> list[dict[str, Any]]:
     fields = set(table_schema("indices", run_id=run_id, dump_id=dump_id))
+    table_name = "indices"
+    if custom_metric_defs:
+        try:
+            with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
+                table_name, fields = _register_custom_metric_view(conn, "indices", "indices_with_custom_metrics", list(fields), custom_metric_defs)
+                return _selected_registered_index_rows(
+                    conn,
+                    table_name,
+                    fields,
+                    fraction_mode,
+                    author_ids=author_ids,
+                    data_filters=data_filters,
+                    data_search=data_search,
+                    data_sort=data_sort,
+                    data_direction=data_direction,
+                    data_limit=data_limit,
+                    custom_metric_defs=custom_metric_defs,
+                    select_fields=select_fields,
+                )
+        except duckdb.Error:
+            pass
+    return _selected_registered_index_rows(
+        None,
+        table_name,
+        fields,
+        fraction_mode,
+        run_id=run_id,
+        dump_id=dump_id,
+        author_ids=author_ids,
+        data_filters=data_filters,
+        data_search=data_search,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
+        select_fields=select_fields,
+    )
+
+
+def _selected_registered_index_rows(
+    conn: duckdb.DuckDBPyConnection | None,
+    table_name: str,
+    fields: set[str],
+    fraction_mode: str,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+    author_ids: set[str] | list[str] | tuple[str, ...] | None,
+    data_filters: dict[str, Any],
+    data_search: str,
+    data_sort: str,
+    data_direction: str,
+    data_limit: int,
+    custom_metric_defs: list[dict[str, str]] | None,
+    select_fields: list[str] | tuple[str, ...] | set[str] | None,
+) -> list[dict[str, Any]]:
     custom_ids = custom_metrics.custom_metric_ids(custom_metric_defs)
     native_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field in fields}
     python_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field not in fields}
     sort_is_native = not data_sort or data_sort in fields
-    sort_is_custom = data_sort in custom_ids
-    needs_python_selection = bool(author_ids) or bool(python_filters) or sort_is_custom
+    needs_python_selection = bool(author_ids) or bool(python_filters) or bool(data_sort and not sort_is_native)
     required_fields = _selected_index_query_fields(
         fields,
         requested_fields=select_fields,
@@ -752,21 +807,35 @@ def _selected_precomputed_index_rows(
     # before Python-side selection.
     query_limit = 0 if needs_python_selection else data_limit
     query_sort = data_sort if sort_is_native else ""
-    payload = query_table(
-        "indices",
-        run_id=run_id,
-        dump_id=dump_id,
-        q=data_search,
-        fraction_mode=fraction_mode,
-        data_filters=native_filters,
-        sort=query_sort,
-        direction=data_direction,
-        limit=query_limit,
-        select_fields=required_fields,
-    )
+    if conn is not None:
+        payload = _query_registered_table(
+            conn,
+            table_name,
+            list(fields),
+            q=data_search,
+            fraction_mode=fraction_mode,
+            data_filters=native_filters,
+            sort=query_sort,
+            direction=data_direction,
+            limit=query_limit,
+            select_fields=required_fields,
+        )
+    else:
+        payload = query_table(
+            table_name,
+            run_id=run_id,
+            dump_id=dump_id,
+            q=data_search,
+            fraction_mode=fraction_mode,
+            data_filters=native_filters,
+            sort=query_sort,
+            direction=data_direction,
+            limit=query_limit,
+            select_fields=required_fields,
+        )
     rows = list(payload.get("rows") or [])
     rows = filter_rows_by_author_ids(rows, author_ids)
-    if custom_metric_defs:
+    if custom_metric_defs and not custom_ids.issubset(fields):
         rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     if needs_python_selection:
         rows = apply_data_selection(
@@ -799,14 +868,18 @@ def _selected_cached_index_rows(
         escaped = str(path).replace("'", "''")
         conn.execute(f"CREATE VIEW cached_indices AS SELECT * FROM read_parquet('{escaped}')")
         fields = _registered_fields(conn, "cached_indices")
+        table_name = "cached_indices"
+        if custom_metric_defs:
+            table_name, field_set = _register_custom_metric_view(conn, "cached_indices", "cached_indices_with_custom_metrics", fields, custom_metric_defs)
+            fields = list(field_set)
         custom_ids = custom_metrics.custom_metric_ids(custom_metric_defs)
-        native_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field in fields}
-        python_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field not in fields}
-        sort_is_native = not data_sort or data_sort in fields
-        sort_is_custom = data_sort in custom_ids
-        needs_python_selection = bool(author_ids) or bool(python_filters) or sort_is_custom
+        field_set = set(fields)
+        native_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field in field_set}
+        python_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field not in field_set}
+        sort_is_native = not data_sort or data_sort in field_set
+        needs_python_selection = bool(author_ids) or bool(python_filters) or bool(data_sort and not sort_is_native)
         required_fields = _selected_index_query_fields(
-            set(fields),
+            field_set,
             requested_fields=select_fields,
             native_filters=native_filters,
             data_sort=data_sort,
@@ -816,7 +889,7 @@ def _selected_cached_index_rows(
         query_sort = data_sort if sort_is_native else ""
         payload = _query_registered_table(
             conn,
-            "cached_indices",
+            table_name,
             fields,
             q=data_search,
             fraction_mode=fraction_mode,
@@ -828,7 +901,7 @@ def _selected_cached_index_rows(
         )
     rows = list(payload.get("rows") or [])
     rows = filter_rows_by_author_ids(rows, author_ids)
-    if custom_metric_defs:
+    if custom_metric_defs and not custom_ids.issubset(set(rows[0].keys()) if rows else set(fields)):
         rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
     if needs_python_selection:
         rows = apply_data_selection(
@@ -840,6 +913,27 @@ def _selected_cached_index_rows(
             data_limit=data_limit,
         )
     return rows
+
+
+def _register_custom_metric_view(
+    conn: duckdb.DuckDBPyConnection,
+    source_table: str,
+    view_name: str,
+    fields: list[str],
+    custom_metric_defs: list[dict[str, str]] | None,
+) -> tuple[str, set[str]]:
+    if not custom_metric_defs:
+        return source_table, set(fields)
+    source_fields = set(fields)
+    percentile_exprs = custom_metrics.duckdb_percentile_expressions(custom_metric_defs, source_fields)
+    inner_select = "*"
+    available_fields = set(source_fields)
+    if percentile_exprs:
+        inner_select = "*, " + ", ".join(percentile_exprs)
+        available_fields.update({f"pr_{field}" for field in custom_metrics.referenced_base_fields(custom_metric_defs)})
+    metric_exprs = custom_metrics.duckdb_metric_expressions(custom_metric_defs, available_fields)
+    conn.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT *, {', '.join(metric_exprs)} FROM (SELECT {inner_select} FROM {source_table}) custom_metric_source")
+    return view_name, set(_registered_fields(conn, view_name))
 
 
 def _selected_index_query_fields(
@@ -856,6 +950,7 @@ def _selected_index_query_fields(
     if data_sort:
         required.add(data_sort)
     required.update(custom_metrics.referenced_base_fields(custom_metric_defs))
+    required.update(custom_metrics.custom_metric_ids(custom_metric_defs))
     return {field for field in required if field in fields}
 
 

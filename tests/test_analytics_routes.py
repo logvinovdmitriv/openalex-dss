@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import unittest
 from pathlib import Path
@@ -29,6 +30,20 @@ def _request(**params: object) -> Request:
             "headers": [],
         }
     )
+
+
+def _response_text(response: object) -> str:
+    body_iterator = getattr(response, "body_iterator", None)
+    if body_iterator is None:
+        return getattr(response, "body").decode("utf-8")
+
+    async def collect() -> bytes:
+        chunks: list[bytes] = []
+        async for chunk in body_iterator:
+            chunks.append(chunk if isinstance(chunk, bytes) else str(chunk).encode("utf-8"))
+        return b"".join(chunks)
+
+    return asyncio.run(collect()).decode("utf-8")
 
 
 class AnalyticsRouteTests(unittest.TestCase):
@@ -140,7 +155,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         ):
             response = analytics_routes.ranking_csv(run_id="run_a", dump_id="dump_a", metric="h", limit=100_000)
 
-        self.assertIn("A1", response.body.decode("utf-8"))
+        self.assertIn("A1", _response_text(response))
         self.assertEqual(captured["kwargs"]["max_limit"], analytics_routes.EXPORT_RESULT_MAX_ROWS)
         self.assertEqual(captured["kwargs"]["limit"], 100_000)
 
@@ -276,7 +291,7 @@ class AnalyticsRouteTests(unittest.TestCase):
         ):
             response = analytics_routes.ranking_csv(cohort_id="cohort_empty", fraction_mode="integer", metric="h", limit=100)
 
-        self.assertEqual(response.body.decode("utf-8").strip(), "author_id,score")
+        self.assertEqual(_response_text(response).strip(), "author_id,score")
         self.assertEqual(response.headers["X-OpenAlex-DSS-Scope-Status"], "cohort_resolved_scope")
         self.assertEqual(response.headers["X-OpenAlex-DSS-Reproducible"], "true")
 

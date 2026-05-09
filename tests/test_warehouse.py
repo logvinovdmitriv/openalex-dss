@@ -170,6 +170,37 @@ class WarehouseTests(unittest.TestCase):
         self.assertEqual([row["author_id"] for row in rows], ["A2"])
         self.assertEqual(query_table.call_args.kwargs["limit"], 0)
 
+    def test_selected_index_rows_sorts_custom_metric_in_duckdb(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "runs" / "run_custom"
+            run_dir.mkdir(parents=True)
+            (run_dir / "metric_run.json").write_text(json.dumps({"run_id": "run_custom", "dump_id": "dump_custom"}), encoding="utf-8")
+            write_parquet_dicts(
+                run_dir / "tables" / "indices.parquet",
+                [
+                    {"fraction_mode": "integer", "author_id": "A1", "author_display_name": "Author One", "p": 1, "c": 3, "h": 1},
+                    {"fraction_mode": "integer", "author_id": "A2", "author_display_name": "Author Two", "p": 5, "c": 9, "h": 3},
+                ],
+                ["fraction_mode", "author_id", "author_display_name", "p", "c", "h"],
+            )
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+            ):
+                rows = warehouse.selected_index_rows(
+                    "integer",
+                    {},
+                    run_id="run_custom",
+                    data_sort="custom_weighted",
+                    data_limit=1,
+                    custom_metric_defs=[{"id": "custom_weighted", "label": "Weighted", "expression": "h + pr_c"}],
+                )
+
+        self.assertEqual([row["author_id"] for row in rows], ["A2"])
+        self.assertIn("custom_weighted", rows[0])
+
     def test_selected_index_rows_recomputes_when_work_level_filters_are_present(self) -> None:
         source_rows = [{"author_id": "A1", "author_display_name": "Author One", "h": 3, "p": 1}]
         with (

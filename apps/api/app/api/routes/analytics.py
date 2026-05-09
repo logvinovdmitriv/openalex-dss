@@ -6,6 +6,7 @@ from io import StringIO
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import StreamingResponse
 
 from app.services import cohorts, custom_metrics, scientometrics, warehouse
 from app.services.analysis_filters import build_analysis_filters
@@ -410,7 +411,7 @@ def ranking_csv(
     data_limit: int = Query(0, ge=0, le=EXPORT_RESULT_MAX_ROWS),
     custom_metric_defs: str = "",
     limit: int = Query(100_000, ge=0, le=EXPORT_RESULT_MAX_ROWS),
-) -> Response:
+) -> StreamingResponse:
     requested_run_id = run_id
     requested_dump_id = dump_id
     filters = _slice_filters(
@@ -477,12 +478,8 @@ def ranking_csv(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
-    output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=payload["fields"], extrasaction="ignore")
-    writer.writeheader()
-    writer.writerows(payload["rows"])
-    return Response(
-        content=output.getvalue(),
+    return StreamingResponse(
+        _iter_dict_csv(payload["fields"], payload["rows"]),
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": 'attachment; filename="openalex_dss_filtered_rating.csv"',
@@ -900,6 +897,18 @@ def _csv_response(fields: list[str], rows: list[dict[str, Any]], *, filename: st
         media_type="text/csv; charset=utf-8",
         headers=response_headers,
     )
+
+
+def _iter_dict_csv(fields: list[str], rows: list[dict[str, Any]]) -> Any:
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    yield output.getvalue()
+    for row in rows:
+        output.seek(0)
+        output.truncate(0)
+        writer.writerow(row)
+        yield output.getvalue()
 
 
 def _scientometric_descriptive_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:

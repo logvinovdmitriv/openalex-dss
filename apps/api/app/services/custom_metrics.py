@@ -44,6 +44,18 @@ ALLOWED_FUNCTIONS = {
     "ceil": math.ceil,
 }
 
+SQL_FUNCTIONS = {
+    "abs": "abs",
+    "sqrt": "sqrt",
+    "log": "ln",
+    "log1p": "log1p",
+    "exp": "exp",
+    "pow": "pow",
+    "round": "round",
+    "floor": "floor",
+    "ceil": "ceil",
+}
+
 ALLOWED_NAMES = set(BASE_NUMERIC_FIELDS) | {f"pr_{field}" for field in BASE_NUMERIC_FIELDS} | {"pi", "e"}
 SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9_]{2,48}$")
 
@@ -135,6 +147,25 @@ def metric_catalog(definitions: list[dict[str, str]] | None) -> list[dict[str, s
         }
         for definition in definitions or []
     ]
+
+
+def duckdb_percentile_expressions(definitions: list[dict[str, str]] | None, available_fields: set[str]) -> list[str]:
+    expressions: list[str] = []
+    for field in sorted(_percentile_fields(definitions or [])):
+        alias = _quote_identifier(f"pr_{field}")
+        if field not in available_fields:
+            expressions.append(f"0.0 AS {alias}")
+        else:
+            expressions.append(f"COALESCE(percent_rank() OVER (ORDER BY TRY_CAST({_quote_identifier(field)} AS DOUBLE)), 0.0) AS {alias}")
+    return expressions
+
+
+def duckdb_metric_expressions(definitions: list[dict[str, str]] | None, available_fields: set[str]) -> list[str]:
+    out: list[str] = []
+    for definition in definitions or []:
+        expression = _compile_expression(definition["expression"])
+        out.append(f"{_duckdb_expression(expression, available_fields)} AS {_quote_identifier(definition['id'])}")
+    return out
 
 
 def _metric_id(raw: str, index: int) -> str:
@@ -238,6 +269,60 @@ def _eval_expression(node: ast.AST, context: dict[str, float]) -> float:
         fn = ALLOWED_FUNCTIONS[node.func.id]
         return float(fn(*[_eval_expression(arg, context) for arg in node.args]))
     raise ValueError("Формула содержит неподдерживаемое выражение.")
+
+
+def _duckdb_expression(node: ast.AST, available_fields: set[str]) -> str:
+    if isinstance(node, ast.Expression):
+        return _duckdb_expression(node.body, available_fields)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return repr(float(node.value))
+        raise ValueError("В формуле разрешены только числовые константы.")
+    if isinstance(node, ast.Name):
+        if node.id == "pi":
+            return repr(math.pi)
+        if node.id == "e":
+            return repr(math.e)
+        if node.id.startswith("pr_"):
+            return f"COALESCE({_quote_identifier(node.id)}, 0.0)" if node.id in available_fields else "0.0"
+        if node.id in BASE_NUMERIC_FIELDS:
+            return f"COALESCE(TRY_CAST({_quote_identifier(node.id)} AS DOUBLE), 0.0)" if node.id in available_fields else "0.0"
+        raise ValueError(f"Неизвестное поле в формуле: {node.id}.")
+    if isinstance(node, ast.UnaryOp):
+        value = _duckdb_expression(node.operand, available_fields)
+        if isinstance(node.op, ast.USub):
+            return f"(-({value}))"
+        if isinstance(node.op, ast.UAdd):
+            return f"({value})"
+    if isinstance(node, ast.BinOp):
+        left = _duckdb_expression(node.left, available_fields)
+        right = _duckdb_expression(node.right, available_fields)
+        if isinstance(node.op, ast.Add):
+            return f"(({left}) + ({right}))"
+        if isinstance(node.op, ast.Sub):
+            return f"(({left}) - ({right}))"
+        if isinstance(node.op, ast.Mult):
+            return f"(({left}) * ({right}))"
+        if isinstance(node.op, ast.Div):
+            return f"(CASE WHEN ({right}) = 0 THEN 0.0 ELSE ({left}) / ({right}) END)"
+        if isinstance(node.op, ast.Mod):
+            return f"(CASE WHEN ({right}) = 0 THEN 0.0 ELSE ({left}) % ({right}) END)"
+        if isinstance(node.op, ast.Pow):
+            return f"pow(({left}), ({right}))"
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        args = [_duckdb_expression(arg, available_fields) for arg in node.args]
+        if node.func.id == "min":
+            return f"least({', '.join(args)})"
+        if node.func.id == "max":
+            return f"greatest({', '.join(args)})"
+        sql_fn = SQL_FUNCTIONS.get(node.func.id)
+        if sql_fn:
+            return f"{sql_fn}({', '.join(args)})"
+    raise ValueError("Формула содержит неподдерживаемое выражение.")
+
+
+def _quote_identifier(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
 
 
 def _row_context(row: dict[str, Any], percentile_maps: dict[str, dict[int, float]], names: list[str]) -> dict[str, float]:
