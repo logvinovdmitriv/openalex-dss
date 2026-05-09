@@ -286,6 +286,9 @@ function Workbench() {
   const hasAvailableLocalTables = localDataKindOptions.length > 0;
   const hasAuthorIndices = Boolean(localDataSummary.data?.tables?.indices?.exists);
   const hasLocalAnalyticsData = scopeReady && hasAuthorIndices;
+  const dataViewActive = view === "data";
+  const rankingsViewActive = view === "rankings";
+  const analyticsViewActive = view === "statistics";
   const workflowNav = useMemo(() => buildWorkflowNav({
     view,
     scopeReady,
@@ -328,7 +331,7 @@ function Workbench() {
   const table = useQuery({
     queryKey: ["local-data-preview", localDataKind, dataSearch, dataFilterKey, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId, previewPageKey],
     queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: dataPreviewLimit, offset: effectiveDataOffset, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })),
-    enabled: scopeReady && localDataKindAvailable,
+    enabled: dataViewActive && scopeReady && localDataKindAvailable,
     placeholderData: (previous) => previous,
     staleTime: 60_000,
   });
@@ -345,7 +348,7 @@ function Workbench() {
       dataSelection,
       customMetrics,
     )),
-    enabled: hasLocalAnalyticsData,
+    enabled: rankingsViewActive && hasLocalAnalyticsData,
     placeholderData: (previous) => previous,
     staleTime: 60_000,
   });
@@ -362,7 +365,7 @@ function Workbench() {
       fractionMode,
       dataFilters: dataColumnFilters,
     })),
-    enabled: scopeReady && Boolean(localDataSummary.data?.tables?.indices?.exists),
+    enabled: (rankingsViewActive || analyticsViewActive) && scopeReady && Boolean(localDataSummary.data?.tables?.indices?.exists),
     placeholderData: (previous) => previous,
     staleTime: 60_000,
   });
@@ -379,7 +382,7 @@ function Workbench() {
       dataSelection,
       customMetrics,
     })),
-    enabled: hasLocalAnalyticsData && scientometricMetrics.length > 0,
+    enabled: analyticsViewActive && hasLocalAnalyticsData && scientometricMetrics.length > 0,
     placeholderData: (previous) => previous,
     staleTime: 10 * 60_000,
     gcTime: 30 * 60_000,
