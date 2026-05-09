@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -798,12 +799,41 @@ class SliceWorkbenchTests(unittest.TestCase):
                 patch.object(slice_workbench.jobs, "get_run", return_value={"run_id": "run_download_dir", "status": "queued"}),
             ):
                 slice_workbench._write_materialization(plan)
-                slice_workbench.run_materialization("mat_download_dir", {"download_dir": "custom_slices"})
+                slice_workbench.run_materialization("mat_download_dir", {"download_dir": "custom_slices", "api_key": "test-key"})
 
                 updated = slice_workbench.get_materialization_plan("mat_download_dir")
         self.assertEqual(updated["download_dir"], "custom_slices")
         self.assertEqual(updated["technical_payload"]["download_dir"], "custom_slices")
         self.assertEqual((captured["payload"] or {})["download_dir"], "custom_slices")
+
+    def test_run_materialization_requires_openalex_key_before_creating_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            plan = {
+                "materialization_id": "mat_requires_key",
+                "slice_id": "slice_requires_key",
+                "state": "planned",
+                "technical_payload": {
+                    "entity_level": "subfield",
+                    "entity_id_short": "1706",
+                    "entity_display_name": "Computer Science Applications",
+                    "filter_mode": "primary_topic",
+                    "from_publication_date": "2020-01-01",
+                    "to_publication_date": "2025-12-31",
+                },
+                "estimated": {},
+                "accepted_estimate_signature": "estimate",
+                "accepted_download_signature": "download",
+            }
+            with (
+                patch.object(slice_workbench, "MATERIALIZATIONS_DIR", tmp_path / "materialization_plans"),
+                patch.object(slice_workbench.jobs, "create_run") as create_run,
+                patch.dict(os.environ, {"OPENALEX_API_KEY": ""}, clear=False),
+            ):
+                slice_workbench._write_materialization(plan)
+                with self.assertRaisesRegex(ValueError, "ключ OpenAlex"):
+                    slice_workbench.run_materialization("mat_requires_key", {})
+                create_run.assert_not_called()
 
     def test_materialization_no_data_marks_slice_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -34,9 +34,9 @@ def cli_status(api_key_env: str = "OPENALEX_API_KEY") -> dict[str, Any]:
         "executable": executable or "",
         "api_key_env": key_env,
         "api_key_configured": bool(os.environ.get(key_env)),
-        "api_key_required_for_remote_download": False,
+        "api_key_required_for_remote_download": True,
         "install": "pip install openalex-official",
-        "purpose": "скачивание выбранного среза OpenAlex локальным загрузчиком; ключ передается только если пользователь явно его указал",
+        "purpose": "скачивание выбранного среза OpenAlex локальным загрузчиком; установленный загрузчик требует ключ OpenAlex",
     }
 
 
@@ -53,6 +53,11 @@ def download_works_metadata(
     status = cli_status()
     if not status["available"]:
         raise RuntimeError("Загрузчик OpenAlex не установлен. Установите его локально: pip install openalex-official")
+    if not api_key.strip():
+        raise ValueError(
+            "Для скачивания нового среза нужен ключ OpenAlex. "
+            "Введите ключ в блоке «Доступ к OpenAlex» или задайте OPENALEX_API_KEY на сервере."
+        )
     consistency = download_consistency(cfg)
     if consistency.get("compatible") is False:
         raise ValueError("; ".join(consistency.get("reasons") or []) or "Этот срез нельзя скачать установленным загрузчиком OpenAlex.")

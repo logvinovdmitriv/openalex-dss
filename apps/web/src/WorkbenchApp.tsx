@@ -190,7 +190,12 @@ function Workbench() {
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => getJson<RegistryPayload>("/registry") });
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => getJson<CatalogPayload>("/catalog") });
   const workbench = useQuery({ queryKey: ["workbench"], queryFn: () => getJson<WorkbenchState>("/workbench") });
-  const dumps = useQuery({ queryKey: ["dumps"], queryFn: () => getJson<{ dumps?: WorkbenchDump[] }>("/dumps?limit=50") });
+  const dumps = useQuery({
+    queryKey: ["dumps"],
+    queryFn: () => getJson<{ dumps?: WorkbenchDump[] }>("/dumps?limit=50"),
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
+  });
   const countries = useQuery({ queryKey: ["countries"], queryFn: () => getJson<ListPayload>("/openalex/countries?limit=50") });
   const workTypes = useQuery({ queryKey: ["work-types"], queryFn: () => getJson<ListPayload>("/openalex/work-types?limit=50") });
   const rateLimit = useQuery({
@@ -419,6 +424,7 @@ function Workbench() {
   const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
     .filter((item) => ["openalex_cli"].includes(item.value));
   const backendCliApiKeyConfigured = Boolean(catalog.data?.openalex_cli?.api_key_configured);
+  const openAlexDownloadKeyRequired = Boolean(catalog.data?.openalex_cli?.api_key_required_for_remote_download ?? true);
   const defaultStorageProfileId = String(defaultOption(storageProfileOptions)?.value ?? "minimal_analytics");
   const defaultSourceStrategy = String(defaultOption(sourceStrategyOptions)?.value ?? "openalex_cli");
   const activeStorageProfileId = storageProfileId || defaultStorageProfileId;
@@ -794,6 +800,7 @@ function Workbench() {
             apiKey={apiKey}
             setApiKey={setApiKey}
             backendCliApiKeyConfigured={backendCliApiKeyConfigured}
+            openAlexDownloadKeyRequired={openAlexDownloadKeyRequired}
             effectiveRunId={effectiveRunId}
             effectiveDumpId={effectiveDumpId}
             onSelect={setSelected}
@@ -810,7 +817,7 @@ function Workbench() {
             downloadConfigReady={downloadConfigReady}
             run={run.data}
             sliceDoc={sliceDoc}
-            downloadedDumps={dumps.data?.dumps ?? workbench.data?.dumps ?? []}
+            downloadedDumps={dumps.data?.dumps ?? []}
             onSelectDownloadedDump={selectDownloadedDump}
             onShowDumpInfo={setDumpInfo}
             onRepairDownloadedDump={(nextDumpId) => repairDownloadedDump.mutate(nextDumpId)}
@@ -962,6 +969,7 @@ function SlicesPage({
   apiKey,
   setApiKey,
   backendCliApiKeyConfigured,
+  openAlexDownloadKeyRequired,
   effectiveRunId,
   effectiveDumpId,
   onSelect,
@@ -1003,6 +1011,7 @@ function SlicesPage({
   apiKey: string;
   setApiKey: (value: string) => void;
   backendCliApiKeyConfigured: boolean;
+  openAlexDownloadKeyRequired: boolean;
   effectiveRunId: string;
   effectiveDumpId: string;
   onSelect: (value: { kind: "author" | "work"; id: string }) => void;
@@ -1036,6 +1045,7 @@ function SlicesPage({
   const noDataEstimate = hasEstimate && (decision.status === "no_data" || Number(rawEstimate?.estimate_count ?? 0) === 0);
   const emptyEstimateValue = hasEstimate ? "0" : "—";
   const apiKeyReady = Boolean(apiKey.trim()) || backendCliApiKeyConfigured;
+  const downloadKeyMissing = openAlexDownloadKeyRequired && !apiKeyReady;
 
   return (
     <div className="stack">
@@ -1138,7 +1148,7 @@ function SlicesPage({
           <div>
             <span className="step-badge">Оценка и получение данных</span>
             <h2>План локального среза</h2>
-            <p>Система оценивает объем через OpenAlex API, а уже скачанные срезы выбираются без API. Новый срез скачивается отдельным действием через установленный загрузчик; если ему нужен ключ, система покажет это до запуска.</p>
+            <p>Система оценивает объем через OpenAlex API, а уже скачанные срезы выбираются без API. Для новой загрузки установленный загрузчик OpenAlex требует ключ.</p>
           </div>
           <button onClick={() => onEstimate(true)} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} {estimating ? "Оцениваем..." : "Обновить оценку"}</button>
         </div>
@@ -1165,13 +1175,27 @@ function SlicesPage({
           <b>Где используется OpenAlex API</b>
           <span>OpenAlex API используется для справочников, оценки объема и точечного добавления автора, организации, источника или работы к срезу. Выбор, просмотр, пересчет и удаление уже скачанного среза API не используют.</span>
         </div>
+        <section className={downloadKeyMissing ? "notice warn" : "notice success"}>
+          <b>Доступ к OpenAlex</b>
+          <span>
+            {downloadKeyMissing
+              ? "Для скачивания нового среза нужен ключ OpenAlex. Введите его ниже или задайте OPENALEX_API_KEY на сервере. Уже скачанные срезы можно выбирать и анализировать без ключа."
+              : backendCliApiKeyConfigured && !apiKey.trim()
+                ? "Ключ задан на сервере. Новую загрузку можно запускать."
+                : "Ключ введен для текущей загрузки. После запуска поле будет очищено в интерфейсе."}
+          </span>
+          <Field label="Ключ OpenAlex для новой загрузки">
+            <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Введите ключ OpenAlex" />
+            <small className="field-hint">Ключ нужен только для новой загрузки через OpenAlex CLI. Он не требуется для выбора, просмотра, восстановления и пересчета уже скачанных локальных срезов.</small>
+          </Field>
+        </section>
         {[...(decision.reasons ?? []), ...(decision.warnings ?? [])].length > 0 && (
           <ul className="plain-list">
             {[...(decision.reasons ?? []), ...(decision.warnings ?? [])].map((item: string) => <li key={item}>{decisionMessageLabel(item)}</li>)}
           </ul>
         )}
         <details className="technical-details">
-          <summary>Папка и ключ для новой загрузки</summary>
+          <summary>Папка и ограничения загрузки</summary>
           <div className="form-grid tight">
             <Field label="Папка загрузки">
               <div className="lookup-row">
@@ -1195,11 +1219,6 @@ function SlicesPage({
               />
               <small className="field-hint">Если лимит достигнут, загрузка остановится, а уже скачанные записи будут упакованы как частичный срез для предварительного анализа.</small>
             </Field>
-            <Field label="Ключ OpenAlex">
-              <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Необязательно" />
-              <small className="field-hint">Оставьте пустым, если не хотите передавать ключ загрузчику. Если установленный загрузчик потребует ключ, ошибка появится уведомлением.</small>
-              {backendCliApiKeyConfigured && !apiKey.trim() && <small className="field-hint">Ключ уже задан в настройках сервера.</small>}
-            </Field>
           </div>
         </details>
         <RateLimitPanel rateLimit={rateLimit} apiKeySet={apiKeyReady} estimate={rawEstimate} />
@@ -1211,7 +1230,7 @@ function SlicesPage({
           </div>
         )}
         <div className="action-row">
-          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !hasEstimate || !downloadConfigReady || decision.can_execute === false}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} {materializing ? "Выполняется..." : "Скачать срез"}</button>
+          <button className="primary" onClick={onRun} disabled={materializing || dateInvalid || subjectMissing || !hasEstimate || !downloadConfigReady || downloadKeyMissing || decision.can_execute === false}>{materializing ? <Loader2 size={16} className="spin" /> : <UploadCloud size={16} />} {materializing ? "Выполняется..." : "Скачать срез"}</button>
           {run && ["queued", "running", "cancelling"].includes(String(run.status ?? "")) && (
             <button type="button" className="danger-button" onClick={onCancelRun} disabled={String(run.status ?? "") === "cancelling"}>
               {String(run.status ?? "") === "cancelling" ? "Останавливаем..." : "Остановить и сохранить частичный срез"}

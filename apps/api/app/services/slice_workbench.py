@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 import hashlib
@@ -260,6 +261,12 @@ def run_materialization(materialization_id: str, payload: dict[str, Any] | None 
         "accepted_download_signature": plan.get("accepted_download_signature"),
         **payload,
     })
+    cfg = author_slice.config_from_payload({**run_payload, "workflow_mode": "strict_works"})
+    if not str(run_payload.get("api_key") or os.environ.get(cfg.api_key_env) or "").strip():
+        raise ValueError(
+            "Для скачивания нового среза нужен ключ OpenAlex. "
+            "Введите ключ в интерфейсе или задайте OPENALEX_API_KEY на сервере."
+        )
     run = jobs.create_run("build_from_openalex", run_payload, autostart=False)
     plan["state"] = "materializing"
     plan["run_id"] = run["run_id"]

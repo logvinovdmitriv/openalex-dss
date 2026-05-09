@@ -68,10 +68,35 @@ class OpenAlexCliProviderTests(unittest.TestCase):
             self.assertEqual(manifest["status"], "failed")
             self.assertEqual(manifest["files"][0]["status"], "failed")
 
-    def test_remote_cli_download_omits_api_key_when_blank(self) -> None:
+    def test_remote_cli_download_requires_api_key(self) -> None:
         cfg = replace_config(
             load_config(ROOT / "config/slice.yaml"),
             slice_name="cli_without_key",
+            filter_mode="primary_topic",
+            entity_level="subfield",
+            entity_id_short="1706",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(openalex_cli_provider, "cli_status", return_value={"available": True, "executable": "/tmp/openalex"}):
+                with self.assertRaises(ValueError) as ctx:
+                    openalex_cli_provider.download_works_metadata(
+                        cfg,
+                        api_key="",
+                        out_dir=root / "raw",
+                        estimate={
+                            "estimate_signature": corpus_signature(cfg),
+                            "download_signature": cli_download_signature(cfg),
+                            "estimate_count": 1,
+                        },
+                    )
+
+        self.assertIn("нужен ключ OpenAlex", str(ctx.exception))
+
+    def test_remote_cli_download_uses_resume_and_conservative_workers(self) -> None:
+        cfg = replace_config(
+            load_config(ROOT / "config/slice.yaml"),
+            slice_name="cli_with_key",
             filter_mode="primary_topic",
             entity_level="subfield",
             entity_id_short="1706",
@@ -98,7 +123,7 @@ class OpenAlexCliProviderTests(unittest.TestCase):
             ):
                 manifest = openalex_cli_provider.download_works_metadata(
                     cfg,
-                    api_key="",
+                    api_key="test-key",
                     out_dir=root / "raw",
                     estimate={
                         "estimate_signature": corpus_signature(cfg),
@@ -107,8 +132,8 @@ class OpenAlexCliProviderTests(unittest.TestCase):
                     },
                 )
 
-        self.assertFalse(manifest["used_api_key"])
-        self.assertNotIn("--api-key", commands[0])
+        self.assertTrue(manifest["used_api_key"])
+        self.assertIn("--api-key", commands[0])
         self.assertIn("--resume", commands[0])
         self.assertIn("--workers", commands[0])
         self.assertEqual(commands[0][commands[0].index("--workers") + 1], "4")
@@ -188,7 +213,7 @@ class OpenAlexCliProviderTests(unittest.TestCase):
             ):
                 manifest = openalex_cli_provider.download_works_metadata(
                     cfg,
-                    api_key="",
+                    api_key="test-key",
                     out_dir=root / "raw",
                     estimate={
                         "estimate_signature": corpus_signature(cfg),
