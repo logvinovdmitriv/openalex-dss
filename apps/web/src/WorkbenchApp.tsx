@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { createRoot } from "react-dom/client";
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -64,6 +63,7 @@ import {
   scientometricsUrl,
   dataSelectionQuery,
   customMetricDefsQuery,
+  customMetricModelsUrl,
   sliceSubjectTitle,
   viewFromHash,
   type EntitySuggestion,
@@ -218,7 +218,7 @@ function nextUnlockedNavIndex(items: WorkflowNavItem[], current: number, key: st
   return current;
 }
 
-function App() {
+export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Workbench />
@@ -342,6 +342,17 @@ function Workbench() {
   const effectiveDumpId = uiScope.dumpId;
   const usingActiveContextScope = uiScope.source === "active_context";
   const scopeReady = Boolean(effectiveRunId || effectiveDumpId);
+  const savedMetricModels = useQuery({
+    queryKey: ["custom-metric-models", effectiveRunId],
+    queryFn: () => getJson<{ models: CustomMetricDefinition[] }>(customMetricModelsUrl(effectiveRunId)),
+    enabled: Boolean(effectiveRunId),
+    staleTime: 30_000,
+  });
+  useEffect(() => {
+    const models = savedMetricModels.data?.models ?? [];
+    if (models.length) setCustomMetrics(models);
+    if (!models.length && effectiveRunId) setCustomMetrics(DEFAULT_CUSTOM_METRICS);
+  }, [effectiveRunId, savedMetricModels.data?.models]);
   const dataFilterKey = useMemo(() => JSON.stringify(dataColumnFilters), [dataColumnFilters]);
   const customMetricKey = useMemo(() => JSON.stringify(customMetrics), [customMetrics]);
   const analysisFilters = useMemo(() => DATA_ONLY_ANALYSIS_FILTERS, []);
@@ -523,6 +534,23 @@ function Workbench() {
     mutationFn: () => postJson<{ path?: string }>("/system/select-directory", { initial_dir: downloadDir || String(catalog.data?.data_root ?? "") }),
     onSuccess: (result) => {
       if (result.path) setDownloadDir(result.path);
+    },
+  });
+
+  const saveCustomMetric = useMutation({
+    mutationFn: (metricModel: CustomMetricDefinition) => postJson<{ model: CustomMetricDefinition }>("/analytics/custom-metrics", { ...metricModel, run_id: effectiveRunId, enabled: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["custom-metric-models", effectiveRunId] });
+    },
+  });
+
+  const deleteCustomMetric = useMutation({
+    mutationFn: (metricId: string) => {
+      const query = new URLSearchParams({ run_id: effectiveRunId });
+      return deleteJson<{ deleted: boolean }>(`/analytics/custom-metrics/${encodeURIComponent(metricId)}?${query.toString()}`);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["custom-metric-models", effectiveRunId] });
     },
   });
 
@@ -939,6 +967,9 @@ function Workbench() {
             setSelectedMetrics={setScientometricMetrics}
             customMetrics={customMetrics}
             setCustomMetrics={setCustomMetrics}
+            onSaveCustomMetric={(model) => saveCustomMetric.mutateAsync(model)}
+            onDeleteCustomMetric={(id) => deleteCustomMetric.mutateAsync(id)}
+            customMetricPersistenceReady={Boolean(effectiveRunId)}
             selectedAuthorIds={selectedAuthorIds}
             metricOptions={allMetricOptions}
             metricLabels={metricLabelMap}
@@ -2080,6 +2111,9 @@ function RankingsPage({
   setSelectedMetrics,
   customMetrics,
   setCustomMetrics,
+  onSaveCustomMetric,
+  onDeleteCustomMetric,
+  customMetricPersistenceReady,
   selectedAuthorIds,
   metricOptions,
   metricLabels,
@@ -2102,6 +2136,9 @@ function RankingsPage({
   setSelectedMetrics: (value: string[]) => void;
   customMetrics: CustomMetricDefinition[];
   setCustomMetrics: (value: CustomMetricDefinition[]) => void;
+  onSaveCustomMetric: (value: CustomMetricDefinition) => Promise<unknown>;
+  onDeleteCustomMetric: (id: string) => Promise<unknown>;
+  customMetricPersistenceReady: boolean;
   selectedAuthorIds: string[];
   metricOptions: SelectOption[];
   metricLabels: Record<string, string>;
@@ -2232,6 +2269,9 @@ function RankingsPage({
           <FormulaBuilderDialog
             metrics={customMetrics}
             setMetrics={setCustomMetrics}
+            onSaveMetric={onSaveCustomMetric}
+            onDeleteMetric={onDeleteCustomMetric}
+            persistenceReady={customMetricPersistenceReady}
             selectedMetrics={selectedMetrics}
             setSelectedMetrics={setSelectedMetrics}
             activeMetric={metric}
@@ -2423,6 +2463,9 @@ const FORMULA_FUNCTION_NAMES = new Set(FORMULA_FUNCTIONS.map((item) => item.repl
 function CustomMetricBuilder({
   metrics,
   setMetrics,
+  onSaveMetric,
+  onDeleteMetric,
+  persistenceReady,
   selectedMetrics,
   setSelectedMetrics,
   activeMetric,
@@ -2430,6 +2473,9 @@ function CustomMetricBuilder({
 }: {
   metrics: CustomMetricDefinition[];
   setMetrics: (value: CustomMetricDefinition[]) => void;
+  onSaveMetric: (value: CustomMetricDefinition) => Promise<unknown>;
+  onDeleteMetric: (id: string) => Promise<unknown>;
+  persistenceReady: boolean;
   selectedMetrics: string[];
   setSelectedMetrics: (value: string[]) => void;
   activeMetric: string;
@@ -2448,7 +2494,7 @@ function CustomMetricBuilder({
     const next = `${current}${needsOperator ? " + " : current ? " " : ""}${suffix}`.trim();
     setDraft({ ...draft, expression: next });
   };
-  const addMetric = () => {
+  const addMetric = async () => {
     const expression = draft.expression.trim();
     if (!expression) {
       emitToast({ title: "Формула не добавлена", message: "Введите математическое выражение по доступным полям.", tone: "error" });
@@ -2466,13 +2512,25 @@ function CustomMetricBuilder({
       return;
     }
     const nextMetric = { id, label, description: draft.description?.trim() || "Собственная формула по данным выбранного среза.", expression };
-    setMetrics([...metrics, nextMetric]);
+    try {
+      if (persistenceReady) await onSaveMetric(nextMetric);
+    } catch (error) {
+      emitToast({ title: "Формула не сохранена", message: mutationError(error), tone: "error" });
+      return;
+    }
+    setMetrics([...metrics.filter((item) => item.id !== id), nextMetric]);
     setSelectedMetrics([...new Set([...selectedMetrics, id])]);
     setActiveMetric(id);
     setDraft({ id: "", label: "", description: "", expression: "" });
     emitToast({ title: "Формула добавлена", message: `Показатель «${label}» включен в таблицу и графики.`, tone: "success" });
   };
-  const removeMetric = (id: string) => {
+  const removeMetric = async (id: string) => {
+    try {
+      if (persistenceReady) await onDeleteMetric(id);
+    } catch (error) {
+      emitToast({ title: "Формула не удалена", message: mutationError(error), tone: "error" });
+      return;
+    }
     setMetrics(metrics.filter((item) => item.id !== id));
     setSelectedMetrics(selectedMetrics.filter((item) => item !== id));
     if (activeMetric === id) setActiveMetric("h");
@@ -2620,6 +2678,9 @@ function validateFormulaExpression(expression: string) {
 function FormulaBuilderDialog(props: {
   metrics: CustomMetricDefinition[];
   setMetrics: (value: CustomMetricDefinition[]) => void;
+  onSaveMetric: (value: CustomMetricDefinition) => Promise<unknown>;
+  onDeleteMetric: (id: string) => Promise<unknown>;
+  persistenceReady: boolean;
   selectedMetrics: string[];
   setSelectedMetrics: (value: string[]) => void;
   activeMetric: string;
@@ -4559,5 +4620,3 @@ function KeyValue({ label, value }: { label: string; value: string }) {
 function CheckPill({ active, label }: { active: boolean; label: string }) {
   return <span className={active ? "check-pill active" : "check-pill"}>{active && <CheckCircle2 size={14} />}{label}</span>;
 }
-
-createRoot(document.getElementById("root")!).render(<App />);

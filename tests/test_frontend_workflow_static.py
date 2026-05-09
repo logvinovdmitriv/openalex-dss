@@ -16,7 +16,7 @@ def test_frontend_progress_component_uses_structured_phases() -> None:
 
 
 def test_workbench_uses_scope_and_data_selection_hooks() -> None:
-    main = (ROOT / "apps/web/src/main.tsx").read_text(encoding="utf-8")
+    main = (ROOT / "apps/web/src/WorkbenchApp.tsx").read_text(encoding="utf-8")
     assert "useWorkbenchScope" in main
     assert "useDataSelection" in main
     assert "ProgressPanel" in main
@@ -24,7 +24,7 @@ def test_workbench_uses_scope_and_data_selection_hooks() -> None:
 
 
 def test_formula_and_tooltip_ui_stay_in_dedicated_components() -> None:
-    main = (ROOT / "apps/web/src/main.tsx").read_text(encoding="utf-8")
+    main = (ROOT / "apps/web/src/WorkbenchApp.tsx").read_text(encoding="utf-8")
     assert "FormulaBuilderDialog" in main
     assert "formula-builder" in main
     assert "InfoPopover" in main

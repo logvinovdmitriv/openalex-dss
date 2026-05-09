@@ -548,6 +548,13 @@ export function customMetricDefsQuery(customMetrics?: CustomMetricDefinition[]) 
   return clean.length ? JSON.stringify(clean) : "";
 }
 
+export function customMetricModelsUrl(runId = "") {
+  const query = new URLSearchParams();
+  if (runId) query.set("run_id", runId);
+  const suffix = query.toString();
+  return `/analytics/custom-metrics${suffix ? `?${suffix}` : ""}`;
+}
+
 export function dataSelectionQuery(selection?: DataSelectionParams) {
   const encodedFilters = encodeColumnFilters(selection?.filters);
   const sort = String(selection?.sort ?? "").trim();

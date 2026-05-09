@@ -12,6 +12,7 @@
     "dev:web": "npm --workspace apps/web run dev",
     "build:web": "npm --workspace apps/web run build",
     "preview:web": "npm --workspace apps/web run preview",
+    "test:e2e:web": "npm --workspace apps/web run test:e2e",
     "clean": "python3 scripts/clean_project.py",
     "clean:all": "python3 scripts/clean_project.py --data --deps --empty-old"
   }
