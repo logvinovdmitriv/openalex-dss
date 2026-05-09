@@ -75,7 +75,6 @@ import {
 } from "./workbench";
 import { buildWorkflowNav, nextUnlockedNavIndex } from "./features/workflow/workflowNav";
 import { StatusRail } from "./features/workflow/StatusRail";
-import { DataRestrictionChips } from "./features/data/DataRestrictionChips";
 import { DataView } from "./features/data/DataView";
 import { DownloadedSlicesPanel, DumpInfoModal } from "./features/slices/DownloadedSlices";
 import { EstimateBudget, EstimateFacets, RateLimitPanel } from "./features/slices/EstimatePanels";
@@ -902,16 +901,10 @@ function Workbench() {
             baselineMetric={baselineMetric}
             rankTopN={analysisRankTopN}
             dataFilters={dataColumnFilters}
-            setDataFilters={setDataColumnFilters}
             dataSearch={dataSearch}
-            setDataSearch={setDataSearch}
             selectedAuthorIds={selectedAuthorIds}
-            setSelectedAuthorIds={setSelectedAuthorIds}
             dataSort={dataSort}
-            setDataSort={setDataSort}
             dataDirection={dataDirection}
-            setDataDirection={setDataDirection}
-            onSelect={setSelected}
           />
         )}
 
@@ -1628,16 +1621,10 @@ function StatisticsPage({
   baselineMetric,
   rankTopN,
   dataFilters,
-  setDataFilters,
   dataSearch,
-  setDataSearch,
   selectedAuthorIds,
-  setSelectedAuthorIds,
   dataSort,
-  setDataSort,
   dataDirection,
-  setDataDirection,
-  onSelect,
 }: {
   filters: ActiveFilters;
   scientometrics?: ScientometricAnalysisPayload;
@@ -1658,22 +1645,15 @@ function StatisticsPage({
   baselineMetric: string;
   rankTopN: number;
   dataFilters: TableColumnFilters;
-  setDataFilters: (value: TableColumnFilters) => void;
   dataSearch: string;
-  setDataSearch: (value: string) => void;
   selectedAuthorIds: string[];
-  setSelectedAuthorIds: (value: string[]) => void;
   dataSort: string;
-  setDataSort: (value: string) => void;
   dataDirection: "asc" | "desc";
-  setDataDirection: (value: "asc" | "desc") => void;
-  onSelect: (value: { kind: "author" | "work"; id: string }) => void;
 }) {
   const metrics = (scientometrics?.metrics ?? scientometricMetrics).filter(Boolean);
   const analyticsMetrics = metrics.length ? metrics : [metric].filter(Boolean);
   const warnings = (scientometrics?.warnings ?? []).filter((warning) => !/Кендалл|Kendall/i.test(String(warning)));
   const [showBoxplot, setShowBoxplot] = useState(true);
-  const analyticsAuthorTable = useMemo(() => projectAuthorIndexTable(authorIndexTable, analyticsMetrics), [authorIndexTable, analyticsMetrics.join("|")]);
   const selectedAuthorRows = selectedAuthorIndexTable(authorIndexTable, analyticsMetrics, selectedAuthorIds)?.rows ?? [];
   const scientometricMetricParam = scientometricMetrics.join(",");
   const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: dataSort, direction: dataDirection, limit: 0 });
@@ -1780,22 +1760,6 @@ function StatisticsPage({
       )}
       {scientometrics && Number(scientometrics.n_authors ?? 0) > 0 && (
         <>
-          <AnalyticsAuthorTablePanel
-            table={analyticsAuthorTable}
-            metrics={analyticsMetrics}
-            metricLabels={metricLabels}
-            dataFilters={dataFilters}
-            setDataFilters={setDataFilters}
-            dataSearch={dataSearch}
-            setDataSearch={setDataSearch}
-            dataSort={dataSort}
-            setDataSort={setDataSort}
-            dataDirection={dataDirection}
-            setDataDirection={setDataDirection}
-            selectedAuthorIds={selectedAuthorIds}
-            setSelectedAuthorIds={setSelectedAuthorIds}
-            onSelect={onSelect}
-          />
           <DescriptiveStatsPanel
             payload={scientometrics}
             metrics={analyticsMetrics}
@@ -1938,118 +1902,6 @@ function analysisWarningLabel(warning: string, metricLabels?: Record<string, str
     return "Межквартильный размах равен нулю; границы выделяющихся значений по ящику с усами здесь неинформативны.";
   }
   return text;
-}
-
-function AnalyticsAuthorTablePanel({
-  table,
-  metrics,
-  metricLabels,
-  dataFilters,
-  setDataFilters,
-  dataSearch,
-  setDataSearch,
-  dataSort,
-  setDataSort,
-  dataDirection,
-  setDataDirection,
-  selectedAuthorIds,
-  setSelectedAuthorIds,
-  onSelect,
-}: {
-  table?: TableResponse;
-  metrics: string[];
-  metricLabels?: Record<string, string>;
-  dataFilters: TableColumnFilters;
-  setDataFilters: (value: TableColumnFilters) => void;
-  dataSearch: string;
-  setDataSearch: (value: string) => void;
-  dataSort: string;
-  setDataSort: (value: string) => void;
-  dataDirection: "asc" | "desc";
-  setDataDirection: (value: "asc" | "desc") => void;
-  selectedAuthorIds: string[];
-  setSelectedAuthorIds: (value: string[]) => void;
-  onSelect: (value: { kind: "author" | "work"; id: string }) => void;
-}) {
-  const visibleAuthorIds = useMemo(() => [...new Set((table?.rows ?? []).map((row) => String(row.author_id ?? "").trim()).filter(Boolean))], [table?.rows]);
-  const selectedSet = new Set(selectedAuthorIds);
-  const allVisibleSelected = visibleAuthorIds.length > 0 && visibleAuthorIds.every((id) => selectedSet.has(id));
-  const reset = () => {
-    setDataFilters({});
-    setDataSearch("");
-    setDataSort("");
-    setDataDirection("desc");
-    setSelectedAuthorIds([]);
-  };
-  return (
-    <section className="panel table-panel analytics-author-table">
-      <div className="panel-head split">
-        <div>
-          <span className="step-badge">Авторы</span>
-          <h2>Таблица авторов и рейтингов</h2>
-          <p>Поиск, фильтры и сортировка в этой таблице сразу меняют графики и выводы ниже. Выбранные авторы показываются отдельными точками.</p>
-        </div>
-        <div className="download-inline">
-          <button type="button" className="ghost-button" onClick={reset}>Сбросить</button>
-        </div>
-      </div>
-      <div className="form-grid tight single">
-        <Field label="Поиск по авторам">
-          <input value={dataSearch} onChange={(event) => setDataSearch(event.target.value)} placeholder="ФИО, организация, страна или ID" />
-          <small className="field-hint">Поиск выполняется на backend по авторской таблице выбранного среза.</small>
-        </Field>
-      </div>
-      <div className="action-row">
-        {visibleAuthorIds.length > 0 && (
-          <button
-            type="button"
-            className={allVisibleSelected ? "choice-pill active" : "choice-pill"}
-            onClick={() => setSelectedAuthorIds(allVisibleSelected ? [] : visibleAuthorIds)}
-          >
-            {allVisibleSelected ? "Убрать точки с графиков" : "Показать видимых авторов точками"}
-          </button>
-        )}
-        {selectedAuthorIds.length > 0 && <span className="selection-chip passive">Выбрано авторов: {fmt(selectedAuthorIds.length)}</span>}
-      </div>
-      <DataRestrictionChips
-        filters={dataFilters}
-        sortField={dataSort}
-        sortDirection={dataDirection}
-        search={dataSearch}
-        selectedAuthorIds={selectedAuthorIds}
-        onResetSearch={() => setDataSearch("")}
-        onRemoveFilter={(field) => {
-          const next = { ...dataFilters };
-          delete next[field];
-          setDataFilters(next);
-        }}
-        onResetSort={() => {
-          setDataSort("");
-          setDataDirection("desc");
-        }}
-      />
-      <DataGrid
-        data={table}
-        onSelect={onSelect}
-        hiddenFields={["author_id"]}
-        fieldLabels={metricLabels}
-        sortField={dataSort}
-        sortDirection={dataDirection}
-        onSortChange={(field, direction) => {
-          setDataSort(field);
-          setDataDirection(direction);
-        }}
-        enableColumnFilters
-        columnFilters={dataFilters}
-        onColumnFiltersChange={setDataFilters}
-        selectableRows
-        selectedIds={selectedAuthorIds}
-        selectionField="author_id"
-        onSelectedIdsChange={setSelectedAuthorIds}
-      />
-      <p className="muted">Показатели в таблице: {metrics.map((item) => metricLabelFor(item, metricLabels)).join(", ")}.</p>
-    </section>
-  );
 }
 
 const CHART_COLORS = ["#155e75", "#167343", "#5b5fc7", "#0f766e", "#7c3aed", "#8a5a00", "#2563eb", "#64748b"];

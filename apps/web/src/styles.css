@@ -665,10 +665,6 @@ input[aria-invalid="true"] {
   align-items: center;
 }
 
-.analytics-author-table {
-  min-height: 520px;
-}
-
 .stats-summary-table table {
   min-width: 960px;
 }
