@@ -216,6 +216,26 @@ class WarehouseTests(unittest.TestCase):
             self.assertEqual(rows[0]["h"], 1)
             self.assertAlmostEqual(rows[0]["c_frac"], 12.0)
 
+    def test_filtered_analytics_cache_hits_and_prunes_under_run_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_dump_tables(root, "dump_a", "W1", "A1", "Author One", 12)
+            _write_run_author_work(root, "run_a", "dump_a", "W1", "A1", "Author One", 12)
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+                patch.object(warehouse, "_ANALYTICS_CACHE_LIMIT", 1),
+            ):
+                first = warehouse.metric_ranking("integer", "h", {"country_code": "RU"}, run_id="run_a")
+                second = warehouse.metric_ranking("integer", "h", {"country_code": "RU"}, run_id="run_a")
+                cache_dirs = list((root / "runs" / "run_a" / "analytics" / "filtered").glob("*/manifest.json"))
+
+            self.assertEqual(first["analytics_cache"]["status"], "miss")
+            self.assertEqual(second["analytics_cache"]["status"], "hit")
+            self.assertEqual(second["analytics_cache"]["rows"], 1)
+            self.assertEqual(len(cache_dirs), 1)
+
     def test_run_scoped_metric_ranking_uses_requested_run_tables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import sys
 from collections import defaultdict
@@ -18,6 +19,7 @@ if str(SRC) not in sys.path:
 
 from openalex_dss.metrics import assign_iupv_percentiles, g_index, h_index, i10_index, lrdi as lrdi_metric  # noqa: E402
 from openalex_dss.ranking import sort_metric_rows  # noqa: E402
+from openalex_dss.io_utils import write_json, write_parquet_dicts  # noqa: E402
 
 INDEX_NUMERIC_FIELDS = {
     "p",
@@ -103,6 +105,8 @@ LINE_CHART_METRICS = EXTENDED_LINE_CHART_METRICS
 
 FilterSet = dict[str, Any]
 _ROW_COUNT_CACHE: dict[str, tuple[int, int, int]] = {}
+_ANALYTICS_CACHE_LIMIT = 10
+_LAST_ANALYTICS_CACHE_INFO: dict[str, Any] = {"status": "not_used", "key": "", "rows": 0}
 
 DUMP_TABLES = {"works", "authorships", "work_topics"}
 RUN_JSON_DOCS = {
@@ -665,7 +669,25 @@ def selected_index_rows(
         normalized_limit = 0
 
     if _can_use_precomputed_indices(filters, run_id=run_id, dump_id=dump_id):
+        _set_analytics_cache_info({"status": "not_used", "key": "", "rows": count_rows("indices", run_id=run_id, dump_id=dump_id)})
         return _selected_precomputed_index_rows(
+            fraction_mode,
+            run_id=run_id,
+            dump_id=dump_id,
+            author_ids=author_ids,
+            data_filters=parsed_filters,
+            data_search=data_search,
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=normalized_limit,
+            custom_metric_defs=custom_metric_defs,
+            select_fields=select_fields,
+        )
+
+    cached = _filtered_indices_cache_hit(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    if cached:
+        return _selected_cached_index_rows(
+            cached["indices_path"],
             fraction_mode,
             run_id=run_id,
             dump_id=dump_id,
@@ -758,6 +780,68 @@ def _selected_precomputed_index_rows(
     return rows
 
 
+def _selected_cached_index_rows(
+    path: Path,
+    fraction_mode: str,
+    *,
+    run_id: str,
+    dump_id: str,
+    author_ids: set[str] | list[str] | tuple[str, ...] | None,
+    data_filters: dict[str, Any],
+    data_search: str,
+    data_sort: str,
+    data_direction: str,
+    data_limit: int,
+    custom_metric_defs: list[dict[str, str]] | None,
+    select_fields: list[str] | tuple[str, ...] | set[str] | None,
+) -> list[dict[str, Any]]:
+    with duckdb.connect(":memory:") as conn:
+        escaped = str(path).replace("'", "''")
+        conn.execute(f"CREATE VIEW cached_indices AS SELECT * FROM read_parquet('{escaped}')")
+        fields = _registered_fields(conn, "cached_indices")
+        custom_ids = custom_metrics.custom_metric_ids(custom_metric_defs)
+        native_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field in fields}
+        python_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field not in fields}
+        sort_is_native = not data_sort or data_sort in fields
+        sort_is_custom = data_sort in custom_ids
+        needs_python_selection = bool(author_ids) or bool(python_filters) or sort_is_custom
+        required_fields = _selected_index_query_fields(
+            set(fields),
+            requested_fields=select_fields,
+            native_filters=native_filters,
+            data_sort=data_sort,
+            custom_metric_defs=custom_metric_defs,
+        )
+        query_limit = 0 if needs_python_selection else data_limit
+        query_sort = data_sort if sort_is_native else ""
+        payload = _query_registered_table(
+            conn,
+            "cached_indices",
+            fields,
+            q=data_search,
+            fraction_mode=fraction_mode,
+            data_filters=native_filters,
+            sort=query_sort,
+            direction=data_direction,
+            limit=query_limit,
+            select_fields=required_fields,
+        )
+    rows = list(payload.get("rows") or [])
+    rows = filter_rows_by_author_ids(rows, author_ids)
+    if custom_metric_defs:
+        rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
+    if needs_python_selection:
+        rows = apply_data_selection(
+            rows,
+            data_filters=python_filters,
+            data_search="",
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=data_limit,
+        )
+    return rows
+
+
 def _selected_index_query_fields(
     fields: set[str],
     *,
@@ -796,7 +880,225 @@ def filtered_indices(
     run_id: str = "",
     dump_id: str = "",
 ) -> list[dict[str, Any]]:
-    return _filtered_work_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    cached = _filtered_indices_cache_hit(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    if cached:
+        return _read_cached_index_rows(cached["indices_path"])
+    rows = _filtered_work_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+    _write_filtered_indices_cache(fraction_mode, filters, rows, run_id=run_id, dump_id=dump_id)
+    return rows
+
+
+def analytics_cache_info() -> dict[str, Any]:
+    return dict(_LAST_ANALYTICS_CACHE_INFO)
+
+
+def _set_analytics_cache_info(info: dict[str, Any]) -> None:
+    _LAST_ANALYTICS_CACHE_INFO.clear()
+    _LAST_ANALYTICS_CACHE_INFO.update(
+        {
+            "status": str(info.get("status") or "not_used"),
+            "key": str(info.get("key") or ""),
+            "rows": int(info.get("rows") or 0),
+        }
+    )
+
+
+def _filtered_indices_cache_hit(
+    fraction_mode: str,
+    filters: FilterSet | None = None,
+    *,
+    run_id: str = "",
+    dump_id: str = "",
+) -> dict[str, Any] | None:
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    key = _filtered_indices_cache_key(fraction_mode, filters, run_id=scope["run_id"], dump_id=scope["dump_id"])
+    cache_dir = _filtered_indices_cache_dir(scope["run_id"], key)
+    manifest_path = cache_dir / "manifest.json"
+    indices_path = cache_dir / "indices.parquet"
+    author_work_path = cache_dir / "author_work.parquet"
+    if not (manifest_path.is_file() and indices_path.is_file()):
+        _set_analytics_cache_info({"status": "miss", "key": key, "rows": 0})
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        _set_analytics_cache_info({"status": "miss", "key": key, "rows": 0})
+        return None
+    if manifest.get("key") != key:
+        _set_analytics_cache_info({"status": "miss", "key": key, "rows": 0})
+        return None
+    rows = _count_parquet_rows(indices_path)
+    manifest["last_used_at"] = _utc_now()
+    manifest["rows"] = rows
+    try:
+        write_json(manifest_path, manifest)
+    except OSError:
+        pass
+    _set_analytics_cache_info({"status": "hit", "key": key, "rows": rows})
+    return {
+        "key": key,
+        "cache_dir": cache_dir,
+        "indices_path": indices_path,
+        "author_work_path": author_work_path,
+        "rows": rows,
+    }
+
+
+def _write_filtered_indices_cache(
+    fraction_mode: str,
+    filters: FilterSet | None,
+    rows: list[dict[str, Any]],
+    *,
+    run_id: str,
+    dump_id: str,
+) -> None:
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    if not scope["run_id"]:
+        _set_analytics_cache_info({"status": "not_used", "key": "", "rows": len(rows)})
+        return
+    key = _filtered_indices_cache_key(fraction_mode, filters, run_id=scope["run_id"], dump_id=scope["dump_id"])
+    cache_dir = _filtered_indices_cache_dir(scope["run_id"], key)
+    tmp_dir = cache_dir.with_name(f"{cache_dir.name}.tmp")
+    if tmp_dir.exists():
+        import shutil
+
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    fields = _filtered_indices_fields(rows)
+    indices_path = tmp_dir / "indices.parquet"
+    author_work_path = tmp_dir / "author_work.parquet"
+    try:
+        write_parquet_dicts(indices_path, rows, fields)
+        # Work-level filtered rows can be added later without changing the
+        # manifest contract; keep an empty artifact so cache consumers can rely
+        # on stable filenames.
+        write_parquet_dicts(author_work_path, [], AUTHOR_WORK_DETAIL_FIELDS)
+        manifest = {
+            "schema": "filtered_analytics_cache",
+            "key": key,
+            "run_id": scope["run_id"],
+            "dump_id": scope["dump_id"],
+            "fraction_mode": fraction_mode,
+            "filters": _clean_filters(filters or {}),
+            "metric_params": _run_metric_params(scope["run_id"]),
+            "source_signatures": _filtered_source_signatures(scope["run_id"], scope["dump_id"]),
+            "rows": len(rows),
+            "created_at": _utc_now(),
+            "last_used_at": _utc_now(),
+            "artifacts": {
+                "indices": "indices.parquet",
+                "author_work": "author_work.parquet",
+            },
+        }
+        write_json(tmp_dir / "manifest.json", manifest)
+        if cache_dir.exists():
+            import shutil
+
+            shutil.rmtree(cache_dir, ignore_errors=True)
+        tmp_dir.replace(cache_dir)
+        _prune_filtered_indices_cache(scope["run_id"])
+        _set_analytics_cache_info({"status": "miss", "key": key, "rows": len(rows)})
+    except Exception:
+        import shutil
+
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+
+
+def _read_cached_index_rows(path: Path) -> list[dict[str, Any]]:
+    escaped = str(path).replace("'", "''")
+    with duckdb.connect(":memory:") as conn:
+        return _records(conn.execute(f"SELECT * FROM read_parquet('{escaped}')"))
+
+
+def _filtered_indices_cache_key(
+    fraction_mode: str,
+    filters: FilterSet | None,
+    *,
+    run_id: str,
+    dump_id: str,
+) -> str:
+    payload = {
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "fraction_mode": str(fraction_mode or ""),
+        "filters": _clean_filters(filters or {}),
+        "metric_params": _run_metric_params(run_id),
+        "source_signatures": _filtered_source_signatures(run_id, dump_id),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:24]
+
+
+def _filtered_indices_cache_dir(run_id: str, key: str) -> Path:
+    return _run_dir(run_id) / "analytics" / "filtered" / _safe_id(key)
+
+
+def _filtered_source_signatures(run_id: str, dump_id: str) -> dict[str, dict[str, Any]]:
+    signatures: dict[str, dict[str, Any]] = {}
+    for table in ("author_work", "works", "authorships", "work_topics"):
+        path = resolve_scoped_table_path(table, run_id=run_id, dump_id=dump_id) if table in TABLE_KINDS else None
+        if path and path.is_file():
+            signatures[table] = _file_signature(path)
+    calc = _run_dir(run_id) / "passports" / "calculation_passport.json"
+    if calc.is_file():
+        signatures["calculation_passport"] = _file_signature(calc)
+    return signatures
+
+
+def _file_signature(path: Path) -> dict[str, Any]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return {"path": str(path), "exists": False, "size": 0, "mtime_ns": 0}
+    return {"path": str(path), "exists": True, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def _filtered_indices_fields(rows: list[dict[str, Any]]) -> list[str]:
+    preferred = [
+        "run_id",
+        "source_run_id",
+        "source_dump_id",
+        "metric_scope",
+        "percentile_scope",
+        *AUTHOR_INDEX_DETAIL_FIELDS,
+        "top1_share",
+        "mean_authors_per_work",
+        "share_single_authored",
+        "n_flagged_works",
+        "n_truncated_works",
+        "country_code",
+        "subject_name",
+    ]
+    present = {key for row in rows for key in row}
+    ordered = [field for field in preferred if field in present]
+    ordered.extend(sorted(present - set(ordered)))
+    return ordered or list(preferred)
+
+
+def _prune_filtered_indices_cache(run_id: str) -> None:
+    root = _run_dir(run_id) / "analytics" / "filtered"
+    if not root.is_dir():
+        return
+    entries: list[tuple[str, Path]] = []
+    for manifest_path in root.glob("*/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        entries.append((str(manifest.get("last_used_at") or manifest.get("created_at") or ""), manifest_path.parent))
+    if len(entries) <= _ANALYTICS_CACHE_LIMIT:
+        return
+    import shutil
+
+    for _, cache_dir in sorted(entries)[: max(0, len(entries) - _ANALYTICS_CACHE_LIMIT)]:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def _utc_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _filtered_work_indices(
@@ -1108,7 +1410,7 @@ def metric_ranking(
         data_limit=data_limit,
         custom_metric_defs=custom_metric_defs,
     )
-    return metric_ranking_from_rows(
+    payload = metric_ranking_from_rows(
         rows,
         fraction_mode,
         metric,
@@ -1119,6 +1421,8 @@ def metric_ranking(
         dump_id=dump_id,
         custom_metric_defs=custom_metric_defs,
     )
+    payload["analytics_cache"] = analytics_cache_info()
+    return payload
 
 
 def metric_ranking_from_rows(
@@ -1200,7 +1504,9 @@ def metric_distribution(
         data_limit=data_limit,
         custom_metric_defs=custom_metric_defs,
     )
-    return metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id, custom_metric_defs=custom_metric_defs)
+    payload = metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id, custom_metric_defs=custom_metric_defs)
+    payload["analytics_cache"] = analytics_cache_info()
+    return payload
 
 
 def metric_distribution_from_rows(
@@ -1344,6 +1650,7 @@ def metric_bundle(
     )
     return {
         "rows": rows,
+        "analytics_cache": analytics_cache_info(),
         "distribution": metric_distribution_from_rows(rows, fraction_mode, metric, run_id=scope["run_id"], dump_id=scope["dump_id"], custom_metric_defs=custom_metric_defs),
         "ranking": metric_ranking_from_rows(rows, fraction_mode, metric, filters, limit=limit, max_limit=500_000, run_id=scope["run_id"], dump_id=scope["dump_id"], custom_metric_defs=custom_metric_defs),
         "line_series": metric_line_series_from_rows(rows, fraction_mode, rank_metric=metric, limit=40, run_id=scope["run_id"], dump_id=scope["dump_id"], custom_metric_defs=custom_metric_defs),
