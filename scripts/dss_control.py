@@ -15,6 +15,7 @@ RUNTIME = ROOT / ".runtime"
 LOGS = RUNTIME / "logs"
 BACKEND_PORT = 8000
 FRONTEND_PORT = 5173
+STARTUP_TIMEOUT_SECONDS = 18
 
 
 SERVICES = {
@@ -53,7 +54,8 @@ def start() -> None:
     ensure_runtime()
     start_backend()
     start_frontend()
-    time.sleep(1.2)
+    wait_for_service("backend")
+    wait_for_service("frontend")
     status()
     print()
     print("UI:      http://127.0.0.1:5173/")
@@ -99,9 +101,11 @@ def start_backend() -> None:
 
 
 def start_frontend() -> None:
+    if not (ROOT / "node_modules").exists():
+        raise SystemExit("Missing node_modules. Run: npm install")
     start_service(
         "frontend",
-        ["npm", "run", "dev", "--workspace", "apps/web", "--", "--port", str(FRONTEND_PORT)],
+        ["npm", "--workspace", "apps/web", "run", "dev", "--", "--port", str(FRONTEND_PORT)],
         cwd=ROOT,
     )
 
@@ -111,17 +115,21 @@ def start_service(name: str, command: list[str], *, cwd: Path) -> None:
     port = int(service["port"])
     existing_pid = service_pid(name)
     if existing_pid and pid_alive(existing_pid):
-        print(f"{name}: already running pid={existing_pid}")
-        return
+        if port_open(port):
+            print(f"{name}: already running pid={existing_pid}")
+            return
+        print(f"{name}: stale pid without listening port pid={existing_pid}; restarting")
+        terminate_pid(existing_pid)
+        Path(service["pid"]).unlink(missing_ok=True)
     port_owner = port_pid(port)
     if port_owner and pid_alive(port_owner):
         write_pid(name, port_owner)
         print(f"{name}: already listening on port {port} pid={port_owner}")
         return
 
-    env = os.environ.copy()
-    env.setdefault("OPENALEX_DSS_DATA_DIR", str((ROOT.parent / "openalex-dss-data").resolve()))
+    env = service_env()
     log_path = Path(service["log"])
+    log_path.write_bytes(b"")
     log = log_path.open("ab")
     proc = subprocess.Popen(
         command,
@@ -173,6 +181,42 @@ def terminate_pid(pid: int) -> None:
 
 def ensure_runtime() -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
+
+
+def service_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("OPENALEX_DSS_DATA_DIR", str((ROOT.parent / "openalex-dss-data").resolve()))
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    python_paths = [str(ROOT / "apps/api"), str(ROOT / "src")]
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    if existing_pythonpath:
+        python_paths.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(python_paths)
+    return env
+
+
+def wait_for_service(name: str) -> None:
+    service = SERVICES[name]
+    port = int(service["port"])
+    pid = service_pid(name)
+    deadline = time.time() + STARTUP_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        if pid and not pid_alive(pid):
+            raise SystemExit(f"{name}: process exited during startup. Log tail:\n{log_tail(name)}")
+        if port_open(port):
+            return
+        time.sleep(0.2)
+    raise SystemExit(f"{name}: port {port} did not open in {STARTUP_TIMEOUT_SECONDS}s. Log tail:\n{log_tail(name)}")
+
+
+def log_tail(name: str, *, lines: int = 30) -> str:
+    path = Path(SERVICES[name]["log"])
+    if not path.exists():
+        return "(no log file)"
+    try:
+        return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]) or "(empty log file)"
+    except OSError as exc:
+        return f"(cannot read log: {exc})"
 
 
 def service_pid(name: str) -> int | None:
