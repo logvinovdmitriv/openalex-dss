@@ -135,7 +135,6 @@ function Workbench() {
   const [filters, setFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
   const [metric, setMetric] = useState("h");
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
-  const [topN, setTopN] = useState(0);
   const [dataOffset, setDataOffset] = useState(0);
   const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
   const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "g", "iupv", "islv", "custom_added_rating"]);
@@ -268,7 +267,7 @@ function Workbench() {
     search: dataSearch,
     sort: dataSort,
     direction: dataDirection,
-    limit: topN,
+    limit: 0,
     authorIds: [],
   });
   const scientometricMetricKey = useMemo(() => scientometricMetrics.join(","), [scientometricMetrics]);
@@ -321,24 +320,21 @@ function Workbench() {
   }, [workbench.isFetched, workbench.isError, workflowNav.map((item) => `${item.id}:${item.unlocked}`).join("|"), view]);
   useEffect(() => {
     setDataOffset(0);
-  }, [localDataKind, dataSearch, dataFilterKey, dataSort, dataDirection, topN, fractionMode, effectiveRunId, effectiveDumpId]);
-  const selectedRowLimit = Math.max(0, Number(topN) || 0);
-  const effectiveDataOffset = selectedRowLimit > 0 ? Math.min(dataOffset, Math.max(0, selectedRowLimit - 1)) : dataOffset;
-  const dataPreviewLimit = selectedRowLimit > 0
-    ? Math.max(1, Math.min(DATA_PREVIEW_PAGE_SIZE, selectedRowLimit - effectiveDataOffset))
-    : DATA_PREVIEW_PAGE_SIZE;
+  }, [localDataKind, dataSearch, dataFilterKey, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId]);
+  const effectiveDataOffset = dataOffset;
+  const dataPreviewLimit = DATA_PREVIEW_PAGE_SIZE;
   const previewPageKey = `${effectiveDataOffset}:${dataPreviewLimit}`;
-  const rankingPreviewLimit = selectedRowLimit > 0 ? Math.min(selectedRowLimit, DATA_PREVIEW_PAGE_SIZE) : DATA_PREVIEW_PAGE_SIZE;
-  const analysisRankTopN = selectedRowLimit > 0 ? Math.min(selectedRowLimit, 1000) : 0;
+  const rankingPreviewLimit = DATA_PREVIEW_PAGE_SIZE;
+  const analysisRankTopN = 0;
   const table = useQuery({
-    queryKey: ["local-data-preview", localDataKind, dataSearch, dataFilterKey, topN, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId, previewPageKey],
+    queryKey: ["local-data-preview", localDataKind, dataSearch, dataFilterKey, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId, previewPageKey],
     queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: dataPreviewLimit, offset: effectiveDataOffset, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })),
     enabled: scopeReady && localDataKindAvailable,
     placeholderData: (previous) => previous,
     staleTime: 60_000,
   });
   const ranking = useQuery({
-    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, topN, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
+    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
     queryFn: () => getJson<TableResponse>(analyticsRankingUrl(
       analysisFilters,
       fractionMode,
@@ -355,7 +351,7 @@ function Workbench() {
     staleTime: 60_000,
   });
   const authorIndexTable = useQuery({
-    queryKey: ["author-index-table", fractionMode, effectiveRunId, effectiveDumpId, topN, dataSearch, dataFilterKey, dataSort, dataDirection, previewPageKey],
+    queryKey: ["author-index-table", fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, previewPageKey],
     queryFn: () => getJson<TableResponse>(localDataPreviewUrl("indices", {
       q: dataSearch,
       runId: effectiveRunId,
@@ -372,7 +368,7 @@ function Workbench() {
     staleTime: 60_000,
   });
   const scientometrics = useQuery({
-    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, topN, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
+    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
     queryFn: () => getJson<ScientometricAnalysisPayload>(scientometricsUrl({
       filters: analysisFilters,
       fractionMode,
@@ -406,8 +402,6 @@ function Workbench() {
   const countryOptions = catalogOptions(countries.data?.results ?? []);
   const workTypeOptions = catalogOptions(workTypes.data?.results ?? []).map((item) => ({ ...item, label: workTypeLabel(item.value) }));
   const storageProfileOptions = configuredOptions(catalog.data?.storage_profiles ?? []);
-  const uiOptions = catalog.data?.ui_options ?? {};
-  const topNOptions = configuredOptions((uiOptions.top_n ?? []) as Array<Record<string, unknown>>);
   const metricCatalogOptions = configuredOptions(catalog.data?.metrics ?? []);
   const primaryMetricOptions = rankingMetricOptions(metricCatalogOptions, CORE_METRIC_OPTIONS);
   const customMetricOptions: SelectOption[] = customMetrics.map((item) => ({
@@ -429,7 +423,6 @@ function Workbench() {
   const defaultSourceStrategy = String(defaultOption(sourceStrategyOptions)?.value ?? "openalex_cli");
   const activeStorageProfileId = storageProfileId || defaultStorageProfileId;
   const activeSourceStrategy = sourceStrategy || defaultSourceStrategy;
-  const activeTopN = topN;
   const slicePayload = useMemo(() => buildSliceDefinitionPayload(filters), [filters]);
   const analysisRunPayload = useMemo(() => buildAnalysisRunPayload(fractionMode, displayFractionModeOptions.map((item) => item.value)), [fractionMode, displayFractionModeOptions]);
   const downloadConfigReady = Boolean(activeStorageProfileId && activeSourceStrategy);
@@ -638,7 +631,7 @@ function Workbench() {
       fraction_mode: fractionMode,
       run_id: runId,
       dump_id: activeDumpId,
-      limit: activeTopN > 0 ? Math.min(activeTopN, 500) : 50,
+      limit: 0,
       scientometric_metrics: scientometricMetrics.join(","),
       baseline_metric: baselineMetric,
       rank_top_n: analysisRankTopN,
@@ -648,7 +641,7 @@ function Workbench() {
         search: dataSearch,
         sort: dataSort,
         direction: dataDirection,
-        limit: activeTopN,
+        limit: 0,
         authorIds: selectedAuthorIds,
       }),
     }).toString()}`, {}),
@@ -844,14 +837,11 @@ function Workbench() {
             setDataDirection={setDataDirection}
             selectedAuthorIds={selectedAuthorIds}
             setSelectedAuthorIds={setSelectedAuthorIds}
-            topN={activeTopN}
-            setTopN={setTopN}
-            topNOptions={topNOptions}
             dataOffset={effectiveDataOffset}
             setDataOffset={setDataOffset}
             pageSize={DATA_PREVIEW_PAGE_SIZE}
             table={table.data}
-            csvUrl={`${API_BASE}${localDataPreviewCsvUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: activeTopN > 0 ? activeTopN : 100_000, offset: 0, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })}`}
+            csvUrl={`${API_BASE}${localDataPreviewCsvUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: 100_000, offset: 0, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })}`}
             run={run.data}
             running={running}
             activeContext={workbench.data?.active_context}
@@ -869,7 +859,6 @@ function Workbench() {
             setMetric={setMetric}
             fractionMode={fractionMode}
             setFractionMode={setFractionMode}
-            topN={activeTopN}
             ranking={ranking.data}
             authorIndexTable={authorIndexTable.data}
             selectedMetrics={scientometricMetrics}
@@ -912,8 +901,6 @@ function Workbench() {
             scientometricMetrics={scientometricMetrics}
             baselineMetric={baselineMetric}
             rankTopN={analysisRankTopN}
-            topN={activeTopN}
-            setTopN={setTopN}
             dataFilters={dataColumnFilters}
             setDataFilters={setDataColumnFilters}
             dataSearch={dataSearch}
@@ -929,7 +916,7 @@ function Workbench() {
         )}
 
         {view === "reports" && (
-          <ReportsPage filters={analysisFilters} metric={metric} fractionMode={fractionMode} runId={effectiveRunId} dumpId={effectiveDumpId} topN={activeTopN} scientometricMetrics={scientometricMetrics} baselineMetric={baselineMetric} rankTopN={analysisRankTopN} dataFilters={dataColumnFilters} dataSort={dataSort} dataDirection={dataDirection} customMetrics={customMetrics} metricLabels={metricLabelMap} onBuild={() => buildReport.mutate()} building={buildReport.isPending} state={workbench.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
+          <ReportsPage filters={analysisFilters} metric={metric} fractionMode={fractionMode} runId={effectiveRunId} dumpId={effectiveDumpId} scientometricMetrics={scientometricMetrics} baselineMetric={baselineMetric} rankTopN={analysisRankTopN} dataFilters={dataColumnFilters} dataSort={dataSort} dataDirection={dataDirection} customMetrics={customMetrics} metricLabels={metricLabelMap} onBuild={() => buildReport.mutate()} building={buildReport.isPending} state={workbench.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
         )}
         </motion.section>
       </AnimatePresence>
@@ -1416,7 +1403,6 @@ function RankingsPage({
   setMetric,
   fractionMode,
   setFractionMode,
-  topN,
   ranking,
   authorIndexTable,
   selectedMetrics,
@@ -1441,7 +1427,6 @@ function RankingsPage({
   setMetric: (value: string) => void;
   fractionMode: string;
   setFractionMode: (value: string) => void;
-  topN: number;
   ranking?: TableResponse;
   authorIndexTable?: TableResponse;
   selectedMetrics: string[];
@@ -1481,7 +1466,7 @@ function RankingsPage({
           <div>
             <span className="step-badge">Расчет индексов</span>
             <h2>Индексы и рейтинги</h2>
-          <p>Здесь показывается авторская таблица индексов. Ограничения, сортировка и число строк берутся из вкладки “Данные”, а ниже выбирается, какие индексы вывести.</p>
+          <p>Здесь показывается авторская таблица индексов. Поиск, ограничения и сортировка берутся из вкладки “Данные”, а ниже выбирается, какие индексы вывести.</p>
           </div>
           <button
             className="primary"
@@ -1509,7 +1494,6 @@ function RankingsPage({
         <div className="metric-grid">
           <MetricCard label="Показатель" value={metricLabelFor(metric, metricLabels)} />
           <MetricCard label="Учет вклада" value={modeLabel(fractionMode)} />
-          <MetricCard label="Лимит из “Данных”" value={topN > 0 ? fmt(topN) : "все"} />
           <MetricCard label="Авторов в таблице" value={fmt(authorIndexTable?.total ?? ranking?.total ?? 0)} />
           <MetricCard label="Точек на графиках" value={selectedAuthorIds.length ? fmt(selectedAuthorIds.length) : "нет"} />
         </div>
@@ -1596,7 +1580,7 @@ function RankingsPage({
         <div className="panel-head">
           <span className="step-badge">Таблица индексов</span>
           <h2>Авторский уровень данных</h2>
-          <p>Это таблица авторов с выбранными индексами. Она использует те же ограничения, сортировку и число строк, которые заданы на вкладке “Данные”.</p>
+          <p>Это таблица авторов с выбранными индексами. Она использует те же поиск, ограничения и сортировку, которые заданы на вкладке “Данные”.</p>
         </div>
         <DataGrid data={rankingTable} onSelect={onSelect} hiddenFields={["author_id"]} fieldLabels={metricLabels} />
       </section>
@@ -1643,8 +1627,6 @@ function StatisticsPage({
   scientometricMetrics,
   baselineMetric,
   rankTopN,
-  topN,
-  setTopN,
   dataFilters,
   setDataFilters,
   dataSearch,
@@ -1675,8 +1657,6 @@ function StatisticsPage({
   scientometricMetrics: string[];
   baselineMetric: string;
   rankTopN: number;
-  topN: number;
-  setTopN: (value: number) => void;
   dataFilters: TableColumnFilters;
   setDataFilters: (value: TableColumnFilters) => void;
   dataSearch: string;
@@ -1696,7 +1676,7 @@ function StatisticsPage({
   const analyticsAuthorTable = useMemo(() => projectAuthorIndexTable(authorIndexTable, analyticsMetrics), [authorIndexTable, analyticsMetrics.join("|")]);
   const selectedAuthorRows = selectedAuthorIndexTable(authorIndexTable, analyticsMetrics, selectedAuthorIds)?.rows ?? [];
   const scientometricMetricParam = scientometricMetrics.join(",");
-  const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: dataSort, direction: dataDirection, limit: topN });
+  const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: dataSort, direction: dataDirection, limit: 0 });
   const scientometricParams = filterParams(filters, {
     fraction_mode: fractionMode,
     metrics: scientometricMetricParam,
@@ -1719,7 +1699,7 @@ function StatisticsPage({
     <div className="stack">
       <section className="notice">
         <b>Аналитика построена по выборке из “Данных”</b>
-        <span>Поиск, фильтры, сортировка и число строк задаются во вкладке “Данные”. Отмеченные авторы подсвечиваются точками на графиках.</span>
+        <span>Поиск, фильтры и сортировка задаются во вкладке “Данные”. Расчеты используют всех авторов после этих ограничений, а отмеченные авторы подсвечиваются точками на графиках.</span>
       </section>
       {!hasAuthorIndices && (
         <section className="notice warn action-notice">
@@ -1743,12 +1723,12 @@ function StatisticsPage({
           <div>
             <span className="step-badge">Аналитика</span>
             <h2>Аналитика выбранной выборки</h2>
-            <p>На этой странице нет отдельных фильтров. Все графики ниже автоматически используют поиск, ограничения, сортировку и число строк из вкладки “Данные”. Отмеченные авторы показываются отдельными точками.</p>
+            <p>На этой странице нет отдельных фильтров. Все графики ниже автоматически используют поиск, ограничения и сортировку из вкладки “Данные”. Отмеченные авторы показываются отдельными точками.</p>
           </div>
           {loadingScientometrics && <span className="status-chip"><Loader2 size={14} className="spin" /> Обновление</span>}
         </div>
         <div className="analytics-context-line">
-          <span><b>Строк из “Данных”:</b> {topN > 0 ? fmt(topN) : "все"}</span>
+          <span><b>Авторов после ограничений:</b> {scientometrics?.n_authors !== undefined ? fmt(Number(scientometrics.n_authors)) : "все"}</span>
           <span><b>Основной показатель:</b> {metricLabelFor(baselineMetric, metricLabels)}</span>
           <span><b>Показатели:</b> {analyticsMetrics.map((item) => metricLabelFor(item, metricLabels)).join(", ")}</span>
         </div>
@@ -1814,8 +1794,6 @@ function StatisticsPage({
             setDataDirection={setDataDirection}
             selectedAuthorIds={selectedAuthorIds}
             setSelectedAuthorIds={setSelectedAuthorIds}
-            topN={topN}
-            setTopN={setTopN}
             onSelect={onSelect}
           />
           <DescriptiveStatsPanel
@@ -1976,8 +1954,6 @@ function AnalyticsAuthorTablePanel({
   setDataDirection,
   selectedAuthorIds,
   setSelectedAuthorIds,
-  topN,
-  setTopN,
   onSelect,
 }: {
   table?: TableResponse;
@@ -1993,8 +1969,6 @@ function AnalyticsAuthorTablePanel({
   setDataDirection: (value: "asc" | "desc") => void;
   selectedAuthorIds: string[];
   setSelectedAuthorIds: (value: string[]) => void;
-  topN: number;
-  setTopN: (value: number) => void;
   onSelect: (value: { kind: "author" | "work"; id: string }) => void;
 }) {
   const visibleAuthorIds = useMemo(() => [...new Set((table?.rows ?? []).map((row) => String(row.author_id ?? "").trim()).filter(Boolean))], [table?.rows]);
@@ -2013,35 +1987,16 @@ function AnalyticsAuthorTablePanel({
         <div>
           <span className="step-badge">Авторы</span>
           <h2>Таблица авторов и рейтингов</h2>
-          <p>Фильтры, сортировка и число строк в этой таблице сразу меняют графики и выводы ниже. Выбранные авторы показываются отдельными точками.</p>
+          <p>Поиск, фильтры и сортировка в этой таблице сразу меняют графики и выводы ниже. Выбранные авторы показываются отдельными точками.</p>
         </div>
         <div className="download-inline">
           <button type="button" className="ghost-button" onClick={reset}>Сбросить</button>
         </div>
       </div>
-      <div className="form-grid tight">
+      <div className="form-grid tight single">
         <Field label="Поиск по авторам">
           <input value={dataSearch} onChange={(event) => setDataSearch(event.target.value)} placeholder="ФИО, организация, страна или ID" />
           <small className="field-hint">Поиск выполняется на backend по авторской таблице выбранного среза.</small>
-        </Field>
-        <Field label="Сколько авторов взять">
-          <div className="limit-input-row">
-            <input
-              type="number"
-              min={1}
-              max={500000}
-              value={topN > 0 ? String(topN) : ""}
-              onChange={(event) => {
-                const next = Number(event.target.value);
-                setTopN(Number.isFinite(next) && next > 0 ? Math.floor(next) : 0);
-              }}
-              placeholder="Все"
-            />
-            <button type="button" className={topN <= 0 ? "choice-pill active" : "choice-pill"} onClick={() => setTopN(0)}>
-              Все
-            </button>
-          </div>
-          <small className="field-hint">Ограничение применяется после фильтров и сортировки.</small>
         </Field>
       </div>
       <div className="action-row">
@@ -2062,7 +2017,6 @@ function AnalyticsAuthorTablePanel({
         sortDirection={dataDirection}
         search={dataSearch}
         selectedAuthorIds={selectedAuthorIds}
-        limit={topN}
         onResetSearch={() => setDataSearch("")}
         onRemoveFilter={(field) => {
           const next = { ...dataFilters };
@@ -2345,7 +2299,7 @@ function CorrelationMatrixPanel({ payload, method, metrics, metricLabels }: { pa
         <h2>{correlationLabel(method)} между рейтингами</h2>
         <p>Большая матрица показывает, насколько похоже упорядочиваются авторы по выбранным показателям. Значение ближе к 1 означает более похожий рейтинг.</p>
       </div>
-      {method === "kendall_tau_b" && skipped.length > 0 && <div className="notice warn"><b>Часть пар не рассчитана</b><span>Слишком много наблюдений для выбранного способа сравнения. Уменьшите число строк или уточните фильтр во вкладке “Данные”.</span></div>}
+      {method === "kendall_tau_b" && skipped.length > 0 && <div className="notice warn"><b>Часть пар не рассчитана</b><span>Слишком много наблюдений для выбранного способа сравнения. Уточните поиск или ограничения во вкладке “Данные”.</span></div>}
       {visibleMetrics.length < 2 ? (
         <EmptyState title="Недостаточно показателей" detail="Для матрицы нужно выбрать минимум два показателя одной смысловой группы." />
       ) : (

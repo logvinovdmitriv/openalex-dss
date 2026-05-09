@@ -28,9 +28,6 @@ type DataViewProps = {
   setDataDirection: (value: "asc" | "desc") => void;
   selectedAuthorIds: string[];
   setSelectedAuthorIds: (value: string[]) => void;
-  topN: number;
-  setTopN: (value: number) => void;
-  topNOptions: SelectOption[];
   dataOffset: number;
   setDataOffset: (value: number) => void;
   pageSize: number;
@@ -61,9 +58,6 @@ export function DataView({
   setDataDirection,
   selectedAuthorIds,
   setSelectedAuthorIds,
-  topN,
-  setTopN,
-  topNOptions,
   dataOffset,
   setDataOffset,
   pageSize,
@@ -91,20 +85,19 @@ export function DataView({
   const rowsOnPage = table?.rows?.length ?? 0;
   const totalExact = table?.total_exact !== false && table?.total !== null && table?.total !== undefined;
   const rawTotal = Number(table?.total ?? 0);
-  const selectedTotal = totalExact ? (topN > 0 ? Math.min(rawTotal, topN) : rawTotal) : null;
+  const selectedTotal = totalExact ? rawTotal : null;
   const pageStart = rowsOnPage ? dataOffset + 1 : 0;
   const pageEndRaw = rowsOnPage ? dataOffset + rowsOnPage : 0;
   const pageEnd = selectedTotal !== null && selectedTotal > 0 ? Math.min(pageEndRaw, selectedTotal) : pageEndRaw;
   const canPrevPage = dataOffset > 0;
   const canNextPage = totalExact
     ? selectedTotal !== null && selectedTotal > 0 && pageEnd < selectedTotal
-    : Boolean(table?.has_more) && (topN <= 0 || pageEndRaw < topN);
+    : Boolean(table?.has_more);
   const paginationText = rowsOnPage
     ? totalExact && selectedTotal !== null
       ? `Показаны строки ${fmt(pageStart)}-${fmt(pageEnd)} из ${fmt(selectedTotal)}`
       : `Показаны строки ${fmt(pageStart)}-${fmt(pageEnd)}${table?.has_more ? " · есть следующие строки" : " · конец выборки"}`
     : "Строк нет";
-  const limitText = totalExact && topN > 0 && rawTotal > topN ? ` (ограничено до ${fmt(topN)})` : "";
   const visibleAuthorIds = useMemo(() => {
     if (localDataKind !== "indices") return [];
     return [...new Set((table?.rows ?? []).map((row) => String(row.author_id ?? "").trim()).filter(Boolean))];
@@ -155,7 +148,7 @@ export function DataView({
         <div className="panel-head">
           <span className="step-badge">Просмотр таблицы</span>
           <h2>Данные текущей выборки</h2>
-          <p>Здесь задаются таблица, ограничения по столбцам, сортировка и число строк. Индексы, аналитика и отчеты используют эту же выборку.</p>
+          <p>Здесь задаются таблица, поиск, ограничения по столбцам и сортировка. Индексы, аналитика и отчеты используют всех авторов, оставшихся после этих ограничений.</p>
           <button onClick={onRefresh}><Loader2 size={16} className={running ? "spin" : ""} /> Обновить</button>
         </div>
         {run && <RunCard run={run} />}
@@ -183,29 +176,6 @@ export function DataView({
             <input value={dataSearch} onChange={(event) => setDataSearch(event.target.value)} placeholder="Автор, работа, организация, DOI..." />
             <small className="field-hint">Поиск применяется к текущей таблице вместе с ограничениями по столбцам.</small>
           </Field>
-          <Field label={localDataKind === "indices" ? "Сколько авторов взять" : "Сколько строк взять"}>
-            <div className="limit-input-row">
-              <input
-                type="number"
-                min={1}
-                max={500000}
-                list="top-n-options"
-                value={topN > 0 ? String(topN) : ""}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  setTopN(Number.isFinite(next) && next > 0 ? Math.floor(next) : 0);
-                }}
-                placeholder="Все"
-              />
-              <button type="button" className={topN <= 0 ? "choice-pill active" : "choice-pill"} onClick={() => setTopN(0)}>
-                Все
-              </button>
-            </div>
-            <datalist id="top-n-options">
-              {topNOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </datalist>
-            <small className="field-hint">Пустое поле означает “все”. Ограничение применяется после фильтров и сортировки; фильтры задаются нажатием на заголовок столбца.</small>
-          </Field>
         </div>
         <div className="action-row">
           {!missingScope.missing && hasAvailableTables && <a className="button-link" href={csvUrl}>Скачать текущую выборку</a>}
@@ -226,7 +196,6 @@ export function DataView({
           sortDirection={dataDirection}
           search={dataSearch}
           selectedAuthorIds={selectedAuthorIds}
-          limit={topN}
           onResetSearch={() => setDataSearch("")}
           onRemoveFilter={(field) => {
             const next = { ...dataColumnFilters };
@@ -274,7 +243,6 @@ export function DataView({
             <div className="table-pagination">
               <span>
                 {paginationText}
-                {limitText}
               </span>
               <div className="action-row compact">
                 <button type="button" className="ghost-button" disabled={!canPrevPage} onClick={() => setDataOffset(Math.max(0, dataOffset - pageSize))}>

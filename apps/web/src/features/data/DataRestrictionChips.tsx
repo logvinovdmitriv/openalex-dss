@@ -7,7 +7,6 @@ export function DataRestrictionChips({
   sortDirection,
   search,
   selectedAuthorIds,
-  limit,
   onResetSearch,
   onRemoveFilter,
   onResetSort,
@@ -17,7 +16,6 @@ export function DataRestrictionChips({
   sortDirection: "asc" | "desc";
   search: string;
   selectedAuthorIds: string[];
-  limit: number;
   onResetSearch: () => void;
   onRemoveFilter: (field: string) => void;
   onResetSort: () => void;
@@ -29,7 +27,7 @@ export function DataRestrictionChips({
     return (
       <div className="selection-summary">
         <span>Ограничений по столбцам нет</span>
-        <span>{limitLabel(limit)}</span>
+        <span>Для расчетов берутся все строки текущей таблицы</span>
       </div>
     );
   }
@@ -52,7 +50,7 @@ export function DataRestrictionChips({
           {columnLabel(field)}: {columnFilterSummary(filter)} ×
         </button>
       ))}
-      <span>{limit > 0 ? `${limitLabel(limit)} после сортировки и ограничений` : "Берутся все строки после сортировки и ограничений"}</span>
+      <span>Для расчетов берутся все строки после поиска, фильтров и сортировки</span>
     </div>
   );
 }
@@ -63,9 +61,5 @@ function columnFilterSummary(filter: { contains?: string; min?: string; max?: st
   if (filter.min) parts.push(`от ${filter.min}`);
   if (filter.max) parts.push(`до ${filter.max}`);
   return parts.join(", ") || "ограничение";
-}
-
-function limitLabel(limit: number) {
-  return Number(limit) > 0 ? `Берется до ${fmt(limit)} строк` : "Берутся все строки";
 }
 
