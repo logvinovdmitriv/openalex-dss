@@ -30,8 +30,8 @@ export type CustomMetricDefinition = {
   expression: string;
 };
 
-export async function getJson<T>(path: string): Promise<T> {
-  const res = await safeFetch(path);
+export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await safeFetch(path, init);
   const data = await safeJson(res);
   if (!res.ok) throw new ApiError(errorMessage(data, res.status), res.status, data);
   return data as T;
@@ -71,6 +71,7 @@ async function safeFetch(path: string, init?: RequestInit) {
   try {
     return await fetch(`${API_BASE}${path}`, init);
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError(networkErrorMessage(), 0, {
       detail: error instanceof Error ? error.message : String(error),
       path,

@@ -3,7 +3,9 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 import sys
+import time
 from collections import defaultdict
 from io import StringIO
 from pathlib import Path
@@ -24,6 +26,8 @@ DUMP_TABLES = storage_paths.DUMP_TABLES
 RUN_JSON_DOCS = storage_paths.RUN_JSON_DOCS
 _safe_id = storage_paths.safe_id
 _ANALYTICS_CACHE_LIMIT = cache_engine.DEFAULT_FILTERED_CACHE_ENTRIES_PER_RUN
+_SLOW_QUERY_SECONDS = 1.0
+logger = logging.getLogger(__name__)
 
 
 def _run_dir(run_id: str) -> Path:
@@ -338,6 +342,7 @@ def _query_registered_table(
     select_fields: list[str] | tuple[str, ...] | set[str] | None = None,
     include_total: bool = True,
 ) -> dict[str, Any]:
+    started = time.perf_counter()
     where_sql, order_sql, args = _table_query_parts(
         fields,
         q=q,
@@ -379,7 +384,7 @@ def _query_registered_table(
     elif include_total and total is not None and raw_limit > 0:
         has_more = offset + len(rows) < total
     next_offset = offset + len(rows) if has_more else None
-    return {
+    payload = {
         "table": table,
         "fields": selected_fields or fields,
         "rows": rows,
@@ -390,6 +395,19 @@ def _query_registered_table(
         "limit": effective_limit,
         "offset": offset,
     }
+    elapsed = time.perf_counter() - started
+    if elapsed >= _SLOW_QUERY_SECONDS:
+        logger.warning(
+            "slow table query table=%s sort=%s direction=%s limit=%s offset=%s total_exact=%s elapsed=%.3fs",
+            table,
+            sort or "",
+            direction,
+            limit,
+            offset,
+            bool(include_total),
+            elapsed,
+        )
+    return payload
 
 
 def _table_query_parts(

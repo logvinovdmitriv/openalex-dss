@@ -32,10 +32,28 @@ test("workflow guard, data table, formula builder and analytics stay usable", as
   await expect(page.getByRole("heading", { name: "Аналитика", level: 1 })).toBeVisible();
 });
 
-async function mockApi(page: Page) {
+test("data sorting stays server-side and does not refresh heavy analytics", async ({ page }) => {
+  const calls: string[] = [];
+  page.on("request", (request) => {
+    const url = request.url();
+    if (url.includes("/api/v1/")) calls.push(url);
+  });
+  await page.goto("/#data");
+  await expect(page.getByText(/Данные текущей выборки/i)).toBeVisible();
+  calls.length = 0;
+
+  await page.getByRole("button", { name: /Сортировать столбец Публикации/i }).click();
+  await expect.poll(() => calls.some((url) => url.includes("/local-data/preview") && url.includes("sort=p") && url.includes("direction=desc"))).toBeTruthy();
+
+  expect(calls.some((url) => url.includes("/analytics/scientometrics"))).toBeFalsy();
+  expect(calls.some((url) => url.includes("/analytics/ranking"))).toBeFalsy();
+});
+
+async function mockApi(page: Page, calls: string[] = []) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/v1", "");
+    calls.push(`${path}?${url.searchParams.toString()}`);
     const json = (body: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     if (path === "/registry") return json({ domain_presets: [], organization_presets: [] });
     if (path === "/catalog") {

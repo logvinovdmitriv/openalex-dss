@@ -2041,10 +2041,18 @@ input[aria-invalid="true"] {
   background: #eef7ff;
 }
 
+.table-header-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
 .table-sort-button {
   display: inline-flex;
   align-items: center;
-  justify-content: inherit;
+  justify-content: flex-start;
   gap: 6px;
   min-height: 0;
   width: 100%;
@@ -2054,6 +2062,29 @@ input[aria-invalid="true"] {
   color: inherit;
   font: inherit;
   text-align: inherit;
+}
+
+.column-filter-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  width: 24px;
+  min-height: 24px;
+  height: 24px;
+  border: 1px solid #d6e1eb;
+  border-radius: 6px;
+  padding: 0;
+  background: #ffffff;
+  color: #40546a;
+  font: inherit;
+  line-height: 1;
+}
+
+.column-filter-button:hover,
+.column-filter-button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .sort-mark {

@@ -155,6 +155,21 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertEqual([row["score"] for row in loaded], [1.0, 0.5])
         self.assertEqual(loaded[0]["metadata"], '{"source": "fixture"}')
 
+    def test_duckdb_table_expression_prefers_parquet_sibling_for_internal_reads(self) -> None:
+        from openalex_dss.duckdb_io import table_expression
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "author_work.csv"
+            parquet_path = root / "author_work.parquet"
+            csv_path.write_text("broken csv placeholder", encoding="utf-8")
+            parquet_path.write_text("parquet placeholder", encoding="utf-8")
+
+            expression = table_expression(csv_path)
+
+        self.assertIn("read_parquet", expression)
+        self.assertIn("author_work.parquet", expression)
+
     def test_topic_filter_keeps_openalex_t_prefix_and_no_hidden_date_filters(self) -> None:
         cfg = replace_config(
             load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),

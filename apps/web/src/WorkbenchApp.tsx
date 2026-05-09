@@ -127,6 +127,15 @@ export function App() {
   );
 }
 
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 function Workbench() {
   const qc = useQueryClient();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -259,11 +268,14 @@ function Workbench() {
     if (!models.length && effectiveRunId) setCustomMetrics(DEFAULT_CUSTOM_METRICS);
   }, [effectiveRunId, savedMetricModels.data?.models]);
   const dataFilterKey = useMemo(() => JSON.stringify(dataColumnFilters), [dataColumnFilters]);
+  const debouncedDataSearch = useDebouncedValue(dataSearch, 250);
+  const debouncedDataColumnFilters = useDebouncedValue(dataColumnFilters, 250);
+  const debouncedDataFilterKey = useMemo(() => JSON.stringify(debouncedDataColumnFilters), [debouncedDataColumnFilters]);
   const customMetricKey = useMemo(() => JSON.stringify(customMetrics), [customMetrics]);
   const analysisFilters = useMemo(() => DATA_ONLY_ANALYSIS_FILTERS, []);
   const dataSelection = useDataSelection({
-    filters: dataColumnFilters,
-    search: dataSearch,
+    filters: debouncedDataColumnFilters,
+    search: debouncedDataSearch,
     sort: dataSort,
     direction: dataDirection,
     limit: 0,
@@ -329,15 +341,15 @@ function Workbench() {
   const rankingPreviewLimit = DATA_PREVIEW_PAGE_SIZE;
   const analysisRankTopN = 0;
   const table = useQuery({
-    queryKey: ["local-data-preview", localDataKind, dataSearch, dataFilterKey, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId, previewPageKey],
-    queryFn: () => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: dataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: dataPreviewLimit, offset: effectiveDataOffset, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: dataColumnFilters })),
+    queryKey: ["local-data-preview", localDataKind, debouncedDataSearch, debouncedDataFilterKey, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId, previewPageKey],
+    queryFn: ({ signal }) => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: debouncedDataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: dataPreviewLimit, offset: effectiveDataOffset, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: debouncedDataColumnFilters }), { signal }),
     enabled: dataViewActive && scopeReady && localDataKindAvailable,
     placeholderData: (previous) => previous,
     staleTime: 60_000,
   });
   const ranking = useQuery({
-    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
-    queryFn: () => getJson<TableResponse>(analyticsRankingUrl(
+    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, debouncedDataSearch, debouncedDataFilterKey, dataSort, dataDirection, customMetricKey],
+    queryFn: ({ signal }) => getJson<TableResponse>(analyticsRankingUrl(
       analysisFilters,
       fractionMode,
       metric,
@@ -347,15 +359,15 @@ function Workbench() {
       "",
       dataSelection,
       customMetrics,
-    )),
+    ), { signal }),
     enabled: rankingsViewActive && hasLocalAnalyticsData,
     placeholderData: (previous) => previous,
     staleTime: 60_000,
   });
   const authorIndexTable = useQuery({
-    queryKey: ["author-index-table", fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, previewPageKey],
-    queryFn: () => getJson<TableResponse>(localDataPreviewUrl("indices", {
-      q: dataSearch,
+    queryKey: ["author-index-table", fractionMode, effectiveRunId, effectiveDumpId, debouncedDataSearch, debouncedDataFilterKey, dataSort, dataDirection, previewPageKey],
+    queryFn: ({ signal }) => getJson<TableResponse>(localDataPreviewUrl("indices", {
+      q: debouncedDataSearch,
       runId: effectiveRunId,
       dumpId: effectiveDumpId,
       limit: dataPreviewLimit,
@@ -363,15 +375,15 @@ function Workbench() {
       sort: dataSort,
       direction: dataDirection,
       fractionMode,
-      dataFilters: dataColumnFilters,
-    })),
+      dataFilters: debouncedDataColumnFilters,
+    }), { signal }),
     enabled: (rankingsViewActive || analyticsViewActive) && scopeReady && Boolean(localDataSummary.data?.tables?.indices?.exists),
     placeholderData: (previous) => previous,
     staleTime: 60_000,
   });
   const scientometrics = useQuery({
-    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, fractionMode, effectiveRunId, effectiveDumpId, dataSearch, dataFilterKey, dataSort, dataDirection, customMetricKey],
-    queryFn: () => getJson<ScientometricAnalysisPayload>(scientometricsUrl({
+    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, fractionMode, effectiveRunId, effectiveDumpId, debouncedDataSearch, debouncedDataFilterKey, dataSort, dataDirection, customMetricKey],
+    queryFn: ({ signal }) => getJson<ScientometricAnalysisPayload>(scientometricsUrl({
       filters: analysisFilters,
       fractionMode,
       metrics: scientometricMetrics,
@@ -381,7 +393,7 @@ function Workbench() {
       dumpId: effectiveDumpId,
       dataSelection,
       customMetrics,
-    })),
+    }), { signal }),
     enabled: analyticsViewActive && hasLocalAnalyticsData && scientometricMetrics.length > 0,
     placeholderData: (previous) => previous,
     staleTime: 10 * 60_000,

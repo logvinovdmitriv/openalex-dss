@@ -77,7 +77,11 @@ export function DataGrid({
   const rows = data?.rows ?? [];
   const selectedSet = useMemo(() => new Set(selectedIds.map(String)), [selectedIds.join("|")]);
   const effectiveColumnFilters = columnFilters ?? localColumnFilters;
-  const filteredRows = useMemo(() => rows.filter((row) => rowMatchesColumnFilters(row as Record<string, unknown>, effectiveColumnFilters)), [rows, effectiveColumnFilters]);
+  const serverControlled = Boolean(onSortChange || onColumnFiltersChange);
+  const filteredRows = useMemo(
+    () => serverControlled ? rows : rows.filter((row) => rowMatchesColumnFilters(row as Record<string, unknown>, effectiveColumnFilters)),
+    [rows, effectiveColumnFilters, serverControlled],
+  );
   const controlledSorting = sortField ? [{ id: sortField, desc: sortDirection !== "asc" }] : sorting;
   const setColumnFilters = onColumnFiltersChange ?? setLocalColumnFilters;
   const setColumnFilter = (field: string, patch: TableColumnFilter) => {
@@ -110,12 +114,16 @@ export function DataGrid({
     else setSorting([{ id: field, desc: direction === "desc" }]);
     closeColumnMenu();
   };
+  const toggleSort = (field: string) => {
+    const nextDirection = sortField === field && sortDirection === "desc" ? "asc" : "desc";
+    applySort(field, nextDirection);
+  };
   useEffect(() => {
     if (!openColumn) return undefined;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
       if (columnMenuRef.current?.contains(target)) return;
-      if ((target as HTMLElement).closest?.(".table-sort-button")) return;
+      if ((target as HTMLElement).closest?.(".table-sort-button, .column-filter-button")) return;
       closeColumnMenu();
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -143,6 +151,7 @@ export function DataGrid({
     data: filteredRows,
     columns,
     state: { sorting: controlledSorting },
+    manualSorting: Boolean(onSortChange),
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
@@ -189,11 +198,15 @@ export function DataGrid({
               const active = hasColumnFilter(effectiveColumnFilters[field]) || sortField === field;
               return (
               <th key={h.id} className={active ? "column-active" : undefined}>
-                <button type="button" className="table-sort-button" onClick={(event) => toggleColumnMenu(field, event.currentTarget.getBoundingClientRect())} aria-label={`Настроить столбец ${String(h.column.columnDef.header)}`}>
-                  <span>{flexRender(h.column.columnDef.header, h.getContext())}</span>
-                  <SortMark value={h.column.getIsSorted()} />
-                  {hasColumnFilter(effectiveColumnFilters[String(h.column.id)]) && <span className="filter-mark" aria-label="Есть ограничение">●</span>}
-                </button>
+                <div className="table-header-controls">
+                  <button type="button" className="table-sort-button" onClick={() => toggleSort(field)} aria-label={`Сортировать столбец ${String(h.column.columnDef.header)}`}>
+                    <span>{flexRender(h.column.columnDef.header, h.getContext())}</span>
+                    <SortMark value={sortField === field ? sortDirection : h.column.getIsSorted()} />
+                  </button>
+                  <button type="button" className="column-filter-button" onClick={(event) => toggleColumnMenu(field, event.currentTarget.getBoundingClientRect())} aria-label={`Фильтр столбца ${String(h.column.columnDef.header)}`}>
+                    {hasColumnFilter(effectiveColumnFilters[String(h.column.id)]) ? <span className="filter-mark" aria-label="Есть ограничение">●</span> : "⋯"}
+                  </button>
+                </div>
                 {openColumn === String(h.column.id) && (
                   <ColumnMenu
                     menuRef={columnMenuRef}

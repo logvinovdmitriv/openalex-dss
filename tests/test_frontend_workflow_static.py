@@ -25,12 +25,16 @@ def test_workbench_uses_scope_and_data_selection_hooks() -> None:
 
 def test_data_sorting_does_not_eagerly_refresh_heavy_analytics() -> None:
     main = (ROOT / "apps/web/src/WorkbenchApp.tsx").read_text(encoding="utf-8")
+    grid = (ROOT / "apps/web/src/components/ui.tsx").read_text(encoding="utf-8")
     assert 'const dataViewActive = view === "data"' in main
     assert 'const rankingsViewActive = view === "rankings"' in main
     assert 'const analyticsViewActive = view === "statistics"' in main
     assert "enabled: dataViewActive && scopeReady && localDataKindAvailable" in main
     assert "enabled: rankingsViewActive && hasLocalAnalyticsData" in main
     assert "enabled: analyticsViewActive && hasLocalAnalyticsData && scientometricMetrics.length > 0" in main
+    assert "{ signal }) => getJson<TableResponse>" in main
+    assert "serverControlled ? rows : rows.filter" in grid
+    assert "manualSorting: Boolean(onSortChange)" in grid
 
 
 def test_formula_and_tooltip_ui_stay_in_dedicated_components() -> None:

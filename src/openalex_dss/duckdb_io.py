@@ -12,6 +12,10 @@ def sql_literal(value: object) -> str:
 
 def table_expression(path: str | Path) -> str:
     p = Path(path)
+    if p.suffix != ".parquet":
+        parquet_sibling = p.with_suffix(".parquet")
+        if parquet_sibling.exists():
+            p = parquet_sibling
     literal = sql_literal(p)
     if p.suffix == ".parquet":
         return f"read_parquet({literal})"
