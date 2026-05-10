@@ -83,6 +83,7 @@ def metric_ranking(
     run_id: str,
     dump_id: str,
     author_ids: set[str] | list[str] | None = None,
+    rank_direction: str = "desc",
     custom_metric_defs: list[dict[str, str]] | None = None,
     **data_selection: Any,
 ) -> dict[str, Any]:
@@ -102,6 +103,7 @@ def metric_ranking(
         run_id=use_case.context.run_id,
         dump_id=use_case.context.dump_id,
         author_ids=author_ids,
+        rank_direction=rank_direction,
         custom_metric_defs=custom_metric_defs,
         **use_case.data_selection.to_query_kwargs(),
     )

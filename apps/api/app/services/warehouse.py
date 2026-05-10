@@ -1603,6 +1603,7 @@ def metric_ranking(
     data_sort: str = "",
     data_direction: str = "desc",
     data_limit: int = 0,
+    rank_direction: str = "desc",
     custom_metric_defs: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     if not _metric_supported(metric, custom_metric_defs):
@@ -1627,6 +1628,7 @@ def metric_ranking(
         filters,
         limit=limit,
         max_limit=max_limit,
+        rank_direction=rank_direction,
         run_id=run_id,
         dump_id=dump_id,
         custom_metric_defs=custom_metric_defs,
@@ -1819,6 +1821,7 @@ def metric_ranking_from_rows(
     *,
     limit: int = 20,
     max_limit: int = 200,
+    rank_direction: str = "desc",
     run_id: str = "",
     dump_id: str = "",
     custom_metric_defs: list[dict[str, str]] | None = None,
@@ -1827,12 +1830,14 @@ def metric_ranking_from_rows(
         raise ValueError(f"Unsupported metric: {metric}")
     scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
     visible_metrics = _visible_metrics(rows, custom_metric_defs)
-    visible_rows, total_rows = ranking_engine.build_metric_ranking_rows(rows, metric, visible_metrics, limit=limit, max_limit=max_limit)
+    direction = "asc" if str(rank_direction or "").strip().lower() == "asc" else "desc"
+    visible_rows, total_rows = ranking_engine.build_metric_ranking_rows(rows, metric, visible_metrics, limit=limit, max_limit=max_limit, direction=direction)
     requested_limit = max(0, min(int(limit or 0), max(1, int(max_limit))))
     fields = ["rank_competition", "author_display_name", "score", *visible_metrics, "author_id"]
     return {
         "table": "filtered_rating",
         "rank_metric": metric,
+        "rank_direction": direction,
         "fraction_mode": fraction_mode,
         "metric_scope": "filtered_recomputed",
         "percentile_scope": "current filtered author set",

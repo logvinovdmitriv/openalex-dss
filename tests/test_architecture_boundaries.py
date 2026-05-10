@@ -47,6 +47,8 @@ def test_ranking_and_distribution_engines_keep_service_contracts() -> None:
     assert total == 3
     assert [row["author_id"] for row in ranked] == ["a2", "a3", "a1"]
     assert ranked[0]["rank_competition"] == ranked[1]["rank_competition"] == 1
+    ascending, _ = ranking_engine.build_metric_ranking_rows(rows, "h", ["p"], limit=10, max_limit=100, direction="asc")
+    assert [row["author_id"] for row in ascending] == ["a1", "a3", "a2"]
     assert summary["median"] == 7
     assert sum(bucket["count"] for bucket in histogram) == 3
 

@@ -139,6 +139,7 @@ function Workbench() {
   const [view, setView] = useState<View>(() => viewFromHash(window.location.hash));
   const [filters, setFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
   const [metric, setMetric] = useState("h");
+  const [rankingDirection, setRankingDirection] = useState<"asc" | "desc">("desc");
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
   const [dataOffset, setDataOffset] = useState(0);
   const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
@@ -359,7 +360,7 @@ function Workbench() {
     staleTime: 5 * 60_000,
   });
   const ranking = useQuery({
-    queryKey: ["analytics-ranking", metric, fractionMode, effectiveRunId, effectiveDumpId, debouncedDataSearch, debouncedDataFilterKey, customMetricKey],
+    queryKey: ["analytics-ranking", metric, rankingDirection, fractionMode, effectiveRunId, effectiveDumpId, debouncedDataSearch, debouncedDataFilterKey, customMetricKey],
     queryFn: ({ signal }) => getJson<TableResponse>(analyticsRankingUrl(
       analysisFilters,
       fractionMode,
@@ -370,6 +371,7 @@ function Workbench() {
       "",
       analysisDataSelection,
       customMetrics,
+      rankingDirection,
     ), { signal }),
     enabled: (rankingsViewActive || analyticsViewActive) && hasLocalAnalyticsData,
     placeholderData: (previous) => previous,
@@ -868,6 +870,8 @@ function Workbench() {
           <IndicesView
             metric={metric}
             setMetric={setMetric}
+            rankingDirection={rankingDirection}
+            setRankingDirection={setRankingDirection}
             fractionMode={fractionMode}
             setFractionMode={setFractionMode}
             ranking={ranking.data}

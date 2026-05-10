@@ -34,8 +34,10 @@ def test_data_sorting_does_not_eagerly_refresh_heavy_analytics() -> None:
     assert 'sort: ""' in main
     assert "enabled: analyticsViewActive && hasLocalAnalyticsData && scientometricMetrics.length > 0" in main
     assert "{ signal }) => getJson<TableResponse>" in main
-    assert "serverControlled ? rows : rows.filter" in grid
+    assert "data: rows" in grid
     assert "manualSorting: Boolean(onSortChange)" in grid
+    assert "getSortedRowModel" not in grid
+    assert "rows.filter" not in grid
 
 
 def test_formula_and_tooltip_ui_stay_in_dedicated_components() -> None:

@@ -8,6 +8,8 @@ import { FormulaBuilderDialog, MetricInfoPopover, metricLabelFor } from "../form
 export function IndicesView({
   metric,
   setMetric,
+  rankingDirection,
+  setRankingDirection,
   fractionMode,
   setFractionMode,
   ranking,
@@ -32,6 +34,8 @@ export function IndicesView({
 }: {
   metric: string;
   setMetric: (value: string) => void;
+  rankingDirection: "asc" | "desc";
+  setRankingDirection: (value: "asc" | "desc") => void;
   fractionMode: string;
   setFractionMode: (value: string) => void;
   ranking?: TableResponse;
@@ -58,6 +62,15 @@ export function IndicesView({
   const visibleMetrics = [...new Set([metric, ...selectedMetrics])].filter(Boolean);
   const [formulaBuilderOpen, setFormulaBuilderOpen] = useState(false);
   const rankingTable = useMemo(() => selectedAuthorIndexTable(authorIndexTable ?? ranking, visibleMetrics, selectedAuthorIds), [authorIndexTable, ranking, visibleMetrics.join(","), selectedAuthorIds.join("|")]);
+  const sortableMetricIds = useMemo(() => new Set(displayMetricOptions.map((item) => item.value)), [displayMetricOptions]);
+  const onRankingSortChange = (field: string, direction: "asc" | "desc" | "") => {
+    if (!field || !sortableMetricIds.has(field)) {
+      setRankingDirection("desc");
+      return;
+    }
+    setMetric(field);
+    setRankingDirection(direction || "desc");
+  };
   const toggleMetric = (value: string) => {
     if (value === metric) return;
     if (selectedMetrics.includes(value)) {
@@ -189,7 +202,15 @@ export function IndicesView({
           <h2>Авторы и выбранные показатели</h2>
           <p>Таблица показывает авторов и только выбранные показатели рейтинга. Сортировка идет по основному индексу рейтинга; служебные признаки качества остаются в исходных таблицах.</p>
         </div>
-        <DataGrid data={rankingTable} onSelect={onSelect} hiddenFields={["author_id"]} fieldLabels={metricLabels} />
+        <DataGrid
+          data={rankingTable}
+          onSelect={onSelect}
+          hiddenFields={["author_id"]}
+          fieldLabels={metricLabels}
+          sortField={metric}
+          sortDirection={rankingDirection}
+          onSortChange={onRankingSortChange}
+        />
       </section>
     </div>
   );

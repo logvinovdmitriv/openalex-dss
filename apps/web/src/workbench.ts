@@ -562,8 +562,8 @@ function humanRunStage(stage: unknown, status?: string, action?: string) {
   return raw || status || "Выполнение";
 }
 
-export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, dataQuery = "", dataSelection?: DataSelectionParams, customMetrics?: CustomMetricDefinition[]) {
-  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection), custom_metric_defs: customMetricDefsQuery(customMetrics) }).toString()}`;
+export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, dataQuery = "", dataSelection?: DataSelectionParams, customMetrics?: CustomMetricDefinition[], rankDirection: "asc" | "desc" = "desc") {
+  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, rank_direction: rankDirection, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection), custom_metric_defs: customMetricDefsQuery(customMetrics) }).toString()}`;
 }
 
 export function localDataSummaryUrl(runId = "", dumpId = "") {

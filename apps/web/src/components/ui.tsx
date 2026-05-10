@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from "@tanstack/react-table";
-import type { CellContext, SortingState } from "@tanstack/react-table";
+import { flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
+import type { CellContext } from "@tanstack/react-table";
 import { CheckCircle2, Download, ListFilter } from "lucide-react";
 import type { TableColumnFilter, TableColumnFilters, TableColumnSchema, TableResponse } from "../api";
 import { columnLabel, countryLabel, fmt, languageLabel, modeLabel, metricLabel, sourceTypeLabel, workTypeLabel } from "../domain";
@@ -73,8 +73,6 @@ export function DataGrid({
   columnSchema?: TableColumnSchema[];
   fieldLabels?: Record<string, string>;
 }) {
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [localColumnFilters, setLocalColumnFilters] = useState<TableColumnFilters>({});
   const [openColumn, setOpenColumn] = useState<string | null>(null);
   const [columnMenuPosition, setColumnMenuPosition] = useState<ColumnMenuPosition | null>(null);
   const columnMenuRef = useRef<HTMLDivElement | null>(null);
@@ -82,21 +80,17 @@ export function DataGrid({
   const columnSchemaByField = useMemo(() => new Map(columnSchema.map((column) => [column.field, column])), [columnSchema]);
   const rows = data?.rows ?? [];
   const selectedSet = useMemo(() => new Set(selectedIds.map(String)), [selectedIds.join("|")]);
-  const effectiveColumnFilters = columnFilters ?? localColumnFilters;
-  const serverControlled = Boolean(onSortChange || onColumnFiltersChange);
-  const filteredRows = useMemo(
-    () => serverControlled ? rows : rows.filter((row) => rowMatchesColumnFilters(row as Record<string, unknown>, effectiveColumnFilters)),
-    [rows, effectiveColumnFilters, serverControlled],
-  );
-  const activeSortField = onSortChange ? sortField : String(sorting[0]?.id ?? "");
+  const effectiveColumnFilters = columnFilters ?? {};
+  const backendSorting = Boolean(onSortChange);
+  const backendFiltering = Boolean(onColumnFiltersChange);
+  const activeSortField = backendSorting ? sortField : "";
   const activeSortDirection: DataGridSortDirection | "" = onSortChange
     ? (sortField ? sortDirection : "")
-    : (sorting[0] ? (sorting[0].desc ? "desc" : "asc") : "");
-  const controlledSorting = onSortChange
-    ? (sortField ? [{ id: sortField, desc: sortDirection !== "asc" }] : [])
-    : sorting;
-  const setColumnFilters = onColumnFiltersChange ?? setLocalColumnFilters;
+    : "";
+  const controlledSorting = backendSorting && sortField ? [{ id: sortField, desc: sortDirection !== "asc" }] : [];
+  const setColumnFilters = onColumnFiltersChange;
   const setColumnFilter = (field: string, patch: TableColumnFilter) => {
+    if (!setColumnFilters) return;
     const current = effectiveColumnFilters[field] ?? {};
     const nextFilter = cleanColumnFilter({ ...current, ...patch });
     const next = { ...effectiveColumnFilters };
@@ -105,6 +99,7 @@ export function DataGrid({
     setColumnFilters(next);
   };
   const resetColumnFilter = (field: string) => {
+    if (!setColumnFilters) return;
     const next = { ...effectiveColumnFilters };
     delete next[field];
     setColumnFilters(next);
@@ -123,7 +118,6 @@ export function DataGrid({
   };
   const applySort = (field: string, direction: DataGridSortDirection | "") => {
     if (onSortChange) onSortChange(field, direction);
-    else setSorting(direction ? [{ id: field, desc: direction === "desc" }] : []);
     closeColumnMenu();
   };
   const toggleSort = (field: string) => {
@@ -163,16 +157,14 @@ export function DataGrid({
   const columns = useMemo(() => fields.map((field) => ({
     accessorKey: field,
     header: fieldLabels[field] ?? columnLabel(field),
-    sortingFn: (rowA: any, rowB: any, columnId: string) => compareSortValues(rowA.original?.[columnId], rowB.original?.[columnId]),
     cell: (info: CellContext<Record<string, unknown>, unknown>) => renderCell(field, info.getValue(), onSelect, info.row.original),
   })), [fields, hiddenFields, onSelect, JSON.stringify(fieldLabels)]);
   const table = useReactTable({
-    data: filteredRows,
+    data: rows,
     columns,
     state: { sorting: controlledSorting },
     manualSorting: Boolean(onSortChange),
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   });
   if (!fields.length) {
     return <EmptyState title="Нет данных для отображения" detail="Проверьте выбранный источник, фильтр или состояние пайплайна." />;
@@ -219,11 +211,11 @@ export function DataGrid({
               return (
               <th key={h.id} className={active ? "column-active" : undefined}>
                 <div className="table-header-controls">
-                  <button type="button" className="table-sort-button" disabled={schema?.sortable === false} onClick={() => toggleSort(field)} aria-label={`Сортировать столбец ${String(h.column.columnDef.header)}`}>
+                  <button type="button" className="table-sort-button" disabled={!backendSorting || schema?.sortable === false} onClick={() => toggleSort(field)} aria-label={`Сортировать столбец ${String(h.column.columnDef.header)}`}>
                     <span>{flexRender(h.column.columnDef.header, h.getContext())}</span>
                     <SortMark value={activeSortField === field && activeSortDirection ? activeSortDirection : false} />
                   </button>
-                  {enableColumnFilters && schema?.filterable !== false && (
+                  {enableColumnFilters && backendFiltering && schema?.filterable !== false && (
                     <button type="button" className="column-filter-button" onClick={(event) => toggleColumnMenu(field, event.currentTarget.getBoundingClientRect())} aria-label={`Фильтр столбца ${String(h.column.columnDef.header)}`}>
                       <ListFilter size={14} />
                       {hasColumnFilter(effectiveColumnFilters[String(h.column.id)]) && <span className="filter-mark" aria-label="Есть ограничение" />}
@@ -238,7 +230,7 @@ export function DataGrid({
                     description={schema?.description ?? ""}
                     filter={effectiveColumnFilters[String(h.column.id)] ?? {}}
                     type={schema?.type ?? (rows.some((row) => isFiniteTableNumber((row as Record<string, unknown>)[String(h.column.id)])) ? "number" : "text")}
-                    enableFilters={enableColumnFilters}
+                    enableFilters={enableColumnFilters && backendFiltering}
                     position={columnMenuPosition}
                     onSort={applySort}
                     onFilter={setColumnFilter}
@@ -275,7 +267,7 @@ export function DataGrid({
           {visibleRows.length === 0 && <tr><td colSpan={fields.length + (selectableRows ? 1 : 0)}>По текущему фильтру строк нет.</td></tr>}
         </tbody>
       </table>
-      <p className="muted">Показано: {fmt(visibleRows.length)} из {fmt(data?.total ?? rows.length)}. Нажмите на заголовок столбца, чтобы выбрать сортировку{enableColumnFilters ? " или ограничение" : ""}.</p>
+      <p className="muted">Показано: {fmt(visibleRows.length)} из {fmt(data?.total ?? rows.length)}. Сортировка и ограничения выполняются на сервере по всему выбранному срезу.</p>
     </div>
   );
 }
@@ -440,23 +432,6 @@ function SortMark({ value }: { value: false | "asc" | "desc" }) {
   return <span className="sort-mark" aria-hidden="true">{value === "asc" ? "↑" : value === "desc" ? "↓" : "↕"}</span>;
 }
 
-function rowMatchesColumnFilters(row: Record<string, unknown>, filters: TableColumnFilters) {
-  return Object.entries(filters).every(([field, filter]) => {
-    const contains = String(filter.contains ?? "").trim().toLowerCase();
-    if (contains && !textIncludes(row[field], contains)) return false;
-    const minText = String(filter.min ?? "").trim().replace(",", ".");
-    const maxText = String(filter.max ?? "").trim().replace(",", ".");
-    if (!minText && !maxText) return true;
-    const value = tableNumber(row[field]);
-    if (!Number.isFinite(value)) return false;
-    const min = minText ? Number(minText) : Number.NEGATIVE_INFINITY;
-    const max = maxText ? Number(maxText) : Number.POSITIVE_INFINITY;
-    if (Number.isFinite(min) && value < min) return false;
-    if (Number.isFinite(max) && value > max) return false;
-    return true;
-  });
-}
-
 function cleanColumnFilter(filter: TableColumnFilter): TableColumnFilter {
   const next: TableColumnFilter = {};
   const contains = String(filter.contains ?? "").trim();
@@ -473,10 +448,6 @@ function hasColumnFilter(filter: TableColumnFilter | undefined) {
   return Boolean(String(filter.contains ?? "").trim() || String(filter.min ?? "").trim() || String(filter.max ?? "").trim());
 }
 
-function textIncludes(value: unknown, normalizedQuery: string) {
-  return String(value ?? "").toLowerCase().includes(normalizedQuery);
-}
-
 function isFiniteTableNumber(value: unknown) {
   return Number.isFinite(tableNumber(value));
 }
@@ -485,11 +456,4 @@ function tableNumber(value: unknown) {
   if (typeof value === "number") return value;
   if (typeof value === "string" && value.trim()) return Number(value.trim().replace(",", "."));
   return Number.NaN;
-}
-
-function compareSortValues(left: unknown, right: unknown) {
-  const leftNumber = typeof left === "number" ? left : Number(String(left ?? "").replace(",", "."));
-  const rightNumber = typeof right === "number" ? right : Number(String(right ?? "").replace(",", "."));
-  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber - rightNumber;
-  return String(left ?? "").localeCompare(String(right ?? ""), "ru", { numeric: true, sensitivity: "base" });
 }

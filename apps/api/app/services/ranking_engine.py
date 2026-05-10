@@ -18,9 +18,13 @@ def build_metric_ranking_rows(
     *,
     limit: int,
     max_limit: int,
+    direction: str = "desc",
 ) -> tuple[list[dict[str, Any]], int]:
     ranked: list[dict[str, Any]] = []
-    for row in sort_metric_rows(rows, metric):
+    sorted_rows = sort_metric_rows(rows, metric)
+    if str(direction or "desc").strip().lower() == "asc":
+        sorted_rows = list(reversed(sorted_rows))
+    for row in sorted_rows:
         item = {
             "author_id": row["author_id"],
             "author_display_name": row["author_display_name"],

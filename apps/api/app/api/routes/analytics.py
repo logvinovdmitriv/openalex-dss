@@ -329,6 +329,7 @@ def ranking_json(
     data_limit: int = Query(0, ge=0, le=EXPORT_RESULT_MAX_ROWS),
     custom_metric_defs: str = "",
     limit: int = Query(100, ge=0, le=JSON_RESULT_MAX_ROWS),
+    rank_direction: str = "desc",
 ) -> dict[str, Any]:
     requested_run_id = run_id
     requested_dump_id = dump_id
@@ -374,6 +375,7 @@ def ranking_json(
             run_id=run_id,
             dump_id=dump_id,
             author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
+            rank_direction=rank_direction,
             custom_metric_defs=_custom_metric_defs(custom_metric_defs),
             **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
         )

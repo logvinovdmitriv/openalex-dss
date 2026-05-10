@@ -103,6 +103,7 @@ class AnalyticsRouteTests(unittest.TestCase):
                 "run_id": "run_a",
                 "dump_id": "dump_a",
                 "author_ids": None,
+                "rank_direction": "desc",
                 "custom_metric_defs": [],
                 "data_search": "",
                 "data_sort": "",
