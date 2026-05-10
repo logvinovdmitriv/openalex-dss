@@ -81,6 +81,24 @@ FILTER_VALUE_SOURCES = {
     "language": "languages",
     "source_type": "source_types",
 }
+FILTER_UI_BINDINGS = {
+    "subject_primary_topic": "subject_id",
+    "subject_topics_any": "subject_id",
+    "keyword": "keyword_id",
+    "country": "country_code",
+    "institution": "institution_id",
+    "author": "author_id",
+    "source": "source_id",
+    "work_type": "work_type",
+    "from_publication_date": "from_publication_date",
+    "to_publication_date": "to_publication_date",
+    "language": "language",
+    "open_access": "open_access_is_oa",
+    "min_citations": "min_cited_by_count",
+    "doi": "doi",
+    "source_type": "source_type",
+    "has_abstract": "has_abstract",
+}
 
 
 def catalog_status() -> dict[str, Any]:
@@ -178,6 +196,8 @@ def _filter_catalog_item(filter_id: str, item: dict[str, Any], *, entity: str) -
         "warning_ru": str(i18n.get("warning") or ""),
         "input_type": FILTER_INPUT_TYPES.get(filter_id, "text"),
         "value_source": FILTER_VALUE_SOURCES.get(filter_id, ""),
+        "ui_binding": FILTER_UI_BINDINGS.get(filter_id, ""),
+        "target_filter_field": FILTER_UI_BINDINGS.get(filter_id, ""),
         "allowed_operators": _allowed_operators(works_filter, derived=derived),
         "supports_or": bool(works_filter.get("max_or_values") or filter_id in {"work_type"}),
         "supports_negation": filter_id in {"is_retracted", "is_paratext", "is_xpac"},

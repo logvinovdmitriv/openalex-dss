@@ -241,6 +241,35 @@ export type CatalogPayload = {
   [key: string]: unknown;
 };
 
+export type OpenAlexFilterCatalogItem = {
+  filter_id: string;
+  label_ru?: string;
+  short_label_ru?: string;
+  description_ru?: string;
+  user_hint_ru?: string;
+  warning_ru?: string;
+  input_type?: string;
+  value_source?: string;
+  ui_binding?: string;
+  target_filter_field?: string;
+  fetch_pushdown_status?: "safe" | "risky" | "derived" | "advanced" | string;
+  final_analysis_policy?: string;
+  risk_level?: "low" | "medium" | "high" | string;
+  risk_reason_ru?: string;
+};
+
+export type OpenAlexFilterCatalogPayload = {
+  catalog_version?: string;
+  entity?: string;
+  stage?: string;
+  groups?: Array<{
+    group_id: string;
+    label_ru?: string;
+    filters?: OpenAlexFilterCatalogItem[];
+  }>;
+  policy?: Record<string, string>;
+};
+
 export type WorkbenchRun = {
   run_id?: string;
   action?: string;

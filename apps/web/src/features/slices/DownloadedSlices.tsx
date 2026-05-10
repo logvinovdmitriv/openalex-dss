@@ -21,6 +21,7 @@ export type DownloadedSliceRow = {
   status: DownloadedSliceStatus;
   selectDisabled?: boolean;
   repairAction?: string;
+  backfillAction?: string;
   sliceId: string;
   dumpIds: string[];
   dump?: WorkbenchDump;
@@ -30,20 +31,24 @@ export function DownloadedSlicesPanel({
   downloadedDumps,
   selectedDumpId,
   repairingDumpId,
+  backfillingDumpId,
   deletingDumpId,
   onSelectDownloadedDump,
   onShowDumpInfo,
   onRepairDownloadedDump,
+  onBackfillDownloadedDump,
   onDeleteDownloadedDump,
   onBlocked,
 }: {
   downloadedDumps: WorkbenchDump[];
   selectedDumpId: string;
   repairingDumpId: string;
+  backfillingDumpId: string;
   deletingDumpId: string;
   onSelectDownloadedDump: (dump: WorkbenchDump) => void;
   onShowDumpInfo: (dump: WorkbenchDump) => void;
   onRepairDownloadedDump: (dumpId: string) => void;
+  onBackfillDownloadedDump: (dumpId: string) => void;
   onDeleteDownloadedDump: (dumpId: string) => void;
   onBlocked?: (row: DownloadedSliceRow) => void;
 }) {
@@ -62,6 +67,10 @@ export function DownloadedSlicesPanel({
   const repairSliceRow = (row: DownloadedSliceRow) => {
     const dumpId = row.dumpIds[0];
     if (dumpId) onRepairDownloadedDump(dumpId);
+  };
+  const backfillSliceRow = (row: DownloadedSliceRow) => {
+    const dumpId = row.dumpIds[0];
+    if (dumpId) onBackfillDownloadedDump(dumpId);
   };
 
   return (
@@ -90,6 +99,9 @@ export function DownloadedSlicesPanel({
             repairAction={row.repairAction}
             repairing={row.dumpIds.includes(repairingDumpId)}
             onRepair={() => repairSliceRow(row)}
+            backfillAction={row.backfillAction}
+            backfilling={row.dumpIds.includes(backfillingDumpId)}
+            onBackfill={() => backfillSliceRow(row)}
             deleteAction="Удалить"
             deleting={row.dumpIds.includes(deletingDumpId)}
             onDelete={() => deleteSliceRow(row)}
@@ -125,6 +137,7 @@ export function buildDownloadedSliceRows(downloadedDumps: WorkbenchDump[]): Down
         status: health,
         selectDisabled: disabled,
         repairAction: health.repairAction,
+        backfillAction: dumpNeedsBackfill(dump) ? "Восстановить authorships" : "",
         sliceId,
         dumpIds: dumpId ? [dumpId] : [],
         dump,
@@ -157,6 +170,15 @@ export function downloadedSliceTitle(dump: WorkbenchDump) {
   return [subject || "Локальный срез", period, dumpId ? dumpId.replace(/^dump_/, "") : ""].filter(Boolean).join(" · ");
 }
 
+function dumpNeedsBackfill(dump: WorkbenchDump) {
+  const qualityGate = (dump?.quality_gate ?? {}) as Record<string, unknown>;
+  const eligibility = (dump?.analysis_eligibility ?? {}) as Record<string, unknown>;
+  const eligibilityGate = (eligibility?.quality_gate ?? {}) as Record<string, unknown>;
+  const reason = String(qualityGate.reason ?? eligibilityGate.reason ?? "");
+  const status = String(dump?.backfill_status ?? "");
+  return reason === "truncated_authorships_require_backfill" && !["complete", "completed", "not_required"].includes(status);
+}
+
 function ArtifactChoice({
   title,
   meta,
@@ -171,6 +193,9 @@ function ArtifactChoice({
   repairAction,
   repairing = false,
   onRepair,
+  backfillAction,
+  backfilling = false,
+  onBackfill,
   deleteAction,
   deleting = false,
   onDelete,
@@ -188,6 +213,9 @@ function ArtifactChoice({
   repairAction?: string;
   repairing?: boolean;
   onRepair?: () => void;
+  backfillAction?: string;
+  backfilling?: boolean;
+  onBackfill?: () => void;
   deleteAction?: string;
   deleting?: boolean;
   onDelete?: () => void;
@@ -210,6 +238,11 @@ function ArtifactChoice({
         {onRepair && repairAction && (
           <button type="button" onClick={onRepair} disabled={repairing}>
             {repairing ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />} {repairing ? "Запуск..." : repairAction}
+          </button>
+        )}
+        {onBackfill && backfillAction && (
+          <button type="button" onClick={onBackfill} disabled={backfilling}>
+            {backfilling ? <Loader2 size={16} className="spin" /> : <Wrench size={16} />} {backfilling ? "Запуск..." : backfillAction}
           </button>
         )}
         {onDelete && (

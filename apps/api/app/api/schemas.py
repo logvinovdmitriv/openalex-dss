@@ -13,8 +13,22 @@ class SliceDefinitionRequest(SliceDefinitionPayload):
 
 class AnalysisRunRequest(BaseModel):
     dump_id: str = Field(min_length=1)
+    analysis_run_id: str | None = None
+    source_run_id: str | None = None
+    fraction_mode: str | None = None
     fraction_modes: list[str] | None = None
     fraction_mode_default: str | None = None
+    metrics: list[str] | None = None
+    baseline_metric: str | None = None
+    top_n: int | None = Field(default=None, ge=1, le=10000)
+    iterations: int | None = Field(default=None, ge=10, le=10000)
+    samples: int | None = Field(default=None, ge=10, le=10000)
+    prefix_sizes: list[int] | None = None
+    data_filters: dict[str, object] | None = None
+    data_search: str | None = None
+    data_sort: str | None = None
+    data_direction: str | None = None
+    data_limit: int | None = Field(default=None, ge=0, le=500000)
     lrdi_p0: float | None = None
     lrdi_lambda: float | None = None
     analysis_year: int | None = Field(default=None, ge=1900, le=2100)
@@ -29,7 +43,7 @@ class AnalysisRunRequest(BaseModel):
 
 
 class RunRequest(BaseModel):
-    action: Literal["recalculate"] = "recalculate"
+    action: Literal["recalculate", "bootstrap_analysis", "permutation_analysis", "convergence_analysis"] = "recalculate"
     payload: AnalysisRunRequest
 
 

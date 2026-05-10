@@ -148,6 +148,16 @@ def repair_dump(dump_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/dumps/{dump_id}/backfill-authorships", status_code=202)
+def backfill_dump_authorships(dump_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        return slice_workbench.backfill_dump_authorships(dump_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Локальный срез не найден") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/dumps/{dump_id}/health")
 def dump_health(dump_id: str) -> dict[str, Any]:
     try:

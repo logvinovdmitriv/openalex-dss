@@ -9,7 +9,7 @@ from app.services import jobs
 
 
 router = APIRouter(tags=["runs"])
-PUBLIC_RUN_ACTIONS = {"recalculate"}
+PUBLIC_RUN_ACTIONS = {"recalculate", "bootstrap_analysis", "permutation_analysis", "convergence_analysis"}
 
 
 @router.post("/runs", status_code=202)
@@ -23,8 +23,9 @@ def create_run(request: RunRequest) -> dict[str, Any]:
             ),
         )
     payload = request.payload.model_dump(exclude_none=True)
-    if request.action == "recalculate" and not str(payload.get("dump_id") or "").strip():
-        raise HTTPException(status_code=400, detail="dump_id is required for public recalculate runs")
+    if not str(payload.get("dump_id") or "").strip():
+        detail = "dump_id is required for public recalculate runs" if request.action == "recalculate" else "dump_id is required for public analysis runs"
+        raise HTTPException(status_code=400, detail=detail)
     try:
         return jobs.create_run(request.action, payload)
     except ValueError as exc:

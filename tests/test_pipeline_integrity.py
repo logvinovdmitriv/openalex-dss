@@ -343,7 +343,7 @@ class PipelineIntegrityTests(unittest.TestCase):
         mark_completed.assert_called_once()
 
     def test_local_file_import_is_not_a_job_action(self) -> None:
-        self.assertEqual(materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS, {"fetch_slice_dump", "build_from_openalex", "repair_dump"})
+        self.assertEqual(materialization_jobs.SUPPORTED_MATERIALIZATION_ACTIONS, {"fetch_slice_dump", "build_from_openalex", "repair_dump", "backfill_truncated_authorships"})
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(jobs, "RUNS_DIR", Path(tmp) / "runs"):
@@ -660,6 +660,36 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(result["mode"], "repair_dump")
         self.assertEqual(progress[0], (None, "Проверка локальных файлов среза"))
         self.assertEqual(import_local_file.call_args.kwargs["compute_progress_base"], 40)
+
+    def test_backfill_truncated_authorships_hands_off_to_import(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "works.jsonl.gz"
+            raw.write_bytes(b"not-empty")
+            manifest = {
+                "dump_id": "dump_a",
+                "raw_jsonl": str(raw),
+                "records_downloaded": 1,
+                "scientific_completeness": "complete",
+                "signatures": {"compatible": True},
+                "quality_gate": {"reason": "truncated_authorships_require_backfill"},
+            }
+            progress: list[tuple[int | None, str]] = []
+            with (
+                patch.object(materialization_jobs.authorship_backfill, "backfill_truncated_authorships", return_value={"status": "complete", "output_path": str(raw), "sha256": "sha", "manifest_path": str(raw.with_name("backfill_manifest.json"))}) as backfill,
+                patch.object(materialization_jobs.pipeline, "analysis_eligibility_from_dump", return_value={"allowed_for_final_analysis": True, "status": "allowed"}),
+                patch.object(materialization_jobs.pipeline, "import_local_file", return_value={"status": "ok", "archive": {}}) as import_local_file,
+            ):
+                result = materialization_jobs.dispatch(
+                    "run_backfill",
+                    "backfill_truncated_authorships",
+                    {"source_path": str(raw), "dump_manifest": manifest, "api_key": "key"},
+                    update_progress_callback=lambda percent, stage, _extra=None: progress.append((percent, stage)),
+                )
+
+        self.assertEqual(result["mode"], "backfill_truncated_authorships")
+        backfill.assert_called_once()
+        self.assertEqual(progress[0], (None, "Проверка локального среза перед backfill"))
+        self.assertEqual(import_local_file.call_args.kwargs["compute_progress_base"], 55)
 
     def test_internal_plan_job_action_is_not_supported(self) -> None:
         with self.assertRaises(ValueError) as raised:

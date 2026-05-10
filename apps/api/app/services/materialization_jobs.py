@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from app.providers import openalex_cli_provider
-from app.services import pipeline
+from app.services import authorship_backfill, pipeline
 from app.services.internal_payloads import normalize_internal_pipeline_payload
 
 
-MATERIALIZATION_ACTIONS = {"fetch_slice_dump", "build_from_openalex", "repair_dump"}
+MATERIALIZATION_ACTIONS = {"fetch_slice_dump", "build_from_openalex", "repair_dump", "backfill_truncated_authorships"}
 SUPPORTED_MATERIALIZATION_ACTIONS = MATERIALIZATION_ACTIONS
 REQUIRES_ACCEPTED_SIGNATURE_ACTIONS = {"build_from_openalex", "fetch_slice_dump"}
 MATERIALIZATION_LIFECYCLE_ACTIONS = {"build_from_openalex", "fetch_slice_dump", "repair_dump"}
@@ -49,6 +49,13 @@ def dispatch(
         )
     if action == "repair_dump":
         return _repair_dump(run_id, payload, update_progress_callback=update_progress_callback)
+    if action == "backfill_truncated_authorships":
+        return _backfill_truncated_authorships(
+            run_id,
+            payload,
+            update_progress_callback=update_progress_callback,
+            cancel_callback=cancel_callback,
+        )
     raise ValueError(f"Unsupported materialization job action: {action}")
 
 
@@ -127,6 +134,102 @@ def _repair_dump(
         compute_progress_base=40,
     )
     return {"status": "ok", "mode": "repair_dump", "dump": dump, "build": built, "analysis_eligibility": analysis_eligibility}
+
+
+def _backfill_truncated_authorships(
+    run_id: str,
+    payload: dict[str, Any],
+    *,
+    update_progress_callback: StageProgressCallback | None,
+    cancel_callback: CancelCallback | None,
+) -> dict[str, Any]:
+    dump = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
+    raw_jsonl = str(payload.get("source_path") or dump.get("raw_jsonl") or "").strip()
+    if update_progress_callback:
+        update_progress_callback(None, "Проверка локального среза перед backfill", {"source_path": raw_jsonl})
+    raw_jsonl, dump = _ensure_repair_raw_file(dump, raw_jsonl, update_progress_callback)
+    backfill = authorship_backfill.backfill_truncated_authorships(
+        raw_jsonl,
+        api_key=str(payload.get("api_key") or ""),
+        progress_callback=update_progress_callback,
+        cancel_callback=cancel_callback,
+        max_works=int(payload.get("max_works") or 0),
+    )
+    output_path = str(backfill.get("output_path") or raw_jsonl)
+    backfill_status = str(backfill.get("status") or "")
+    updated_dump = _dump_after_backfill(dump, output_path, backfill)
+    analysis_eligibility = pipeline.analysis_eligibility_from_dump(updated_dump, dev_override=True)
+    built = pipeline.import_local_file(
+        normalize_internal_pipeline_payload(
+            {
+                **payload,
+                "source_path": output_path,
+                "api_key": None,
+                "run_id": run_id,
+                "dump_id": updated_dump.get("dump_id") or payload.get("dump_id"),
+                "dump_manifest": updated_dump,
+                "analysis_eligibility": analysis_eligibility,
+                "import_mode": "final_reproducible" if analysis_eligibility["allowed_for_final_analysis"] else "exploratory",
+                "active_context_source": "authorship_backfill",
+            }
+        ),
+        progress_callback=update_progress_callback,
+        compute_progress_base=55,
+    )
+    return {
+        "status": "ok",
+        "mode": "backfill_truncated_authorships",
+        "backfill_status": backfill_status,
+        "backfill": backfill,
+        "dump": updated_dump,
+        "build": built,
+        "analysis_eligibility": analysis_eligibility,
+    }
+
+
+def _dump_after_backfill(dump: dict[str, Any], output_path: str, backfill: dict[str, Any]) -> dict[str, Any]:
+    target = Path(output_path)
+    checksum = str(backfill.get("sha256") or (openalex_cli_provider.sha256_file(target) if target.is_file() else ""))
+    status = str(backfill.get("status") or "")
+    eligible = _backfill_allows_final(dump, status)
+    updated = {
+        **dump,
+        "raw_jsonl": output_path,
+        "raw_jsonl_sha256": checksum,
+        "bytes_written": target.stat().st_size if target.is_file() else dump.get("bytes_written"),
+        "backfill_status": status,
+        "backfill_manifest": str(backfill.get("manifest_path") or ""),
+        "backfill_summary": {
+            "candidates_total": backfill.get("candidates_total"),
+            "attempted": backfill.get("attempted"),
+            "replaced": backfill.get("replaced"),
+            "unresolved": backfill.get("unresolved"),
+        },
+        "allowed_for_final_analysis": eligible,
+        "quality_gate": {} if eligible else dump.get("quality_gate", {}),
+    }
+    storage_plan = updated.get("storage_plan") if isinstance(updated.get("storage_plan"), dict) else {}
+    if storage_plan:
+        updated["storage_plan"] = {**storage_plan, "raw_jsonl": output_path}
+    manifest_path = Path(str(updated.get("dump_manifest") or updated.get("manifest_path") or target.with_name("dump_manifest.json")))
+    updated["dump_manifest"] = str(manifest_path)
+    updated["manifest_path"] = str(manifest_path)
+    openalex_cli_provider.write_json(manifest_path, updated)
+    return updated
+
+
+def _backfill_allows_final(dump: dict[str, Any], backfill_status: str) -> bool:
+    if backfill_status not in {"complete", "completed", "not_required"}:
+        return False
+    if bool(dump.get("allowed_for_final_analysis")):
+        return True
+    eligibility = dump.get("analysis_eligibility") if isinstance(dump.get("analysis_eligibility"), dict) else {}
+    quality_gate = dump.get("quality_gate") if isinstance(dump.get("quality_gate"), dict) else eligibility.get("quality_gate") if isinstance(eligibility.get("quality_gate"), dict) else {}
+    if str(quality_gate.get("reason") or "") == "truncated_authorships_require_backfill":
+        completeness = str(dump.get("scientific_completeness") or "").strip()
+        signatures = dump.get("signatures") if isinstance(dump.get("signatures"), dict) else {}
+        return completeness in {"complete", "full"} and bool(signatures.get("compatible") or signatures.get("download_signature_verified"))
+    return False
 
 
 def _ensure_repair_raw_file(

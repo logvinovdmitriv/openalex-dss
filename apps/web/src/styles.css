@@ -1492,6 +1492,33 @@ input[aria-invalid="true"] {
   margin-top: 12px;
 }
 
+.filter-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.mini-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.mini-card b,
+.mini-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.mini-card small {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .materialization-card span,
 .dump-card span,
 .run-card span,

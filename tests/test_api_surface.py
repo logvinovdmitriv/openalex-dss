@@ -227,11 +227,17 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertEqual(normalized["query_plan"]["estimate"]["estimate_count"], 1)
         self.assertNotIn("unknown_extra", normalized)
 
-    def test_run_request_exposes_only_recalculate_action(self) -> None:
+    def test_run_request_exposes_public_analysis_actions(self) -> None:
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).action, "recalculate")
         self.assertEqual(RunRequest(action="recalculate", payload={"dump_id": "dump_a"}).action, "recalculate")
+        self.assertEqual(RunRequest(action="bootstrap_analysis", payload={"dump_id": "dump_a"}).action, "bootstrap_analysis")
+        self.assertEqual(RunRequest(action="permutation_analysis", payload={"dump_id": "dump_a"}).action, "permutation_analysis")
+        self.assertEqual(RunRequest(action="convergence_analysis", payload={"dump_id": "dump_a"}).action, "convergence_analysis")
         self.assertEqual(RunRequest(payload={"dump_id": "dump_a"}).payload.dump_id, "dump_a")
-        self.assertEqual(RunRequest.model_json_schema()["properties"]["action"]["const"], "recalculate")
+        self.assertEqual(
+            set(RunRequest.model_json_schema()["properties"]["action"]["enum"]),
+            {"recalculate", "bootstrap_analysis", "permutation_analysis", "convergence_analysis"},
+        )
         self.assertIn("payload", RunRequest.model_json_schema()["required"])
         self.assertIn("dump_id", AnalysisRunRequest.model_json_schema()["required"])
 

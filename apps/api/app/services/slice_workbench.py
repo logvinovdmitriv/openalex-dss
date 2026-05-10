@@ -445,6 +445,36 @@ def repair_dump(dump_id: str) -> dict[str, Any]:
     return {"status": "queued", "dump": dump, "health": health, "run": jobs.get_run(run["run_id"])}
 
 
+def backfill_dump_authorships(dump_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    requested_dump_id = str(dump_id or "").strip()
+    if not requested_dump_id:
+        raise ValueError("dump_id is required")
+    raw_dump_id, dump = _resolve_dump_record(requested_dump_id)
+    if not dump:
+        raise KeyError(requested_dump_id)
+    health = _dump_health(raw_dump_id, dump)
+    if not health.get("raw_exists") and not health.get("repairable"):
+        raise ValueError(str(health.get("reason") or "Для backfill нужен локальный файл среза."))
+    run_payload = normalize_internal_pipeline_payload(
+        {
+            "dump_id": raw_dump_id,
+            "source_path": dump.get("raw_jsonl"),
+            "dump_manifest": dump,
+            "api_key": str((payload or {}).get("api_key") or ""),
+            "max_works": int((payload or {}).get("max_works") or 0),
+            "analysis_eligibility": {
+                "allowed_for_final_analysis": bool(dump.get("allowed_for_final_analysis")),
+                "scientific_completeness": str(dump.get("scientific_completeness") or ""),
+                "records_downloaded": int(dump.get("records_downloaded") or 0),
+                "dump_id": raw_dump_id,
+            },
+        }
+    )
+    run = jobs.create_run("backfill_truncated_authorships", run_payload, autostart=False)
+    jobs.start_run(run["run_id"])
+    return {"status": "queued", "dump": dump, "health": health, "run": jobs.get_run(run["run_id"])}
+
+
 def dump_health(dump_id: str) -> dict[str, Any]:
     resolved_dump_id, dump = _resolve_dump_record(dump_id)
     if not dump:

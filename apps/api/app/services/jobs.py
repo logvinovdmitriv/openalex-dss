@@ -201,8 +201,9 @@ def _execute(run_id: str, action: str, payload: dict[str, Any]) -> None:
 def _dispatch(run_id: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
     payload = normalize_internal_pipeline_payload({**payload, "run_id": run_id})
     if action in analysis_jobs.ANALYSIS_ACTIONS:
-        return analysis_jobs.recalculate(
+        return analysis_jobs.dispatch(
             run_id,
+            action,
             payload,
             update_progress_callback=lambda percent, stage, extra=None: update_progress(run_id, percent, stage, extra),
         )
@@ -326,11 +327,24 @@ def _progress_phases(doc: dict[str, Any]) -> list[dict[str, Any]]:
             phase("normalize", "Подготовка таблиц", progress.get("normalize_percent"), "Нормализация", "Подготовка таблиц"),
             phase("compute", "Расчет индексов", progress.get("compute_percent"), "Расчет"),
         ]
+    if action == "backfill_truncated_authorships":
+        return [
+            phase("check", "Проверка файлов", progress.get("check_percent"), "Проверка"),
+            phase("backfill", "Восстановление authorships", progress.get("backfill_percent"), "backfill", "Восстановление singleton"),
+            phase("normalize", "Подготовка таблиц", progress.get("normalize_percent"), "Нормализация", "Подготовка таблиц"),
+            phase("compute", "Расчет индексов", progress.get("compute_percent"), "Расчет"),
+        ]
     if action == "recalculate":
         return [
             phase("check", "Проверка таблиц", progress.get("check_percent"), "Проверка"),
             phase("compute", "Расчет индексов", progress.get("compute_percent"), "Расчет"),
             phase("report", "Паспорт и отчет", progress.get("report_percent"), "Паспорт", "Отчет"),
+        ]
+    if action in {"bootstrap_analysis", "permutation_analysis", "convergence_analysis"}:
+        return [
+            phase("prepare", "Подготовка анализа", progress.get("prepare_percent"), "Подготовка"),
+            phase("compute", "Расчет протокола", progress.get("compute_percent"), "Расчет", "bootstrap", "permutation", "convergence"),
+            phase("write", "Сохранение артефактов", progress.get("write_percent"), "Сохранение"),
         ]
     return []
 
@@ -341,12 +355,18 @@ def _phase_id_for_stage(action: str, stage: str) -> str:
         return "download"
     if "Упаков" in text or "Упаковано" in text:
         return "pack"
+    if "backfill" in text or "Восстановление singleton" in text:
+        return "backfill"
     if "Нормализация" in text or "Подготовка таблиц" in text:
         return "normalize"
     if "Расчет" in text:
         return "compute"
     if "Проверка" in text:
         return "check"
+    if "Подготовка анализа" in text:
+        return "prepare"
+    if "Сохранение" in text:
+        return "write"
     if "Паспорт" in text or "Отчет" in text:
         return "report"
     return ""
@@ -672,7 +692,11 @@ def _stage_for_action(action: str) -> str:
         "fetch_slice_dump": "Загрузка локального среза",
         "build_from_openalex": "Загрузка и построение локального среза",
         "repair_dump": "Восстановление локального среза",
+        "backfill_truncated_authorships": "Восстановление authorships",
         "recalculate": "Расчет индексов",
+        "bootstrap_analysis": "Bootstrap-анализ устойчивости",
+        "permutation_analysis": "Permutation-анализ совпадения рейтингов",
+        "convergence_analysis": "Анализ сходимости корпуса",
     }.get(action, "running")
 
 
@@ -726,8 +750,18 @@ def _artifact_links(action: str, run_id: str, result: dict[str, Any] | None = No
     if action == "repair_dump":
         build = result.get("build") if isinstance(result.get("build"), dict) else {}
         return _run_artifact_links(run_id, build) if build else {}
+    if action == "backfill_truncated_authorships":
+        build = result.get("build") if isinstance(result.get("build"), dict) else {}
+        links = _run_artifact_links(run_id, build) if build else {}
+        backfill = result.get("backfill") if isinstance(result.get("backfill"), dict) else {}
+        if backfill.get("manifest_path"):
+            links["backfill_manifest"] = _relative_data_artifact(backfill.get("manifest_path"))
+        return links
     if action == "recalculate":
         return _run_artifact_links(run_id, result)
+    if action in {"bootstrap_analysis", "permutation_analysis", "convergence_analysis"}:
+        artifact = str((result or {}).get("artifact_path") or "").strip()
+        return {"analysis_artifact": _relative_data_artifact(artifact)} if artifact else {}
     return {}
 
 

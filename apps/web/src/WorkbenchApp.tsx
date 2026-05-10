@@ -57,6 +57,7 @@ import {
   type LocalDataKind,
   type LocalDataSummary,
   type MaterializationPlanPayload,
+  type OpenAlexFilterCatalogPayload,
   type RateLimitPayload,
   type RegistryPayload,
   type ResolverTab,
@@ -76,6 +77,8 @@ import { AnalyticsView } from "./features/analytics/AnalyticsView";
 import { IndicesView } from "./features/indices/IndicesView";
 import { DownloadedSlicesPanel, DumpInfoModal } from "./features/slices/DownloadedSlices";
 import { EstimateBudget, EstimateFacets, RateLimitPanel } from "./features/slices/EstimatePanels";
+import { OpenAlexFilterCatalogPanel } from "./features/slices/OpenAlexFilterCatalogPanel";
+import { SliceEntityLookup, type PointLookupTab } from "./features/slices/SliceEntityLookup";
 import { DEFAULT_CUSTOM_METRICS } from "./features/formulas/defaultCustomMetrics";
 import { metricLabelMap as buildMetricLabelMap, rankingMetricOptions } from "./features/metrics/metricCatalog";
 import { TOAST_EVENT, emitToast, type ToastItem, type ToastPayload } from "./features/notifications/toast";
@@ -196,6 +199,7 @@ function Workbench() {
 
   const registry = useQuery({ queryKey: ["registry"], queryFn: () => getJson<RegistryPayload>("/registry") });
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => getJson<CatalogPayload>("/catalog") });
+  const openAlexFilterCatalog = useQuery({ queryKey: ["openalex-filter-catalog", "download"], queryFn: () => getJson<OpenAlexFilterCatalogPayload>("/openalex/filter-catalog?entity=works&stage=download") });
   const workbench = useQuery({ queryKey: ["workbench"], queryFn: () => getJson<WorkbenchState>("/workbench") });
   const dumps = useQuery({
     queryKey: ["dumps"],
@@ -620,6 +624,20 @@ function Workbench() {
       navigate("data");
     },
   });
+  const backfillDownloadedDump = useMutation({
+    mutationFn: (nextDumpId: string) => postJson<{ run?: WorkbenchRun & { payload?: Record<string, unknown> }; dump?: WorkbenchDump }>(`/dumps/${encodeURIComponent(nextDumpId)}/backfill-authorships`, apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+    onSuccess: (result) => {
+      setApiKey("");
+      const nextRunId = String(result?.run?.run_id ?? "");
+      const nextDumpId = String(result?.dump?.dump_id ?? result?.run?.payload?.dump_id ?? "");
+      if (nextRunId) setRunId(nextRunId);
+      if (nextDumpId && !nextDumpId.startsWith("dump_pending_")) setDumpId(nextDumpId);
+      if (nextRunId) qc.invalidateQueries({ queryKey: ["run", nextRunId] });
+      qc.invalidateQueries({ queryKey: ["workbench"] });
+      qc.invalidateQueries({ queryKey: ["dumps"] });
+      navigate("data");
+    },
+  });
   const recalculate = useMutation({
     mutationFn: () => {
       if (!effectiveDumpId) {
@@ -691,6 +709,7 @@ function Workbench() {
     downloadSlice.error,
     selectDownloadedDumpRemote.error,
     repairDownloadedDump.error,
+    backfillDownloadedDump.error,
     deleteDownloadedDump.error,
     recalculate.error,
   ].filter(Boolean).map(mutationError);
@@ -800,6 +819,7 @@ function Workbench() {
             organizationPresets={organizationPresets}
             countryOptions={countryOptions}
             workTypeOptions={workTypeOptions}
+            filterCatalog={openAlexFilterCatalog.data}
             onOpenResolver={() => setResolverOpen(true)}
             onEstimate={(refresh = false) => estimateSlice.mutate({ refresh })}
             estimate={estimate ?? sliceDoc?.current_estimate}
@@ -835,9 +855,11 @@ function Workbench() {
             onSelectDownloadedDump={selectDownloadedDump}
             onShowDumpInfo={setDumpInfo}
             onRepairDownloadedDump={(nextDumpId) => repairDownloadedDump.mutate(nextDumpId)}
+            onBackfillDownloadedDump={(nextDumpId) => backfillDownloadedDump.mutate(nextDumpId)}
             onDeleteDownloadedDump={(nextDumpId) => deleteDownloadedDump.mutate(nextDumpId)}
             deletingDumpId={String(deleteDownloadedDump.variables ?? "")}
             repairingDumpId={activeRepairDumpId(run.data, repairDownloadedDump.variables)}
+            backfillingDumpId={activeRepairDumpId(run.data, backfillDownloadedDump.variables)}
             selectedDumpId={effectiveDumpId}
           />
         )}
@@ -963,6 +985,7 @@ function SlicesPage({
   organizationPresets,
   countryOptions,
   workTypeOptions,
+  filterCatalog,
   onOpenResolver,
   onEstimate,
   estimate,
@@ -994,9 +1017,11 @@ function SlicesPage({
   onSelectDownloadedDump,
   onShowDumpInfo,
   onRepairDownloadedDump,
+  onBackfillDownloadedDump,
   onDeleteDownloadedDump,
   deletingDumpId,
   repairingDumpId,
+  backfillingDumpId,
   selectedDumpId,
 }: {
   filters: ActiveFilters;
@@ -1005,6 +1030,7 @@ function SlicesPage({
   organizationPresets: OrganizationPreset[];
   countryOptions: SelectOption[];
   workTypeOptions: SelectOption[];
+  filterCatalog?: OpenAlexFilterCatalogPayload | null;
   onOpenResolver: () => void;
   onEstimate: (refresh?: boolean) => void;
   estimate: EstimatePayload | null | undefined;
@@ -1036,9 +1062,11 @@ function SlicesPage({
   onSelectDownloadedDump: (dump: WorkbenchDump) => void;
   onShowDumpInfo: (dump: WorkbenchDump) => void;
   onRepairDownloadedDump: (dumpId: string) => void;
+  onBackfillDownloadedDump: (dumpId: string) => void;
   onDeleteDownloadedDump: (dumpId: string) => void;
   deletingDumpId: string;
   repairingDumpId: string;
+  backfillingDumpId: string;
   selectedDumpId: string;
 }) {
   const dateInvalid = Boolean(filters.from_publication_date && filters.to_publication_date && filters.from_publication_date > filters.to_publication_date);
@@ -1061,10 +1089,12 @@ function SlicesPage({
         downloadedDumps={downloadedDumps}
         selectedDumpId={selectedDumpId}
         repairingDumpId={repairingDumpId}
+        backfillingDumpId={backfillingDumpId}
         deletingDumpId={deletingDumpId}
         onSelectDownloadedDump={onSelectDownloadedDump}
         onShowDumpInfo={onShowDumpInfo}
         onRepairDownloadedDump={onRepairDownloadedDump}
+        onBackfillDownloadedDump={onBackfillDownloadedDump}
         onDeleteDownloadedDump={onDeleteDownloadedDump}
         onBlocked={(row) => emitToast({
           title: "Срез пока недоступен",
@@ -1131,6 +1161,7 @@ function SlicesPage({
             <CheckPill active label="Исключать служебные тексты" />
             <CheckPill active label="XPAC выключен" />
           </div>
+          <OpenAlexFilterCatalogPanel catalog={filterCatalog} filters={filters} onChange={setFilters} />
           {!filters.subject_id && !filters.keyword_id && !filters.text_search_query && <div className="notice"><b>Все направления</b><span>Тематический фильтр не применяется. Перед скачиванием система покажет прогноз объема, а решение о загрузке остается за пользователем.</span></div>}
           {dateInvalid && <div className="notice error"><b>Проверьте период</b><span>Дата начала не должна быть позже даты окончания.</span></div>}
         <div className="action-row">
@@ -1286,101 +1317,6 @@ function authorCountText(count: number) {
   if (mod10 === 1 && mod100 !== 11) return `${fmt(count)} автор`;
   if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return `${fmt(count)} автора`;
   return `${fmt(count)} авторов`;
-}
-
-type PointLookupTab = "author" | "institution" | "work" | "source";
-
-function SliceEntityLookup({
-  effectiveRunId,
-  effectiveDumpId,
-  onSelect,
-  onApplyToSlice,
-}: {
-  effectiveRunId: string;
-  effectiveDumpId: string;
-  onSelect: (value: { kind: "author" | "work"; id: string }) => void;
-  onApplyToSlice: (tab: PointLookupTab, item: EntitySuggestion) => void;
-}) {
-  const [tab, setTab] = useState<PointLookupTab>("author");
-  const [query, setQuery] = useState("");
-  const [picked, setPicked] = useState<EntitySuggestion | null>(null);
-  const endpoint = {
-    author: "/openalex/authors",
-    institution: "/openalex/institutions",
-    work: "/openalex/works",
-    source: "/openalex/sources",
-  }[tab];
-  const lookup = useQuery({
-    queryKey: ["slice-entity-lookup", tab, query.trim()],
-    queryFn: () => getJson<ListPayload<EntitySuggestion>>(`${endpoint}?q=${encodeURIComponent(query.trim())}&limit=10`),
-    enabled: query.trim().length >= 2,
-  });
-  const results = (lookup.data?.results ?? []) as EntitySuggestion[];
-  const selectPoint = (item: EntitySuggestion) => {
-    const id = String(item.openalex_id || item.id || "").trim();
-    setPicked(item);
-    if (!id) return;
-    onApplyToSlice(tab, item);
-    if (tab === "author") onSelect({ kind: "author", id });
-    if (tab === "work") onSelect({ kind: "work", id });
-  };
-
-  return (
-    <section className="panel">
-        <div className="panel-head">
-          <div>
-            <span className="step-badge">Добавить к срезу</span>
-            <h2>Автор, работа, организация или источник</h2>
-            <p>Это часть настройки среза: найдите сущность в OpenAlex и добавьте ее как ограничение. API используется только по этому явному поисковому запросу.</p>
-          </div>
-        </div>
-        <div className="choice-grid compact lookup-tabs">
-          {[
-            ["author", "Автор / ORCID"],
-            ["institution", "Организация / ROR"],
-            ["work", "Работа / DOI"],
-            ["source", "Источник"],
-          ].map(([id, label]) => (
-            <button key={id} type="button" className={tab === id ? "choice-pill active" : "choice-pill"} onClick={() => setTab(id as PointLookupTab)}>
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="resolver-search flat-search">
-          <Search size={17} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Введите имя, DOI, ORCID, ROR или OpenAlex ID"
-          />
-          <button type="button" onClick={() => lookup.refetch()} disabled={query.trim().length < 2 || lookup.isFetching}>
-            {lookup.isFetching ? <Loader2 size={16} className="spin" /> : <Search size={16} />} Найти
-          </button>
-        </div>
-        <div className="resolver-results embedded">
-          {query.trim().length < 2 && <EmptyState title="Введите запрос" detail="Поиск запускается только после явного ввода. Он не скачивает срез и не пересчитывает индексы." />}
-          {query.trim().length >= 2 && results.length === 0 && !lookup.isFetching && <EmptyState title="Ничего не найдено" detail="Попробуйте полный OpenAlex ID, DOI, ORCID или ROR." />}
-          {results.map((item) => (
-            <button key={`${tab}-${item.openalex_id}-${item.id}-${item.name}`} type="button" onClick={() => selectPoint(item)}>
-              <b>{item.name}</b>
-              <span>{item.level_label ?? item.level ?? ""} {item.works_count ? `· ${fmt(item.works_count)} работ` : ""} {item.cited_by_count ? `· ${fmt(item.cited_by_count)} цитирований` : ""}</span>
-              <small>{item.openalex_id ?? item.id} {item.ror ? `· ROR: ${item.ror}` : ""} {item.orcid ? `· ORCID: ${item.orcid}` : ""} {item.doi ? `· DOI: ${item.doi}` : ""}</small>
-            </button>
-          ))}
-        </div>
-        <div className="notice">
-          <b>{effectiveRunId || effectiveDumpId ? "Ограничение добавится к текущему срезу" : "Можно добавить ограничение до скачивания"}</b>
-          <span>{effectiveRunId || effectiveDumpId ? "Карточка автора или работы открывается в контексте выбранного локального среза. Глобальные значения OpenAlex не заменяют локальные индексы." : "После выбора сущности она попадет в описание среза; для локальных карточек и расчета затем нужен скачанный срез."}</span>
-        </div>
-        {picked && (
-          <div className="materialization-card">
-            <b>{picked.name}</b>
-            <span>{picked.level_label ?? picked.level ?? "OpenAlex entity"}</span>
-            <small>{picked.openalex_id ?? picked.id} {picked.ror ? `· ROR: ${picked.ror}` : ""} {picked.orcid ? `· ORCID: ${picked.orcid}` : ""} {picked.doi ? `· DOI: ${picked.doi}` : ""}</small>
-          </div>
-        )}
-      </section>
-  );
 }
 
 function applyEntityToCurrentSlice(
