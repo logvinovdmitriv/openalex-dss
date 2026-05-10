@@ -73,7 +73,7 @@ export function IndicesView({
           <div>
             <span className="step-badge">Расчет индексов</span>
             <h2>Индексы и рейтинги</h2>
-          <p>Здесь показывается авторская таблица индексов. Поиск, ограничения и сортировка берутся из вкладки “Данные”, а ниже выбирается, какие индексы вывести.</p>
+            <p>Здесь показывается авторская таблица выбранных показателей. Поиск, ограничения и сортировка берутся из вкладки “Данные”, а ниже выбирается, какие индексы вывести.</p>
           </div>
           <button
             className="primary"
@@ -161,7 +161,7 @@ export function IndicesView({
         </div>
         <section className="formula-summary">
           <div>
-            <b>Собственные показатели</b>
+            <b>Пользовательские формулы</b>
             <span>Можно добавить расчетный показатель по данным выбранного среза и использовать его в рейтинге, таблице и графиках.</span>
           </div>
           <button type="button" className="primary" onClick={() => setFormulaBuilderOpen(true)}>
@@ -185,9 +185,9 @@ export function IndicesView({
       </section>
       <section className="panel table-panel">
         <div className="panel-head">
-          <span className="step-badge">Таблица индексов</span>
-          <h2>Авторский уровень данных</h2>
-          <p>Это таблица авторов с выбранными индексами. Она использует те же поиск, ограничения и сортировку, которые заданы на вкладке “Данные”.</p>
+          <span className="step-badge">Рейтинг авторов</span>
+          <h2>Авторы и выбранные показатели</h2>
+          <p>Таблица показывает авторов и только выбранные показатели рейтинга. Поиск, ограничения и сортировка берутся из вкладки “Данные”; служебные признаки качества остаются в исходных таблицах.</p>
         </div>
         <DataGrid data={rankingTable} onSelect={onSelect} hiddenFields={["author_id"]} fieldLabels={metricLabels} />
       </section>
@@ -210,7 +210,7 @@ function projectAuthorIndexTable(ranking: TableResponse | undefined, metrics: st
   const fields = ranking.fields ?? [];
   const identityFields = ["author_display_name", "author_id"].filter((field) => fields.includes(field));
   const metricFields = metrics.filter((field) => fields.includes(field));
-  const contextFields = ["country_code", "subject_name", "n_flagged_works", "n_truncated_works"].filter((field) => fields.includes(field));
+  const contextFields = ["country_code", "subject_name"].filter((field) => fields.includes(field));
   const selectedFields = [...new Set([...identityFields, ...metricFields, ...contextFields])];
   return { ...ranking, fields: selectedFields.length ? selectedFields : fields };
 }

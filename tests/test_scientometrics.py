@@ -363,7 +363,7 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertIn("## Кандидатная формула", markdown)
         self.assertIn("Основания: heavy_tail:c", markdown)
         self.assertIn("Метрики: Цитирования", markdown)
-        self.assertIn("Метрики: Собственный сбалансированный индекс", markdown)
+        self.assertIn("Метрики: ISLV: сбалансированный показатель вклада", markdown)
         self.assertIn("## Ограничения вывода", markdown)
         self.assertIn("- Метрики не заменяют экспертную оценку.", markdown)
 
