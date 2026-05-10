@@ -630,7 +630,9 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode }: { pay
     <div className="boxplot-svg-list">
       {rows.map((row) => {
         const scaleMax = row.scaleCap ?? row.observedMax;
-        const domain = expandedBoxplotDomain(row.domainMin, Math.min(row.domainMax, scaleMax ?? row.domainMax), row.observedMin, scaleMax, true);
+        const visualMin = Math.min(row.domainMin, row.observedMin ?? row.domainMin);
+        const visualMax = Math.max(row.domainMax, scaleMax ?? row.domainMax);
+        const domain = expandedBoxplotDomain(visualMin, visualMax, null, null, false);
         const y = (value: number) => {
           const top = 24;
           const bottom = 224;
@@ -650,6 +652,7 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode }: { pay
         const boxHeight = Math.max(6, Math.abs(q3Y - q1Y));
         const boxCenterX = 178;
         const axisValues = boxplotAxisValues(domain.min, domain.max);
+        const scaleCapY = scaleMax !== null ? yClamped(scaleMax) : null;
         return (
           <div key={row.metricName} className="boxplot-svg-row">
             <div className="boxplot-svg-title">
@@ -675,6 +678,11 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode }: { pay
               <line x1={boxCenterX - 24} y1={minY} x2={boxCenterX + 24} y2={minY} className="boxplot-cap" />
               <rect x={boxCenterX - 36} y={boxY} width="72" height={boxHeight} rx="2" className={row.collapsed ? "boxplot-box collapsed" : "boxplot-box"} />
               <line x1={boxCenterX - 42} y1={medianY} x2={boxCenterX + 42} y2={medianY} className="boxplot-median" />
+              {scaleCapY !== null && scaleMode !== "all" && (
+                <line x1="92" y1={scaleCapY} x2="304" y2={scaleCapY} className="boxplot-scale-cap">
+                  <title>{boxplotScaleLabel(scaleMode, row.scaleCap)}</title>
+                </line>
+              )}
               {row.outlierValues.map((value, index) => (
                 <circle key={`${row.metricName}-outlier-${index}`} cx={boxCenterX + 72 + ((index % 5) - 2) * 6} cy={yClamped(value)} r="4" className="boxplot-outlier">
                   <title>{`${row.compactOutliers ? "Отдельное значение вне основной массы" : "Выделяющееся значение"}: ${formatAnalysisValue(value)}`}</title>
@@ -683,11 +691,12 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode }: { pay
             </svg>
             <div className="boxplot-caption">
               <span>{boxplotScaleLabel(scaleMode, row.scaleCap)}</span>
-              <span>Нижняя граница: {formatAnalysisValue(row.min)}</span>
+              <span>Нижний ус IQR: {formatAnalysisValue(row.min)}</span>
               <span>Q1: {formatAnalysisValue(row.q1)}</span>
               <span>Медиана: {formatAnalysisValue(row.median)}</span>
               <span>Q3: {formatAnalysisValue(row.q3)}</span>
-              <span>Верхняя граница: {formatAnalysisValue(row.max)}</span>
+              <span>Верхний ус IQR: {formatAnalysisValue(row.max)}</span>
+              {row.observedMax !== null && <span>Максимум: {formatAnalysisValue(row.observedMax)}</span>}
             </div>
           </div>
         );

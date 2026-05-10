@@ -791,6 +791,13 @@ input[aria-invalid="true"] {
   stroke-linecap: round;
 }
 
+.boxplot-scale-cap {
+  stroke: #64748b;
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  opacity: 0.75;
+}
+
 .boxplot-outlier {
   fill: #be123c;
   stroke: #fff;

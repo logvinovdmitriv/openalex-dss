@@ -83,3 +83,5 @@ def test_collapsed_boxplot_does_not_stretch_to_extreme_values() -> None:
     assert "boxplotScaleMode" in analytics
     assert "до 95-го процентиля" in analytics
     assert "boxplotScaleCap" in analytics
+    assert "Верхний ус IQR" in analytics
+    assert "boxplot-scale-cap" in analytics
