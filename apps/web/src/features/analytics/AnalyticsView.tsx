@@ -1042,7 +1042,7 @@ function metricShortLabel(value: string, metricLabels?: Record<string, string>) 
     top1_share: "Топ-1",
     f5: "Работы 5+",
     fm5: "Долевой вклад 5+",
-    iupv: "Формула активности",
+    iupv: "PCI",
     islv: "Формула баланса",
     lrdi: "Устойчивость",
   };

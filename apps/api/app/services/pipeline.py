@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.core.paths import DATA, ROOT, SRC
-from app.providers import openalex_cli_provider
+from app.providers import openalex_api_provider, openalex_cli_provider
 from app.services import artifact_context, author_slice
 from app.services.filesystem import file_profile, resolve_safe_path
 from app.services import metadata_store, query_planner, reports
@@ -18,7 +18,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from openalex_dss.config import replace_config, write_config  # noqa: E402
-from openalex_dss.io_utils import sha256_file, write_json  # noqa: E402
+from openalex_dss.io_utils import sha256_file, write_json, write_parquet_dicts  # noqa: E402
 from openalex_dss.metrics import build_author_work_metrics, compute_indices  # noqa: E402
 from openalex_dss.normalize import normalize_raw  # noqa: E402
 from openalex_dss.passports import build_passports  # noqa: E402
@@ -111,21 +111,47 @@ def fetch_slice_dump(
     try:
         if api_key:
             os.environ[cfg.api_key_env] = api_key
-        if str(payload.get("source_strategy") or "openalex_cli") != "openalex_cli":
-            raise ValueError("Новая загрузка среза выполняется через установленный загрузчик OpenAlex. Чтобы не использовать API-лимиты, выберите уже скачанный локальный срез.")
-        passport = openalex_cli_provider.download_works_metadata(
-            cfg,
-            api_key=api_key,
-            out_dir=_download_output_dir(payload, cfg),
-            estimate={
-                **estimate,
-                "accepted_estimate_signature": accepted_signature or None,
-                "accepted_download_signature": accepted_download_signature or None,
-            },
-            progress_callback=progress_callback,
-            cancel_callback=cancel_callback,
-            max_download_bytes=_max_download_bytes(payload),
-        )
+        source_strategy = str(payload.get("source_strategy") or "openalex_cli")
+        estimate_payload = {
+            **estimate,
+            "accepted_estimate_signature": accepted_signature or None,
+            "accepted_download_signature": accepted_download_signature or None,
+        }
+        if source_strategy == "openalex_cli":
+            passport = openalex_cli_provider.download_works_metadata(
+                cfg,
+                api_key=api_key,
+                out_dir=_download_output_dir(payload, cfg),
+                estimate=estimate_payload,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+                max_download_bytes=_max_download_bytes(payload),
+            )
+        elif source_strategy in {"openalex_api", "api_cursor_selected_fields"}:
+            passport = openalex_api_provider.download_works_cursor(
+                cfg,
+                api_key=api_key,
+                out_dir=_download_output_dir(payload, cfg, source_strategy=source_strategy),
+                estimate=estimate_payload,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+                max_download_bytes=_max_download_bytes(payload),
+            )
+        elif source_strategy == "ids_then_hydrate":
+            passport = openalex_api_provider.hydrate_work_ids(
+                cfg,
+                work_ids=_work_ids_from_payload(payload),
+                api_key=api_key,
+                out_dir=_download_output_dir(payload, cfg, source_strategy=source_strategy),
+                estimate=estimate_payload,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+                max_download_bytes=_max_download_bytes(payload),
+            )
+        else:
+            raise ValueError(
+                "Неизвестный способ загрузки среза. Доступны openalex_cli, openalex_api/api_cursor_selected_fields и ids_then_hydrate."
+            )
         passport["query_plan"] = plan
         if not passport.get("dump_id"):
             checksum = str(passport.get("raw_jsonl_sha256") or "")
@@ -134,6 +160,7 @@ def fetch_slice_dump(
         if raw_jsonl:
             write_json(Path(str(raw_jsonl)).with_name("dump_manifest.json"), passport)
         metadata_store.record_slice_dump(passport)
+        query_planner.record_estimate_calibration(passport, estimate)
     finally:
         if old is None:
             os.environ.pop(cfg.api_key_env, None)
@@ -282,8 +309,11 @@ def resolve_dump_tables(dump_id: str, *, required: bool = True) -> dict[str, Pat
         "works": base / "works.parquet",
         "authorships": base / "authorships.parquet",
         "work_topics": base / "work_topics.parquet",
+        "author_institutions": base / "author_institutions.parquet",
+        "author_countries": base / "author_countries.parquet",
     }
-    missing = [name for name, path in tables.items() if not path.is_file()]
+    required_tables = {"works", "authorships", "work_topics"}
+    missing = [name for name, path in tables.items() if name in required_tables and not path.is_file()]
     if required and missing:
         missing_text = ", ".join(f"{name}={tables[name]}" for name in missing)
         raise FileNotFoundError(f"Локальные таблицы для dump_id={dump_id} не найдены: {missing_text}. Сначала импортируйте или пересоберите дамп.")
@@ -302,6 +332,8 @@ def _normalize_dump_to_scope(source: Path, dump_id: str) -> tuple[dict[str, Any]
         normalized_dir / "authorships_flat.csv",
         quality_report,
         normalized_dir / "work_topics_flat.csv",
+        normalized_dir / "author_institutions_flat.csv",
+        normalized_dir / "author_countries_flat.csv",
     )
     return quality, _dump_scoped_parquet_sources(safe_dump_id), quality_report
 
@@ -312,6 +344,8 @@ def _dump_scoped_parquet_sources(dump_id: str) -> dict[str, Path]:
         "works": base / "works_flat.parquet",
         "authorships": base / "authorships_flat.parquet",
         "work_topics": base / "work_topics_flat.parquet",
+        "author_institutions": base / "author_institutions_flat.parquet",
+        "author_countries": base / "author_countries_flat.parquet",
     }
 
 
@@ -363,6 +397,8 @@ def _materialize_dump_tables_from_sources(dump_id: str, sources: dict[str, Path]
         "works": "works.parquet",
         "authorships": "authorships.parquet",
         "work_topics": "work_topics.parquet",
+        "author_institutions": "author_institutions.parquet",
+        "author_countries": "author_countries.parquet",
     }
     for name, filename in mapping.items():
         source = sources.get(name)
@@ -453,6 +489,8 @@ def _run_compute(
         "dump/tables/works.parquet": input_table_manifest.get("works"),
         "dump/tables/authorships.parquet": input_table_manifest.get("authorships"),
         "dump/tables/work_topics.parquet": input_table_manifest.get("work_topics"),
+        "dump/tables/author_institutions.parquet": input_table_manifest.get("author_institutions"),
+        "dump/tables/author_countries.parquet": input_table_manifest.get("author_countries"),
         "run/tables/author_work.csv": author_work_csv,
         "run/tables/indices.csv": indices_csv,
         "run/tables/ratings.csv": ratings_csv,
@@ -503,8 +541,9 @@ def _precompute_run_artifacts(
         data_limit=0,
         custom_metric_defs=list(PRECOMPUTE_CUSTOM_METRICS),
     )
+    precompute_tables = _write_precompute_tables(run_id=run_id, report=report)
     manifest_path = _write_precompute_manifest(run_id=run_id, dump_id=dump_id, report=report)
-    return {"report": report, "manifest": str(manifest_path)}
+    return {"report": report, "manifest": str(manifest_path), "tables": precompute_tables}
 
 
 def _write_precompute_manifest(*, run_id: str, dump_id: str, report: dict[str, Any]) -> Path:
@@ -525,6 +564,13 @@ def _write_precompute_manifest(*, run_id: str, dump_id: str, report: dict[str, A
         "data_limit": 0,
         "report_scope_hash": scope_hash,
         "report_bundle": str(DATA / "runs" / _safe_id(run_id) / "reports" / f"report_{_safe_id(scope_hash)}.json") if scope_hash else "",
+        "precompute_tables": {
+            "metric_rank_summary": str(analytics_dir / "precompute" / "metric_rank_summary.parquet"),
+            "chart_readiness": str(analytics_dir / "precompute" / "chart_readiness.parquet"),
+            "metric_pair_correlations": str(analytics_dir / "precompute" / "metric_pair_correlations.parquet"),
+            "topn_overlap_summary": str(analytics_dir / "precompute" / "topn_overlap_summary.parquet"),
+            "rank_delta_summary": str(analytics_dir / "precompute" / "rank_delta_summary.parquet"),
+        },
         "retention": {
             "report_bundles_per_run": reports.report_bundle_keep(),
             "scientometric_cache_files_per_run": reports.scientometrics.ANALYSIS_CACHE_KEEP,
@@ -535,6 +581,94 @@ def _write_precompute_manifest(*, run_id: str, dump_id: str, report: dict[str, A
     path = analytics_dir / "precompute_manifest.json"
     write_json(path, manifest)
     return path
+
+
+def _write_precompute_tables(*, run_id: str, report: dict[str, Any]) -> dict[str, str]:
+    analytics = report.get("scientometric_analysis") if isinstance(report.get("scientometric_analysis"), dict) else {}
+    target_dir = DATA / "runs" / _safe_id(run_id) / "analytics" / "precompute"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    tables = {
+        "metric_rank_summary": _metric_rank_rows(analytics),
+        "chart_readiness": _chart_readiness_rows(analytics),
+        "metric_pair_correlations": _correlation_rows(analytics),
+        "topn_overlap_summary": _top_overlap_rows(analytics),
+        "rank_delta_summary": _rank_delta_rows(analytics),
+    }
+    paths: dict[str, str] = {}
+    for name, rows in tables.items():
+        json_path = target_dir / f"{name}.json"
+        parquet_path = target_dir / f"{name}.parquet"
+        write_json(json_path, {"schema": f"{name}_precompute_v1", "rows": rows})
+        fields = sorted({field for row in rows for field in row}) or ["empty"]
+        write_parquet_dicts(parquet_path, rows or [{"empty": ""}], fields)
+        paths[name] = str(parquet_path)
+    return paths
+
+
+def _metric_rank_rows(analytics: dict[str, Any]) -> list[dict[str, Any]]:
+    summary = analytics.get("metric_rank_summary") if isinstance(analytics.get("metric_rank_summary"), dict) else {}
+    return [{**_flat_scalars(payload), "metric": metric} for metric, payload in sorted(summary.items()) if isinstance(payload, dict)]
+
+
+def _chart_readiness_rows(analytics: dict[str, Any]) -> list[dict[str, Any]]:
+    readiness = analytics.get("chart_readiness") if isinstance(analytics.get("chart_readiness"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    for metric, charts in sorted(readiness.items()):
+        if not isinstance(charts, dict):
+            continue
+        for chart_type, payload in sorted(charts.items()):
+            if isinstance(payload, dict):
+                rows.append({**_flat_scalars(payload), "metric": metric, "chart_type": chart_type})
+    return rows
+
+
+def _correlation_rows(analytics: dict[str, Any]) -> list[dict[str, Any]]:
+    correlations = analytics.get("correlations") if isinstance(analytics.get("correlations"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    for method, matrix_payload in sorted(correlations.items()):
+        matrix = matrix_payload.get("matrix") if isinstance(matrix_payload, dict) and "matrix" in matrix_payload else matrix_payload
+        if not isinstance(matrix, dict):
+            continue
+        for metric_a, cols in sorted(matrix.items()):
+            if not isinstance(cols, dict):
+                continue
+            for metric_b, value in sorted(cols.items()):
+                rows.append({"method": method, "metric_a": metric_a, "metric_b": metric_b, "value": value})
+    return rows
+
+
+def _top_overlap_rows(analytics: dict[str, Any]) -> list[dict[str, Any]]:
+    top_overlap = analytics.get("top_overlap") if isinstance(analytics.get("top_overlap"), dict) else {}
+    matrix = top_overlap.get("matrix") if isinstance(top_overlap.get("matrix"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    for metric_a, cols in sorted(matrix.items()):
+        if not isinstance(cols, dict):
+            continue
+        for metric_b, cuts in sorted(cols.items()):
+            if not isinstance(cuts, dict):
+                continue
+            for cut, payload in sorted(cuts.items()):
+                if isinstance(payload, dict):
+                    rows.append({**_flat_scalars(payload), "metric_a": metric_a, "metric_b": metric_b, "top_n": cut})
+    return rows
+
+
+def _rank_delta_rows(analytics: dict[str, Any]) -> list[dict[str, Any]]:
+    comparisons = analytics.get("rank_comparisons") if isinstance(analytics.get("rank_comparisons"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    for metric, payload in sorted(comparisons.items()):
+        if isinstance(payload, dict):
+            row = {**_flat_scalars({key: value for key, value in payload.items() if key != "largest_shifts"}), "metric": metric}
+            rows.append(row)
+    return rows
+
+
+def _flat_scalars(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in payload.items()
+        if value is None or isinstance(value, (str, int, float, bool))
+    }
 
 
 def _prune_runs_for_dump(dump_id: str, *, keep: int = 3) -> list[str]:
@@ -615,12 +749,17 @@ def _query_plan_from_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _download_output_dir(payload: dict[str, Any], cfg: Any) -> Path:
+def _download_output_dir(payload: dict[str, Any], cfg: Any, *, source_strategy: str = "openalex_cli") -> Path:
     raw_folder_id = str(payload.get("materialization_id") or payload.get("run_id") or "").strip()
     folder_id = _safe_id(raw_folder_id) if raw_folder_id else ""
     raw = str(payload.get("download_dir") or "").strip()
     if not raw:
-        base = DATA / "raw" / "openalex_cli" / _safe_id(str(cfg.slice_name or "slice"))
+        source_root = {
+            "openalex_api": "openalex_api",
+            "api_cursor_selected_fields": "openalex_api",
+            "ids_then_hydrate": "openalex_ids",
+        }.get(str(source_strategy or "openalex_cli"), "openalex_cli")
+        base = DATA / "raw" / source_root / _safe_id(str(cfg.slice_name or "slice"))
         return base / folder_id if folder_id else base
     base = Path(raw).expanduser()
     if not base.is_absolute():
@@ -637,6 +776,20 @@ def _download_output_dir(payload: dict[str, Any], cfg: Any) -> Path:
     safe_slice = _safe_id(str(cfg.slice_name or "slice"))
     base = resolved if resolved.name == safe_slice else resolved / safe_slice
     return base / folder_id if folder_id else base
+
+
+def _work_ids_from_payload(payload: dict[str, Any]) -> list[str]:
+    raw_ids = payload.get("work_ids")
+    ids: list[str] = []
+    if isinstance(raw_ids, list):
+        ids.extend(str(item).strip() for item in raw_ids if str(item).strip())
+    elif isinstance(raw_ids, str):
+        ids.extend(part.strip() for part in raw_ids.replace("\n", ",").split(",") if part.strip())
+    ids_file = str(payload.get("work_ids_file") or "").strip()
+    if ids_file:
+        path = resolve_safe_path(ids_file)
+        ids.extend(part.strip() for part in path.read_text(encoding="utf-8").replace("\n", ",").split(",") if part.strip())
+    return ids
 
 
 def _max_download_bytes(payload: dict[str, Any]) -> int:

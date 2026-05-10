@@ -42,6 +42,26 @@ filters:
     label: "Дата публикации до"
     short_label: "Дата до"
     description: "Верхняя граница периода публикаций."
+  from_created_date:
+    label: "Дата создания записи от"
+    short_label: "Создана от"
+    description: "Нижняя граница даты появления записи в OpenAlex."
+  to_created_date:
+    label: "Дата создания записи до"
+    short_label: "Создана до"
+    description: "Верхняя граница даты появления записи в OpenAlex."
+  from_updated_date:
+    label: "Дата обновления записи от"
+    short_label: "Обновлена от"
+    description: "Нижняя граница даты последнего обновления записи OpenAlex."
+  to_updated_date:
+    label: "Дата обновления записи до"
+    short_label: "Обновлена до"
+    description: "Верхняя граница даты последнего обновления записи OpenAlex."
+  publication_year:
+    label: "Год публикации"
+    short_label: "Год"
+    description: "Фильтр по году публикации работы."
   is_retracted:
     label: "Исключить отозванные работы"
     short_label: "Без отозванных"
@@ -54,3 +74,43 @@ filters:
     label: "Исключить XPAC"
     short_label: "Без XPAC"
     description: "XPAC-записи исключаются по умолчанию из-за более низкой сопоставимости данных."
+  has_doi:
+    label: "Наличие DOI"
+    short_label: "Есть DOI"
+    description: "Оставляет работы с DOI или без DOI."
+  has_references:
+    label: "Наличие списка литературы"
+    short_label: "Есть ссылки"
+    description: "Оставляет работы, у которых OpenAlex содержит список ссылок."
+  has_fulltext:
+    label: "Наличие fulltext-индекса"
+    short_label: "Есть fulltext"
+    description: "Оставляет работы с доступным fulltext-индексом OpenAlex."
+  is_oa:
+    label: "Открытый доступ"
+    short_label: "Open Access"
+    description: "Ограничивает работы по признаку открытого доступа."
+  oa_status:
+    label: "Статус открытого доступа"
+    short_label: "OA-статус"
+    description: "Фильтр по статусу open access в OpenAlex."
+  cited_by_count:
+    label: "Цитирований работы"
+    short_label: "Цитирования"
+    description: "Фильтр по числу цитирований конкретной работы."
+  cited_by:
+    label: "Цитируется работой"
+    short_label: "Цитируется"
+    description: "Экспертный фильтр по работам, которые цитируют выбранную работу."
+  cites:
+    label: "Ссылается на работу"
+    short_label: "Ссылается"
+    description: "Экспертный фильтр по работам, содержащим ссылку на выбранную работу."
+  referenced_works:
+    label: "Ссылки на работы"
+    short_label: "Ссылки"
+    description: "Экспертный фильтр по связанным ссылкам works."
+  openalex_id:
+    label: "OpenAlex ID работы"
+    short_label: "ID работы"
+    description: "Фильтр по одному или нескольким идентификаторам работ OpenAlex."

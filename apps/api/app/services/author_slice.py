@@ -76,7 +76,8 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
             "default_fraction_mode": cfg.fraction_mode_default,
             "core_indices": ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"],
             "experimental_indices": ["f5", "fm5", "iupv", "islv", "lrdi"],
-            "iupv": {
+            "pci_percentile_composite": {
+                "metric_id": "iupv",
                 "formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
                 "percentile_scope": "current slice and fraction mode",
             },

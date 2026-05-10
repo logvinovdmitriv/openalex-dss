@@ -64,6 +64,31 @@ filters:
     class: "openalex_pushdown"
     works_filter:
       field: "to_publication_date"
+  from_created_date:
+    label: "Дата создания записи от"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "from_created_date"
+  to_created_date:
+    label: "Дата создания записи до"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "to_created_date"
+  from_updated_date:
+    label: "Дата обновления записи от"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "from_updated_date"
+  to_updated_date:
+    label: "Дата обновления записи до"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "to_updated_date"
+  publication_year:
+    label: "Год публикации"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "publication_year"
   is_retracted:
     label: "Исключить отозванные работы"
     class: "openalex_pushdown"
@@ -110,6 +135,61 @@ filters:
     class: "openalex_pushdown"
     works_filter:
       field: "has_abstract"
+  has_doi:
+    label: "Наличие DOI"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "has_doi"
+  has_references:
+    label: "Наличие списка литературы"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "has_references"
+  has_fulltext:
+    label: "Наличие fulltext-индекса"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "has_fulltext"
+  is_oa:
+    label: "Открытый доступ"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "is_oa"
+  oa_status:
+    label: "Статус открытого доступа"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "open_access.oa_status"
+  cited_by_count:
+    label: "Цитирований работы"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "cited_by_count"
+      operator: "range"
+  cited_by:
+    label: "Цитирует работу"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "cited_by"
+      max_or_values: 100
+  cites:
+    label: "Ссылается на работу"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "cites"
+      max_or_values: 100
+  referenced_works:
+    label: "Ссылки на работы"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "referenced_works"
+      max_or_values: 100
+  openalex_id:
+    label: "OpenAlex ID работы"
+    class: "openalex_pushdown"
+    works_filter:
+      field: "openalex"
+      max_or_values: 100
   min_local_h:
     label: "Минимальный локальный h-index"
     class: "derived_after_metrics"

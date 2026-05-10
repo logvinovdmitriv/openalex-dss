@@ -22,6 +22,8 @@ TABLE_KINDS = (
     "works",
     "authorships",
     "work_topics",
+    "author_institutions",
+    "author_countries",
     "author_work",
     "indices",
     "ratings",

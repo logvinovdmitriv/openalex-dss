@@ -6,7 +6,7 @@ from pathlib import Path
 from app.core.paths import DATA, TABLE_KINDS
 
 
-DUMP_TABLES = {"works", "authorships", "work_topics"}
+DUMP_TABLES = {"works", "authorships", "work_topics", "author_institutions", "author_countries"}
 RUN_JSON_DOCS = {
     "fetch_meta": ("passports", "fetch_meta.json"),
     "quality": ("passports", "quality_report.json"),

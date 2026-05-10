@@ -14,7 +14,7 @@ from typing import Any
 
 from app.core.paths import DATA
 from app.services.internal_payloads import normalize_internal_pipeline_payload
-from app.services import artifact_context, author_slice, jobs, metadata_store, query_planner, registry, warehouse
+from app.services import artifact_context, author_slice, jobs, metadata_store, openalex_filter_ast, query_planner, registry, warehouse
 from openalex_dss.config import config_to_dict
 from openalex_dss.openalex import cli_download_signature, corpus_request, corpus_signature
 
@@ -183,6 +183,14 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
     plan_id = _safe_id(f"mat_{slice_id}_{profile['profile_id']}_{uuid.uuid4().hex[:8]}")
     cfg = author_slice.config_from_payload({**doc["technical_payload"], "workflow_mode": "strict_works"})
     estimate = _current_estimate_or_refresh(slice_id, doc, cfg, download_policy)
+    if source_strategy != "openalex_cli":
+        estimate = query_planner.plan_slice({
+            **doc["technical_payload"],
+            "workflow_mode": "strict_works",
+            "source_strategy": source_strategy,
+            "download_policy": download_policy,
+            **({"download_dir": download_dir} if download_dir else {}),
+        })
     doc = get_slice(slice_id)
     cfg = author_slice.config_from_payload({**doc["technical_payload"], "workflow_mode": "strict_works"})
     materialization_fingerprint = _materialization_fingerprint(
@@ -203,6 +211,11 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
             "query_plan": estimate,
         }
     )
+    source_root = {
+        "openalex_api": "openalex_api",
+        "api_cursor_selected_fields": "openalex_api",
+        "ids_then_hydrate": "openalex_ids",
+    }.get(source_strategy, "openalex_cli")
     materialization = {
         "materialization_id": plan_id,
         "slice_id": slice_id,
@@ -222,10 +235,12 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         "accepted_download_signature": (estimate.get("estimate") or {}).get("download_signature"),
         "technical_payload": technical_payload,
         "outputs": [
-            "raw/openalex_cli/{slice_id}/works.jsonl.gz",
+            f"raw/{source_root}/{{slice_id}}/works.jsonl.gz",
             "tables/{dump_id}/works.parquet",
             "tables/{dump_id}/authorships.parquet",
             "tables/{dump_id}/work_topics.parquet",
+            "tables/{dump_id}/author_institutions.parquet",
+            "tables/{dump_id}/author_countries.parquet",
             "runs/{run_id}/tables/author_work.csv",
             "runs/{run_id}/tables/author_work.parquet",
             "runs/{run_id}/tables/indices.csv",
@@ -921,24 +936,39 @@ def _dump_match_status(
             "reason": "В паспорте среза нет полного filter/signature для строгой проверки.",
             "final_usable": False,
         }
-    if expected_filter in dump_filter:
+    relation = openalex_filter_ast.filter_relation(dump_filter, expected_filter)
+    if relation == "equal":
+        return {
+            "status": "exact_match",
+            "label": "точное совпадение",
+            "reason": "Нормализованные условия OpenAlex filter совпадают.",
+            "final_usable": bool(dump.get("allowed_for_final_analysis")),
+        }
+    if relation == "narrower":
         return {
             "status": "compatible_subset",
             "label": "срез уже текущего",
-            "reason": "Dump содержит дополнительные ограничения и не покрывает весь текущий срез.",
+            "reason": "Dump содержит дополнительные нормализованные ограничения и не покрывает весь текущий срез.",
             "final_usable": False,
         }
-    if dump_filter in expected_filter:
+    if relation == "broader":
         return {
             "status": "compatible_superset",
             "label": "dump шире текущего среза",
-            "reason": "Dump потенциально можно использовать с локальными фильтрами, но для финального анализа требуется проверка mart-фильтров.",
+            "reason": "Dump шире текущего среза по нормализованным условиям; текущие ограничения можно применить локально на mart-слое.",
             "final_usable": bool(dump.get("allowed_for_final_analysis")),
+        }
+    if relation == "overlap":
+        return {
+            "status": "partial_overlap",
+            "label": "частичное пересечение",
+            "reason": "Фильтры частично пересекаются, но ни один срез не покрывает другой полностью.",
+            "final_usable": False,
         }
     return {
         "status": "incompatible",
         "label": "несовместим",
-        "reason": "Фильтр/signature dump не совпадает с текущим срезом.",
+        "reason": "Фильтр/signature dump не совпадает с текущим срезом и не образует строгий superset/subset.",
         "final_usable": False,
     }
 

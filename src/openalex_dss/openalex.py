@@ -273,11 +273,36 @@ def cli_download_signature(cfg: SliceConfig) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def download_consistency(cfg: SliceConfig) -> dict[str, Any]:
+def api_cursor_download_signature(cfg: SliceConfig) -> str:
+    canonical = json.dumps(
+        {"request": corpus_request(cfg), "select": _works_select_fields(cfg), "tool": "openalex_api_cursor"},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def ids_hydrate_download_signature(cfg: SliceConfig) -> str:
+    canonical = json.dumps({"request": corpus_request(cfg), "tool": "openalex_ids_then_hydrate"}, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def download_signature_for_strategy(cfg: SliceConfig, source_strategy: str) -> str:
+    strategy = str(source_strategy or "openalex_cli")
+    if strategy in {"openalex_api", "api_cursor_selected_fields"}:
+        return api_cursor_download_signature(cfg)
+    if strategy == "ids_then_hydrate":
+        return ids_hydrate_download_signature(cfg)
+    return cli_download_signature(cfg)
+
+
+def download_consistency(cfg: SliceConfig, source_strategy: str = "openalex_cli") -> dict[str, Any]:
     reasons: list[str] = []
-    if cfg.filter_mode == "search" and cfg.text_search_query.strip():
+    strategy = str(source_strategy or "openalex_cli")
+    if strategy == "openalex_cli" and cfg.filter_mode == "search" and cfg.text_search_query.strip():
         reasons.append("Установленный загрузчик OpenAlex поддерживает фильтры, но не текстовый поиск API; выберите тему, организацию, автора, источник или другой структурированный фильтр.")
     compatible = not reasons
+    signature = download_signature_for_strategy(cfg, strategy)
     return {
         "compatible": compatible,
         "download_equivalence": {
@@ -286,9 +311,9 @@ def download_consistency(cfg: SliceConfig) -> dict[str, Any]:
             "reasons": reasons,
         },
         "estimate_signature": corpus_signature(cfg),
-        "download_signature": cli_download_signature(cfg),
+        "download_signature": signature,
         "corpus_signature": corpus_signature(cfg),
-        "tool": "openalex_cli",
+        "tool": strategy,
         "reasons": reasons,
     }
 

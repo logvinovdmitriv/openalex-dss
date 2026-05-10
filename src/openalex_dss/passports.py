@@ -114,7 +114,7 @@ def build_passports(
             "f5": "count(works where cited_by_count >= 5)",
             "fm5": "sum(credit_weight for works where cited_by_count >= 5)",
         },
-        "percentile_activity_citation_formula": {
+        "pci_percentile_composite": {
             "metric_id": "iupv",
             "formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
             "percentile_scope": "current slice within each fraction_mode",

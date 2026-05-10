@@ -2,7 +2,7 @@ version: "1.0"
 sources:
   - id: openalex_api
     label: "OpenAlex API"
-    role: "Поиск сущностей, оценка объема среза, справочники и точечное обогащение ORCID/ROR/DOI. Не используется для скачивания полного среза."
+    role: "Поиск сущностей, оценка объема, справочники, cursor-загрузка небольших/средних срезов с select-проекцией и точечная гидратация работ по ID."
     status: "implemented"
     default: false
     supports:
@@ -11,6 +11,8 @@ sources:
       - group_by_estimate
       - sample_estimate
       - select_fields
+      - cursor_download
+      - ids_then_hydrate
   - id: openalex_cli
     label: "Загрузчик OpenAlex"
     role: "Официальное скачивание выбранных работ OpenAlex с возобновлением и параллельной загрузкой; установленный загрузчик требует ключ OpenAlex."

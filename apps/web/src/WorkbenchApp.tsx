@@ -441,7 +441,7 @@ function Workbench() {
   const fractionModeOptions = configuredOptions(catalog.data?.fraction_modes ?? []);
   const displayFractionModeOptions = fractionModeOptions.length ? fractionModeOptions : FRACTION_MODE_OPTIONS;
   const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
-    .filter((item) => ["openalex_cli"].includes(item.value));
+    .filter((item) => ["openalex_cli", "openalex_api", "api_cursor_selected_fields", "ids_then_hydrate"].includes(item.value));
   const backendCliApiKeyConfigured = Boolean(catalog.data?.openalex_cli?.api_key_configured);
   const openAlexDownloadKeyRequired = Boolean(catalog.data?.openalex_cli?.api_key_required_for_remote_download ?? true);
   const defaultStorageProfileId = String(defaultOption(storageProfileOptions)?.value ?? "minimal_analytics");

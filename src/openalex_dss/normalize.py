@@ -79,6 +79,24 @@ WORK_TOPIC_FIELDS = [
     "is_primary",
 ]
 
+AUTHOR_INSTITUTION_FIELDS = [
+    "work_id",
+    "author_id",
+    "author_seq",
+    "institution_id",
+    "institution_display_name",
+    "ror",
+    "country_code",
+    "institution_type",
+]
+
+AUTHOR_COUNTRY_FIELDS = [
+    "work_id",
+    "author_id",
+    "author_seq",
+    "country_code",
+]
+
 
 @contextmanager
 def _csv_writer(path: str | Path, fieldnames: list[str]) -> Iterator[csv.DictWriter]:
@@ -99,6 +117,8 @@ def normalize_raw(
     authorships_out: str | Path = "data/dumps/local/normalized/authorships_flat.csv",
     quality_out: str | Path = "data/dumps/local/quality_report.json",
     work_topics_out: str | Path = "data/dumps/local/normalized/work_topics_flat.csv",
+    author_institutions_out: str | Path = "data/dumps/local/normalized/author_institutions_flat.csv",
+    author_countries_out: str | Path = "data/dumps/local/normalized/author_countries_flat.csv",
 ) -> dict[str, Any]:
     work_ids_seen: set[str] = set()
 
@@ -107,11 +127,15 @@ def normalize_raw(
     works_count = 0
     authorship_count = 0
     work_topic_count = 0
+    author_institution_count = 0
+    author_country_count = 0
 
     with (
         _csv_writer(works_out, WORK_FIELDS) as works_writer,
         _csv_writer(authorships_out, AUTHORSHIP_FIELDS) as authorship_writer,
         _csv_writer(work_topics_out, WORK_TOPIC_FIELDS) as work_topic_writer,
+        _csv_writer(author_institutions_out, AUTHOR_INSTITUTION_FIELDS) as author_institution_writer,
+        _csv_writer(author_countries_out, AUTHOR_COUNTRY_FIELDS) as author_country_writer,
     ):
         for work in iter_jsonl(raw_path):
             raw_works += 1
@@ -228,6 +252,40 @@ def normalize_raw(
                 country_codes = authorship.get("countries") or [
                     inst.get("country_code") for inst in institutions if inst.get("country_code")
                 ]
+                normalized_country_codes = sorted(set(filter(None, country_codes)))
+                for inst in institutions:
+                    institution_id = inst.get("id")
+                    if not institution_id:
+                        continue
+                    author_institution_writer.writerow(
+                        _csv_row(
+                            {
+                                "work_id": work_id,
+                                "author_id": author_id,
+                                "author_seq": seq,
+                                "institution_id": institution_id,
+                                "institution_display_name": inst.get("display_name"),
+                                "ror": inst.get("ror"),
+                                "country_code": inst.get("country_code"),
+                                "institution_type": inst.get("type"),
+                            },
+                            AUTHOR_INSTITUTION_FIELDS,
+                        )
+                    )
+                    author_institution_count += 1
+                for country_code in normalized_country_codes:
+                    author_country_writer.writerow(
+                        _csv_row(
+                            {
+                                "work_id": work_id,
+                                "author_id": author_id,
+                                "author_seq": seq,
+                                "country_code": country_code,
+                            },
+                            AUTHOR_COUNTRY_FIELDS,
+                        )
+                    )
+                    author_country_count += 1
                 strict_weight = 1.0 / raw_count if raw_count > 0 else None
                 renorm_weight = 1.0 / valid_count if valid_count > 0 and not (qf_null or qf_deleted) else None
 
@@ -243,7 +301,7 @@ def normalize_raw(
                             "raw_author_name": authorship.get("raw_author_name"),
                             "is_corresponding": authorship.get("is_corresponding"),
                             "institution_ids_csv": "|".join(institution_ids),
-                            "country_codes_csv": "|".join(sorted(set(filter(None, country_codes)))),
+                            "country_codes_csv": "|".join(normalized_country_codes),
                             "authorships_count_raw": raw_count,
                             "authors_count_reported": authors_count_reported,
                             "valid_author_ids_count": valid_count,
@@ -264,12 +322,16 @@ def normalize_raw(
     _write_parquet_from_csv(works_out, WORK_FIELDS, works_count)
     _write_parquet_from_csv(authorships_out, AUTHORSHIP_FIELDS, authorship_count)
     _write_parquet_from_csv(work_topics_out, WORK_TOPIC_FIELDS, work_topic_count)
+    _write_parquet_from_csv(author_institutions_out, AUTHOR_INSTITUTION_FIELDS, author_institution_count)
+    _write_parquet_from_csv(author_countries_out, AUTHOR_COUNTRY_FIELDS, author_country_count)
 
     report = {
         "raw_works": raw_works,
         "works_rows": works_count,
         "authorship_rows": authorship_count,
         "work_topic_rows": work_topic_count,
+        "author_institution_rows": author_institution_count,
+        "author_country_rows": author_country_count,
         "quality_counts": dict(sorted(quality.items())),
         "notes": [
             "strict_authors_count uses authors_count_reported when OpenAlex provides it; otherwise it falls back to observed authorships_count_raw.",

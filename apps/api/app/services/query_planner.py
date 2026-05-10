@@ -19,7 +19,7 @@ from app.services.work_type_labels import format_work_types
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from openalex_dss.openalex import build_filter, cli_download_signature, corpus_signature, estimate_works  # noqa: E402
+from openalex_dss.openalex import build_filter, cli_download_signature, corpus_signature, download_consistency, download_signature_for_strategy, estimate_works  # noqa: E402
 
 
 CONFIG_PATH = ROOT / "configs/execution_limits.yaml"
@@ -27,18 +27,25 @@ CONFIG_PATH = ROOT / "configs/execution_limits.yaml"
 
 def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
     cfg = author_slice.config_from_payload({**payload, "workflow_mode": "strict_works"})
+    source_strategy = str(payload.get("source_strategy") or payload.get("data_source_id") or "openalex_cli")
     limits = load_execution_limits()
     download_policy = _download_policy(payload, limits)
     refresh_requested = bool(payload.get("refresh_estimate"))
     estimate, estimate_cache = _cached_estimate(cfg, limits, refresh=refresh_requested, api_key=str(payload.get("api_key") or "").strip())
+    estimate = _estimate_for_source_strategy(estimate, cfg, source_strategy)
 
     storage_estimate = storage_estimate_from_openalex_estimate(estimate, download_dir=str(payload.get("download_dir") or ""))
+    storage_estimate = apply_estimate_calibration(storage_estimate, estimate)
     decision = choose_strategy(
         estimate_count=int(estimate["estimate_count"]),
         planned_api_requests=int(estimate["api_requests_planned"]),
         estimated_raw_bytes=int(storage_estimate.get("recommended_free_space_bytes") or estimate.get("estimated_cli_metadata_bytes") or estimate["estimated_raw_bytes"]),
         limits=limits,
     )
+    if source_strategy in {"openalex_api", "api_cursor_selected_fields"}:
+        decision = {**decision, "strategy": "api_cursor_selected_fields", "notebook_policy": "Срез будет скачан через OpenAlex API cursor с select-проекцией. Для очень крупных срезов предпочтительнее локальный snapshot/CLI или уже скачанный dump."}
+    elif source_strategy == "ids_then_hydrate":
+        decision = {**decision, "strategy": "ids_then_hydrate", "notebook_policy": "Система скачает singleton Works по заранее заданному списку OpenAlex work IDs."}
     consistency = estimate.get("download_consistency") or {}
     if consistency.get("compatible") is False:
         reasons = [str(item) for item in consistency.get("reasons") or [] if str(item).strip()]
@@ -64,6 +71,7 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
             "work_type": format_work_types(cfg.work_type),
         },
         "openalex_filter": build_filter(cfg),
+        "source_strategy": source_strategy,
         "estimate": estimate,
         "storage_estimate": storage_estimate,
         "estimate_cache": estimate_cache,
@@ -71,6 +79,25 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
         "download_policy": download_policy,
         "limits": limits,
         "filter_classes": classify_filters(cfg),
+    }
+
+
+def _estimate_for_source_strategy(estimate: dict[str, Any], cfg: Any, source_strategy: str) -> dict[str, Any]:
+    source_strategy = str(source_strategy or "openalex_cli")
+    signature = download_signature_for_strategy(cfg, source_strategy)
+    consistency = download_consistency(cfg, source_strategy)
+    signatures = {
+        "openalex_cli": cli_download_signature(cfg),
+        "openalex_api": download_signature_for_strategy(cfg, "openalex_api"),
+        "api_cursor_selected_fields": download_signature_for_strategy(cfg, "api_cursor_selected_fields"),
+        "ids_then_hydrate": download_signature_for_strategy(cfg, "ids_then_hydrate"),
+    }
+    return {
+        **estimate,
+        "download_signature": signature,
+        "download_signatures": signatures,
+        "download_consistency": consistency,
+        "source_strategy": source_strategy,
     }
 
 
@@ -254,6 +281,84 @@ def storage_estimate_from_openalex_estimate(estimate: dict[str, Any], *, downloa
             else "Свободного места меньше рекомендованного пикового объема. Сузьте срез, выберите другой диск или задайте лимит загрузки."
         ),
     }
+
+
+def apply_estimate_calibration(storage_estimate: dict[str, Any], estimate: dict[str, Any]) -> dict[str, Any]:
+    calibration = _calibration_summary()
+    multiplier = float(calibration.get("recommended_multiplier") or 1.0)
+    if multiplier <= 1.0:
+        return {**storage_estimate, "calibration": calibration}
+    adjusted = dict(storage_estimate)
+    for field in ("recommended_free_space_bytes", "cli_temp_files_peak_bytes", "final_raw_jsonl_gz_bytes", "parquet_tables_bytes"):
+        adjusted[field] = int(float(adjusted.get(field) or 0) * multiplier)
+    adjusted["recommended_free_space_mb"] = round(int(adjusted.get("recommended_free_space_bytes") or 0) / (1024 * 1024), 3)
+    free = int(adjusted.get("free_space_bytes") or 0)
+    required = int(adjusted.get("recommended_free_space_bytes") or 0)
+    if free > 0 and required > 0:
+        adjusted["free_space_status"] = "ok" if free >= required else "insufficient"
+    adjusted["calibration"] = calibration
+    adjusted["message"] = (
+        f"{adjusted.get('message', '')} Применена историческая поправка прогноза x{multiplier:.2f} "
+        f"по {int(calibration.get('samples') or 0)} завершенным загрузкам."
+    ).strip()
+    return adjusted
+
+
+def record_estimate_calibration(dump_manifest: dict[str, Any], estimate: dict[str, Any]) -> None:
+    actual = int(dump_manifest.get("bytes_written") or 0)
+    estimated = int(dump_manifest.get("estimated_raw_bytes") or estimate.get("estimated_cli_metadata_bytes") or estimate.get("estimated_raw_bytes") or 0)
+    if actual <= 0 or estimated <= 0:
+        return
+    record = {
+        "schema": "download_estimate_calibration_v1",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "slice_id": dump_manifest.get("slice_id"),
+        "dump_id": dump_manifest.get("dump_id"),
+        "source_mode": dump_manifest.get("source_mode"),
+        "records_expected": dump_manifest.get("records_expected"),
+        "records_downloaded": dump_manifest.get("records_downloaded"),
+        "estimated_bytes": estimated,
+        "actual_bytes": actual,
+        "ratio": round(actual / estimated, 6),
+        "estimate_signature": estimate.get("estimate_signature") or ((dump_manifest.get("signatures") or {}).get("estimate_signature")),
+        "download_signature": estimate.get("download_signature") or ((dump_manifest.get("signatures") or {}).get("download_signature")),
+    }
+    path = _calibration_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _calibration_summary() -> dict[str, Any]:
+    path = _calibration_log_path()
+    if not path.is_file():
+        return {"status": "not_enough_history", "samples": 0, "recommended_multiplier": 1.0}
+    ratios: list[float] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines()[-200:]:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            ratio = float(record.get("ratio") or 0.0)
+            if ratio > 0:
+                ratios.append(ratio)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {"status": "invalid_history", "samples": 0, "recommended_multiplier": 1.0}
+    if len(ratios) < 2:
+        return {"status": "not_enough_history", "samples": len(ratios), "recommended_multiplier": 1.0}
+    ratios.sort()
+    index = min(len(ratios) - 1, int(round((len(ratios) - 1) * 0.75)))
+    multiplier = max(1.0, min(5.0, ratios[index] * 1.15))
+    return {
+        "status": "applied",
+        "samples": len(ratios),
+        "p75_actual_vs_estimated": ratios[index],
+        "recommended_multiplier": round(multiplier, 4),
+    }
+
+
+def _calibration_log_path() -> Path:
+    return DATA / "cache" / "estimate_calibration" / "download_estimate_calibration.jsonl"
 
 
 def classify_filters(cfg: Any) -> dict[str, list[str]]:

@@ -35,6 +35,8 @@ _SEARCHABLE_FIELDS_BY_TABLE = {
     "authorships": {"author_display_name", "author_id", "work_id", "institution_display_name"},
     "author_work": {"author_display_name", "author_id", "work_id", "work_display_name"},
     "work_topics": {"work_id", "topic_display_name", "subfield_display_name", "field_display_name"},
+    "author_institutions": {"work_id", "author_id", "institution_id", "institution_display_name", "country_code"},
+    "author_countries": {"work_id", "author_id", "country_code"},
 }
 logger = logging.getLogger(__name__)
 
@@ -180,6 +182,11 @@ _COLUMN_LABELS: dict[str, str] = {
     "author_seq": "Позиция автора",
     "country_codes_csv": "Страны автора",
     "institution_ids_csv": "Организации автора",
+    "institution_id": "ID организации",
+    "institution_display_name": "Организация",
+    "country_code": "Страна",
+    "ror": "ROR",
+    "institution_type": "Тип организации",
     "institution_display_names_csv": "Организации автора",
     "raw_affiliation_strings_csv": "Аффилиации как в источнике",
     "authors_count_used": "Авторов учтено",
