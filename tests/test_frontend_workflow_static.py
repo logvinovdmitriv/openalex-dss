@@ -78,3 +78,8 @@ def test_collapsed_boxplot_does_not_stretch_to_extreme_values() -> None:
     assert "viewBox=\"0 0 360 260\"" in analytics
     assert "boxplotAxisValues" in analytics
     assert "className={row.collapsed ? \"boxplot-box collapsed\" : \"boxplot-box\"}" in analytics
+    assert "boxplot-caption" in analytics
+    assert "верхняя граница</text>" not in analytics
+    assert "boxplotScaleMode" in analytics
+    assert "до 95-го процентиля" in analytics
+    assert "boxplotScaleCap" in analytics

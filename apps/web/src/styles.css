@@ -693,7 +693,7 @@ input[aria-invalid="true"] {
 
 .boxplot-svg-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
   gap: 14px;
   margin-top: 14px;
 }
@@ -722,11 +722,36 @@ input[aria-invalid="true"] {
   font-weight: 800;
 }
 
+.boxplot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+  justify-content: flex-end;
+}
+
+.boxplot-actions label {
+  display: grid;
+  gap: 4px;
+  color: #607286;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.boxplot-actions select {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #fff;
+  color: var(--text);
+}
+
 .boxplot-svg {
   display: block;
   width: 100%;
   height: auto;
-  min-height: 260px;
+  min-height: 230px;
   overflow: visible;
 }
 
@@ -770,6 +795,15 @@ input[aria-invalid="true"] {
   fill: #be123c;
   stroke: #fff;
   stroke-width: 2;
+}
+
+.boxplot-caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: #607286;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .lookup-tabs {

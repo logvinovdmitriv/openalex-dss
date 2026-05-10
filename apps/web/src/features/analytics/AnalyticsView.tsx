@@ -64,6 +64,7 @@ export function AnalyticsView({
   const analyticsMetrics = metrics.length ? metrics : [metric].filter(Boolean);
   const warnings = (scientometrics?.warnings ?? []).filter((warning) => !/Кендалл|Kendall/i.test(String(warning)));
   const [showBoxplot, setShowBoxplot] = useState(true);
+  const [boxplotScaleMode, setBoxplotScaleMode] = useState<BoxplotScaleMode>("p95");
   const [authorSearch, setAuthorSearch] = useState("");
   const pageSelectedAuthorRows = selectedAuthorIndexTable(authorIndexTable, analyticsMetrics, selectedAuthorIds)?.rows ?? [];
   const selectedAuthorRows = mergeAuthorRows(savedSelectedAuthorRows, pageSelectedAuthorRows, selectedAuthorIds);
@@ -277,11 +278,21 @@ export function AnalyticsView({
                 <h2>Разброс значений</h2>
                 <p>Ящик с усами показывает медиану, квартильный диапазон Q1–Q3 и значения за пределами типичного диапазона по правилу 1,5 × IQR.</p>
               </div>
-              <button type="button" className={showBoxplot ? "choice-pill active" : "choice-pill"} onClick={() => setShowBoxplot(!showBoxplot)}>
-                {showBoxplot ? "Скрыть ящик с усами" : "Показать ящик с усами"}
-              </button>
+              <div className="boxplot-actions">
+                <label>
+                  <span>Шкала</span>
+                  <select value={boxplotScaleMode} onChange={(event) => setBoxplotScaleMode(event.target.value as BoxplotScaleMode)}>
+                    <option value="p95">до 95-го процентиля</option>
+                    <option value="p99">до 99-го процентиля</option>
+                    <option value="all">все значения</option>
+                  </select>
+                </label>
+                <button type="button" className={showBoxplot ? "choice-pill active" : "choice-pill"} onClick={() => setShowBoxplot(!showBoxplot)}>
+                  {showBoxplot ? "Скрыть ящик с усами" : "Показать ящик с усами"}
+                </button>
+              </div>
             </div>
-            {showBoxplot && <MetricBoxplotPanel payload={scientometrics} metrics={analyticsMetrics} metricLabels={metricLabels} />}
+            {showBoxplot && <MetricBoxplotPanel payload={scientometrics} metrics={analyticsMetrics} metricLabels={metricLabels} scaleMode={boxplotScaleMode} />}
           </section>
           <CorrelationMatrixPanel payload={scientometrics} method="spearman" metrics={analyticsMetrics} metricLabels={metricLabels} />
           <FindingsPanel payload={scientometrics} metricLabels={metricLabels} />
@@ -556,10 +567,13 @@ function rawDistributionRows(payload: ScientometricAnalysisPayload, metricName: 
     .filter((row) => Number.isFinite(row.center) && Number.isFinite(row.count) && row.count >= 0);
 }
 
-function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: ScientometricAnalysisPayload; metrics: string[]; metricLabels?: Record<string, string> }) {
+type BoxplotScaleMode = "p95" | "p99" | "all";
+
+function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode }: { payload: ScientometricAnalysisPayload; metrics: string[]; metricLabels?: Record<string, string>; scaleMode: BoxplotScaleMode }) {
   const rows = metrics
     .map((metricName) => {
       const boxplot = (payload.boxplots ?? {})[metricName] ?? {};
+      const descriptive = (payload.descriptive ?? {})[metricName] ?? {};
       const q1 = numberOrNull(boxplot.q1);
       const median = numberOrNull(boxplot.median);
       const q3 = numberOrNull(boxplot.q3);
@@ -572,6 +586,8 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
       const outlierValues = outlierRows.map((item) => Number(item.value)).filter(Number.isFinite).slice(0, 24);
       const left = Math.min(min as number, q1 as number, median as number, q3 as number, max as number);
       const right = Math.max(min as number, q1 as number, median as number, q3 as number, max as number);
+      const observedMax = numberOrNull(boxplot.max);
+      const scaleCap = boxplotScaleCap(scaleMode, descriptive, observedMax);
       return {
         metricName,
         min: min as number,
@@ -584,7 +600,8 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
         domainMin: left,
         domainMax: right,
         observedMin: numberOrNull(boxplot.min),
-        observedMax: numberOrNull(boxplot.max),
+        observedMax,
+        scaleCap,
         compactOutliers: Boolean(boxplot.display_outliers) || collapsed,
         collapsed,
       };
@@ -602,6 +619,7 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
       domainMax: number;
       observedMin: number | null;
       observedMax: number | null;
+      scaleCap: number | null;
       compactOutliers: boolean;
       collapsed: boolean;
     }>;
@@ -611,7 +629,8 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
   return (
     <div className="boxplot-svg-list">
       {rows.map((row) => {
-        const domain = expandedBoxplotDomain(row.domainMin, row.domainMax, row.observedMin, row.observedMax, true);
+        const scaleMax = row.scaleCap ?? row.observedMax;
+        const domain = expandedBoxplotDomain(row.domainMin, Math.min(row.domainMax, scaleMax ?? row.domainMax), row.observedMin, scaleMax, true);
         const y = (value: number) => {
           const top = 24;
           const bottom = 224;
@@ -640,7 +659,7 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
                   ? `Основная масса значений равна ${formatAnalysisValue(row.median)}`
                   : `Q1 ${formatAnalysisValue(row.q1)} · медиана ${formatAnalysisValue(row.median)} · Q3 ${formatAnalysisValue(row.q3)}`}
                 {row.outliers ? ` · отдельных значений вне основной массы ${fmt(row.outliers)}` : ""}
-                {row.observedMax !== null && row.observedMax > row.max ? ` · максимум ${formatAnalysisValue(row.observedMax)}` : ""}
+                {row.observedMax !== null ? ` · максимум ${formatAnalysisValue(row.observedMax)}` : ""}
               </span>
             </div>
             <svg viewBox="0 0 360 260" role="img" aria-label={`Ящик с усами для ${metricLabelFor(row.metricName, metricLabels)}`} className="boxplot-svg">
@@ -661,17 +680,33 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
                   <title>{`${row.compactOutliers ? "Отдельное значение вне основной массы" : "Выделяющееся значение"}: ${formatAnalysisValue(value)}`}</title>
                 </circle>
               ))}
-              <text x="76" y={maxY - 6} textAnchor="start">верхняя граница</text>
-              <text x="76" y={q3Y - 6} textAnchor="start">Q3</text>
-              <text x="76" y={medianY + 4} textAnchor="start">медиана</text>
-              <text x="76" y={q1Y + 14} textAnchor="start">Q1</text>
-              <text x="76" y={minY + 16} textAnchor="start">нижняя граница</text>
             </svg>
+            <div className="boxplot-caption">
+              <span>{boxplotScaleLabel(scaleMode, row.scaleCap)}</span>
+              <span>Нижняя граница: {formatAnalysisValue(row.min)}</span>
+              <span>Q1: {formatAnalysisValue(row.q1)}</span>
+              <span>Медиана: {formatAnalysisValue(row.median)}</span>
+              <span>Q3: {formatAnalysisValue(row.q3)}</span>
+              <span>Верхняя граница: {formatAnalysisValue(row.max)}</span>
+            </div>
           </div>
         );
       })}
     </div>
   );
+}
+
+function boxplotScaleCap(mode: BoxplotScaleMode, descriptive: Record<string, unknown>, observedMax: number | null) {
+  if (mode === "all") return observedMax;
+  const percentile = numberOrNull(mode === "p99" ? descriptive.p99 : descriptive.p95);
+  if (percentile === null) return observedMax;
+  if (observedMax === null) return percentile;
+  return Math.min(observedMax, percentile);
+}
+
+function boxplotScaleLabel(mode: BoxplotScaleMode, cap: number | null) {
+  if (mode === "all") return "Шкала: все значения";
+  return `Шкала: до ${mode === "p99" ? "99-го" : "95-го"} процентиля${cap !== null ? ` (${formatAnalysisValue(cap)})` : ""}`;
 }
 
 function expandedBoxplotDomain(domainMin: number, domainMax: number, observedMin: number | null, observedMax: number | null, includeObservedSpread = true) {
