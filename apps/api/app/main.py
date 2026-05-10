@@ -225,7 +225,7 @@ def _http_error_title(status_code: int) -> str:
         502: "Внешний источник недоступен",
         503: "Сервис временно недоступен",
     }
-    return titles.get(status_code, "Ошибка API")
+    return titles.get(status_code, "Ошибка запроса")
 
 
 def _http_error_action(status_code: int) -> str:

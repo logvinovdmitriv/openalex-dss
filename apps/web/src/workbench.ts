@@ -582,13 +582,14 @@ export function localDataSchemaUrl(kind: LocalDataKind, runId = "", dumpId = "")
   return `/local-data/schema?${params.toString()}`;
 }
 
-export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number; offset?: number; sort?: string; direction?: string; fractionMode?: string; dataFilters?: TableColumnFilters } = {}) {
+export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; runId?: string; dumpId?: string; limit?: number; offset?: number; cursor?: string; sort?: string; direction?: string; fractionMode?: string; dataFilters?: TableColumnFilters } = {}) {
   const query = new URLSearchParams({ kind });
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.runId) query.set("run_id", params.runId);
   if (params.dumpId) query.set("dump_id", params.dumpId);
   if (params.limit !== undefined) query.set("limit", String(Math.max(0, Number(params.limit) || 0)));
   if (params.offset !== undefined) query.set("offset", String(Math.max(0, Number(params.offset) || 0)));
+  if (params.cursor) query.set("cursor", params.cursor);
   if (params.sort) {
     query.set("sort", params.sort);
     if (params.direction) query.set("direction", params.direction);

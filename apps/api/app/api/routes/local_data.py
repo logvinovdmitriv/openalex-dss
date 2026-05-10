@@ -80,6 +80,7 @@ def local_data_preview(
     direction: str = "desc",
     limit: int = Query(100, ge=0, le=500_000),
     offset: int = Query(0, ge=0),
+    cursor: str = "",
 ) -> dict[str, Any]:
     table = _local_data_kind(kind)
     _require_local_data_scope(run_id=run_id, dump_id=dump_id)
@@ -87,6 +88,7 @@ def local_data_preview(
     try:
         parsed_data_filters = warehouse.parse_column_filters(data_filters)
         effective_limit = _preview_limit(limit)
+        cursor_arg = {"cursor": cursor} if str(cursor or "").strip() else {}
         payload = warehouse.query_table(
             table,
             run_id=run_id,
@@ -101,6 +103,7 @@ def local_data_preview(
             direction=direction,
             limit=effective_limit,
             offset=offset,
+            **cursor_arg,
             include_total=False,
         )
     except ValueError as exc:

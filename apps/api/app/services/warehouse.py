@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import base64
 import hashlib
 import json
 import logging
@@ -443,6 +444,7 @@ def query_table(
     direction: str = "desc",
     limit: int = 100,
     offset: int = 0,
+    cursor: str = "",
     select_fields: list[str] | tuple[str, ...] | set[str] | None = None,
     include_total: bool = True,
 ) -> dict[str, Any]:
@@ -482,6 +484,7 @@ def query_table(
             direction=direction,
             limit=limit,
             offset=offset,
+            cursor=cursor,
             select_fields=select_fields,
             include_total=include_total,
         )
@@ -508,6 +511,7 @@ def _query_registered_table(
     direction: str = "desc",
     limit: int = 100,
     offset: int = 0,
+    cursor: str = "",
     select_fields: list[str] | tuple[str, ...] | set[str] | None = None,
     include_total: bool = True,
 ) -> dict[str, Any]:
@@ -528,34 +532,47 @@ def _query_registered_table(
     selected_fields = _selected_table_fields(fields, select_fields)
     select_sql = ", ".join(selected_fields) if selected_fields else "*"
     raw_limit = max(0, min(500_000, int(limit or 0)))
-    offset = max(0, int(offset))
+    requested_offset = max(0, int(offset))
+    sql_offset = requested_offset
+    total_where_sql = where_sql
+    total_args = list(args)
+    cursor_payload = _decode_page_cursor(cursor)
+    cursor_active = False
+    if cursor_payload and sort and cursor_payload.get("sort") == sort and cursor_payload.get("direction") == ("asc" if str(direction).lower() == "asc" else "desc"):
+        keyset_sql, keyset_args = _keyset_where_clause(fields, sort, direction, cursor_payload.get("values") or {})
+        if keyset_sql:
+            where_sql = f"{where_sql} AND {keyset_sql}" if where_sql else f"WHERE {keyset_sql}"
+            args.extend(keyset_args)
+            sql_offset = 0
+            cursor_active = True
 
     total: int | None = None
     if include_total:
-        total = int(conn.execute(f"SELECT count(*) FROM {table} {where_sql}", args).fetchone()[0])
+        total = int(conn.execute(f"SELECT count(*) FROM {table} {total_where_sql}", total_args).fetchone()[0])
 
-    fetch_limit = raw_limit + 1 if raw_limit > 0 and not include_total else raw_limit
+    fetch_limit = raw_limit + 1 if raw_limit > 0 and (cursor_active or not include_total) else raw_limit
     if raw_limit > 0:
         rel = conn.execute(
             f"SELECT {select_sql} FROM {table} {where_sql} {order_sql} LIMIT ? OFFSET ?",
-            [*args, fetch_limit, offset],
+            [*args, fetch_limit, sql_offset],
         )
         effective_limit = raw_limit
     else:
         rel = conn.execute(
             f"SELECT {select_sql} FROM {table} {where_sql} {order_sql} OFFSET ?",
-            [*args, offset],
+            [*args, sql_offset],
         )
         effective_limit = 0
     max_in_memory_rows = (max(fetch_limit, raw_limit) + 1) if raw_limit > 0 else 500_000
     rows = _records(rel, max_rows=max_in_memory_rows)
     has_more = False
-    if not include_total and raw_limit > 0 and len(rows) > raw_limit:
+    if raw_limit > 0 and len(rows) > raw_limit:
         has_more = True
         rows = rows[:raw_limit]
     elif include_total and total is not None and raw_limit > 0:
-        has_more = offset + len(rows) < total
-    next_offset = offset + len(rows) if has_more else None
+        has_more = requested_offset + len(rows) < total if not cursor_active else False
+    next_offset = requested_offset + len(rows) if has_more else None
+    next_cursor = _encode_next_cursor(rows[-1], fields, sort=sort, direction=direction) if has_more and rows and sort else None
     payload = {
         "table": table,
         "fields": selected_fields or fields,
@@ -564,8 +581,10 @@ def _query_registered_table(
         "total_exact": bool(include_total),
         "has_more": has_more,
         "next_offset": next_offset,
+        "next_cursor": next_cursor,
+        "cursor": cursor_payload.get("token") if cursor_payload else "",
         "limit": effective_limit,
-        "offset": offset,
+        "offset": requested_offset,
     }
     elapsed = time.perf_counter() - started
     if elapsed >= _SLOW_QUERY_SECONDS:
@@ -575,7 +594,7 @@ def _query_registered_table(
             sort or "",
             direction,
             limit,
-            offset,
+            requested_offset,
             bool(include_total),
             elapsed,
         )
@@ -644,13 +663,83 @@ def _searchable_fields(table: str, fields: list[str] | set[str]) -> list[str]:
 
 
 def _stable_order_sql(fields: list[str] | set[str], sort: str, direction: str = "desc") -> str:
+    order = [f"{_quote_sql_identifier(field)} {field_direction}" for field, field_direction in _stable_order_fields(fields, sort, direction)]
+    return "ORDER BY " + ", ".join(order)
+
+
+def _stable_order_fields(fields: list[str] | set[str], sort: str, direction: str = "desc") -> list[tuple[str, str]]:
     field_set = set(fields)
+    if sort not in field_set:
+        return []
     safe_direction = "DESC" if str(direction or "desc").strip().lower() == "desc" else "ASC"
-    order: list[str] = [f"{_quote_sql_identifier(sort)} {safe_direction}"]
+    order: list[tuple[str, str]] = [(sort, safe_direction)]
     for tie_field, tie_direction in (("c", "DESC"), ("p", "DESC"), ("author_display_name", "ASC"), ("author_id", "ASC"), ("work_id", "ASC")):
         if tie_field in field_set and tie_field != sort:
-            order.append(f"{_quote_sql_identifier(tie_field)} {tie_direction}")
-    return "ORDER BY " + ", ".join(order)
+            order.append((tie_field, tie_direction))
+    return order
+
+
+def _decode_page_cursor(token: str) -> dict[str, Any]:
+    raw = str(token or "").strip()
+    if not raw:
+        return {}
+    try:
+        padding = "=" * (-len(raw) % 4)
+        payload = json.loads(base64.urlsafe_b64decode((raw + padding).encode("ascii")).decode("utf-8"))
+    except (ValueError, OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {**payload, "token": raw}
+
+
+def _encode_next_cursor(row: dict[str, Any], fields: list[str] | set[str], *, sort: str, direction: str) -> str | None:
+    order_fields = _stable_order_fields(fields, sort, direction)
+    if not order_fields:
+        return None
+    values = {field: _cursor_value(row.get(field)) for field, _ in order_fields if field in row}
+    if not values:
+        return None
+    payload = {
+        "v": 1,
+        "sort": sort,
+        "direction": "asc" if str(direction or "").strip().lower() == "asc" else "desc",
+        "values": values,
+    }
+    encoded = base64.urlsafe_b64encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).decode("ascii")
+    return encoded.rstrip("=")
+
+
+def _cursor_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _keyset_where_clause(fields: list[str] | set[str], sort: str, direction: str, values: dict[str, Any]) -> tuple[str, list[Any]]:
+    order_fields = _stable_order_fields(fields, sort, direction)
+    if not order_fields or not isinstance(values, dict):
+        return "", []
+    clauses: list[str] = []
+    args: list[Any] = []
+    equality_prefix: list[str] = []
+    for field, field_direction in order_fields:
+        if field not in values:
+            break
+        column = _quote_sql_identifier(field)
+        comparator = ">" if field_direction == "ASC" else "<"
+        prefix = " AND ".join(equality_prefix)
+        clause = f"{column} {comparator} ?"
+        clauses.append(f"({prefix} AND {clause})" if prefix else f"({clause})")
+        args.extend([*values_for_prefix(values, order_fields[: len(equality_prefix)]), values[field]])
+        equality_prefix.append(f"{column} = ?")
+    if not clauses:
+        return "", []
+    return "(" + " OR ".join(clauses) + ")", args
+
+
+def values_for_prefix(values: dict[str, Any], order_fields: list[tuple[str, str]]) -> list[Any]:
+    return [values[field] for field, _ in order_fields if field in values]
 
 
 def _selected_table_fields(fields: list[str], select_fields: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
@@ -2312,6 +2401,24 @@ def metric_distribution(
 ) -> dict[str, Any]:
     if not _metric_supported(metric, custom_metric_defs):
         raise ValueError(f"Unsupported metric: {metric}")
+    sql_payload = _metric_distribution_sql_payload(
+        fraction_mode,
+        metric,
+        filters,
+        run_id=run_id,
+        dump_id=dump_id,
+        author_ids=author_ids,
+        data_filters=data_filters,
+        data_kind=data_kind,
+        data_search=data_search,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
+        custom_metric_defs=custom_metric_defs,
+    )
+    if sql_payload is not None:
+        sql_payload["analytics_cache"] = analytics_cache_info()
+        return sql_payload
     rows = selected_index_rows(
         fraction_mode,
         filters,
@@ -2329,6 +2436,249 @@ def metric_distribution(
     payload = metric_distribution_from_rows(rows, fraction_mode, metric, run_id=run_id, dump_id=dump_id, custom_metric_defs=custom_metric_defs)
     payload["analytics_cache"] = analytics_cache_info()
     return payload
+
+
+def _metric_distribution_sql_payload(
+    fraction_mode: str,
+    metric: str,
+    filters: FilterSet | None = None,
+    *,
+    run_id: str,
+    dump_id: str,
+    author_ids: set[str] | list[str] | tuple[str, ...] | None,
+    data_filters: dict[str, Any] | None,
+    data_kind: str,
+    data_search: str,
+    data_sort: str,
+    data_direction: str,
+    data_limit: int,
+    custom_metric_defs: list[dict[str, str]] | None,
+) -> dict[str, Any] | None:
+    parsed_filters = parse_column_filters(data_filters)
+    data_kind = _normalize_data_kind(data_kind)
+    if data_kind != "indices" and (parsed_filters or str(data_search or "").strip()):
+        return None
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
+    source_path: Path | None = None
+    source_is_cached = False
+    cache_was_created = False
+    if _can_use_precomputed_indices(filters, run_id=run_id, dump_id=dump_id):
+        _set_analytics_cache_info({"status": "not_used", "key": "", "rows": count_rows("indices", run_id=run_id, dump_id=dump_id)})
+    else:
+        cached = _filtered_indices_cache_hit(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+        if not cached:
+            filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+            cached = _filtered_indices_cache_hit(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+            cache_was_created = True
+        if not cached:
+            return None
+        source_path = cached["indices_path"]
+        source_is_cached = True
+
+    if source_is_cached and source_path is not None:
+        conn = duckdb.connect(":memory:")
+        escaped = str(source_path).replace("'", "''")
+        conn.execute(f"CREATE VIEW distribution_indices AS SELECT * FROM read_parquet('{escaped}')")
+        close_conn = True
+    else:
+        conn = connect_scope(run_id=run_id, dump_id=dump_id)
+        conn.execute("CREATE OR REPLACE VIEW distribution_indices AS SELECT * FROM indices")
+        close_conn = True
+    try:
+        fields = _registered_fields(conn, "distribution_indices")
+        table_name = "distribution_indices"
+        if custom_metric_defs:
+            table_name, field_set = _register_custom_metric_view(conn, "distribution_indices", "distribution_indices_with_custom_metrics", fields, custom_metric_defs)
+            fields = list(field_set)
+        if metric not in set(fields):
+            raise ValueError(f"Unsupported metric: {metric}")
+        source_sql, args = _distribution_source_sql(
+            table_name,
+            fields,
+            fraction_mode=fraction_mode,
+            author_ids=author_ids,
+            data_filters=parsed_filters,
+            data_search=data_search,
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=data_limit,
+        )
+        metric_sql = _quote_sql_identifier(metric)
+        stats_sql = f"""
+WITH selected_indices AS ({source_sql}),
+metric_values AS (
+    SELECT TRY_CAST({metric_sql} AS DOUBLE) AS value
+    FROM selected_indices
+    WHERE TRY_CAST({metric_sql} AS DOUBLE) IS NOT NULL
+)
+SELECT
+    COUNT(*) AS n,
+    COALESCE(MIN(value), 0.0) AS min,
+    COALESCE(quantile_cont(value, 0.25), 0.0) AS q1,
+    COALESCE(quantile_cont(value, 0.50), 0.0) AS median,
+    COALESCE(AVG(value), 0.0) AS mean,
+    COALESCE(quantile_cont(value, 0.75), 0.0) AS q3,
+    COALESCE(quantile_cont(value, 0.90), 0.0) AS p90,
+    COALESCE(MAX(value), 0.0) AS max,
+    COALESCE(STDDEV_SAMP(value), 0.0) AS stddev,
+    COUNT(DISTINCT value) AS unique_count,
+    COUNT(*) FILTER (WHERE value = 0.0) AS zero_count
+FROM metric_values
+"""
+        stats_row = conn.execute(stats_sql, args).fetchone()
+        stats = _distribution_stats_row(stats_row)
+        readiness = _chart_readiness_from_stats(stats, chart_type="distribution")
+        stats["chart_readiness"] = readiness
+        stats["histogram"] = _metric_histogram_sql(conn, source_sql, args, metric_sql, bins=8) if readiness.get("status") == "ok" else []
+        stats.update(
+            {
+                "run_id": run_id,
+                "dump_id": dump_id,
+                "metric_scope": "filtered_recomputed",
+                "execution_engine": "duckdb_sql_full_filtered_slice",
+                "percentile_scope": "current filtered author set",
+                "metric_params": _run_metric_params(run_id),
+                "custom_metrics": custom_metrics.metric_catalog(custom_metric_defs),
+            }
+        )
+        if cache_was_created and source_path is not None:
+            cached_rows = count_rows("indices", run_id=run_id, dump_id=dump_id)
+            _set_analytics_cache_info({"status": "miss", "key": source_path.parent.name, "rows": cached_rows})
+        return stats
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def _distribution_source_sql(
+    table_name: str,
+    fields: list[str],
+    *,
+    fraction_mode: str,
+    author_ids: set[str] | list[str] | tuple[str, ...] | None,
+    data_filters: dict[str, Any],
+    data_search: str,
+    data_sort: str,
+    data_direction: str,
+    data_limit: int,
+) -> tuple[str, list[Any]]:
+    field_set = set(fields)
+    where: list[str] = []
+    args: list[Any] = []
+    if fraction_mode and "fraction_mode" in field_set:
+        where.append("fraction_mode = ?")
+        args.append(fraction_mode)
+    search = str(data_search or "").strip()
+    if search and len(search) >= _MIN_SEARCH_LENGTH:
+        searchable = _searchable_fields("indices", fields)
+        if searchable:
+            where.append("(" + " OR ".join([f"CAST({_quote_sql_identifier(field)} AS VARCHAR) ILIKE ?" for field in searchable]) + ")")
+            args.extend([f"%{search}%"] * len(searchable))
+    ids = _author_id_values(author_ids)
+    if ids and "author_id" in field_set:
+        where.append(f"author_id IN ({', '.join('?' for _ in ids)})")
+        args.extend(ids)
+    _append_column_filter_clauses(where, args, fields, data_filters)
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+    source_sql = f"SELECT * FROM {table_name} {where_sql}"
+    limit = max(0, min(int(data_limit or 0), 500_000))
+    if limit > 0:
+        if data_sort and data_sort in field_set:
+            source_sql = f"{source_sql} {_stable_order_sql(field_set, data_sort, data_direction)} LIMIT ?"
+        else:
+            source_sql = f"{source_sql} LIMIT ?"
+        args.append(limit)
+    return source_sql, args
+
+
+def _distribution_stats_row(row: Any) -> dict[str, Any]:
+    if not row:
+        return distribution_engine.describe([])
+    n = int(row[0] or 0)
+    zero_count = int(row[10] or 0)
+    return {
+        "n": n,
+        "min": _as_float(row[1]),
+        "q1": _as_float(row[2]),
+        "median": _as_float(row[3]),
+        "mean": _as_float(row[4]),
+        "q3": _as_float(row[5]),
+        "p90": _as_float(row[6]),
+        "max": _as_float(row[7]),
+        "stddev": _as_float(row[8]),
+        "unique_count": int(row[9] or 0),
+        "zero_count": zero_count,
+        "zero_rate": zero_count / n if n else None,
+    }
+
+
+def _chart_readiness_from_stats(stats: dict[str, Any], *, chart_type: str) -> dict[str, Any]:
+    n = int(stats.get("n") or 0)
+    unique_count = int(stats.get("unique_count") or 0)
+    zero_count = int(stats.get("zero_count") or 0)
+    base = {
+        "chart_type": chart_type,
+        "n": n,
+        "unique_count": unique_count,
+        "zero_count": zero_count,
+        "zero_rate": zero_count / n if n else None,
+    }
+    if n <= 0:
+        return {**base, "status": "no_data", "is_chartable": False, "message": "Нет числовых данных для графика."}
+    if n < 3:
+        return {**base, "status": "not_enough_rows", "is_chartable": False, "message": "Недостаточно наблюдений для графика."}
+    if unique_count <= 1:
+        if _as_float(stats.get("max")) == 0.0:
+            return {**base, "status": "all_zero", "is_chartable": False, "message": "Все значения показателя равны 0; распределение неинформативно."}
+        return {**base, "status": "constant_values", "is_chartable": False, "message": f"Все значения показателя одинаковые: {_as_float(stats.get('max')):g}."}
+    if chart_type == "boxplot" and _as_float(stats.get("q3")) - _as_float(stats.get("q1")) == 0.0:
+        return {**base, "status": "zero_iqr", "is_chartable": False, "message": "Межквартильный размах равен 0; ящик с усами неинформативен."}
+    return {**base, "status": "ok", "is_chartable": True, "message": ""}
+
+
+def _metric_histogram_sql(conn: duckdb.DuckDBPyConnection, source_sql: str, args: list[Any], metric_sql: str, *, bins: int) -> list[dict[str, Any]]:
+    bins = max(1, min(int(bins or 1), 100))
+    query = f"""
+WITH selected_indices AS ({source_sql}),
+metric_values AS (
+    SELECT TRY_CAST({metric_sql} AS DOUBLE) AS value
+    FROM selected_indices
+    WHERE TRY_CAST({metric_sql} AS DOUBLE) IS NOT NULL
+),
+bounds AS (
+    SELECT MIN(value) AS lo, MAX(value) AS hi
+    FROM metric_values
+),
+binned AS (
+    SELECT
+        CASE
+            WHEN bounds.hi = bounds.lo THEN 0
+            ELSE LEAST({bins - 1}, GREATEST(0, CAST(FLOOR((value - bounds.lo) / NULLIF((bounds.hi - bounds.lo) / {bins}, 0)) AS BIGINT)))
+        END AS bin_index,
+        COUNT(*) AS count
+    FROM metric_values, bounds
+    GROUP BY bin_index
+)
+SELECT
+    bin_index,
+    bounds.lo + bin_index * ((bounds.hi - bounds.lo) / {bins}) AS bin_min,
+    bounds.lo + (bin_index + 1) * ((bounds.hi - bounds.lo) / {bins}) AS bin_max,
+    count
+FROM binned, bounds
+ORDER BY bin_index
+"""
+    rows = _records(conn.execute(query, args), max_rows=bins + 1)
+    return [
+        {
+            "label": f"{_as_float(row.get('bin_min')):.3g}-{_as_float(row.get('bin_max')):.3g}",
+            "min": _as_float(row.get("bin_min")),
+            "max": _as_float(row.get("bin_max")),
+            "count": int(row.get("count") or 0),
+        }
+        for row in rows
+    ]
 
 
 def metric_distribution_from_rows(

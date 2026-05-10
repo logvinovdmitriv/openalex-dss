@@ -96,6 +96,86 @@ class WarehouseTests(unittest.TestCase):
 
         self.assertIn("нельзя использовать для сортировки", str(raised.exception))
 
+    def test_registered_table_uses_keyset_cursor_for_sorted_pages(self) -> None:
+        conn = warehouse.duckdb.connect(":memory:")
+        try:
+            conn.execute(
+                """
+                CREATE TABLE indices (
+                  author_id VARCHAR,
+                  author_display_name VARCHAR,
+                  h INTEGER,
+                  c INTEGER,
+                  p INTEGER,
+                  fraction_mode VARCHAR
+                )
+                """
+            )
+            conn.executemany(
+                "INSERT INTO indices VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    ("A1", "First", 5, 10, 2, "integer"),
+                    ("A2", "Second", 4, 8, 3, "integer"),
+                    ("A3", "Third", 3, 7, 4, "integer"),
+                ],
+            )
+            fields = ["author_id", "author_display_name", "h", "c", "p", "fraction_mode"]
+
+            first = warehouse._query_registered_table(
+                conn,
+                "indices",
+                fields,
+                fraction_mode="integer",
+                sort="h",
+                direction="desc",
+                limit=2,
+                include_total=True,
+            )
+            second = warehouse._query_registered_table(
+                conn,
+                "indices",
+                fields,
+                fraction_mode="integer",
+                sort="h",
+                direction="desc",
+                limit=2,
+                offset=2,
+                cursor=str(first["next_cursor"]),
+                include_total=True,
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual([row["author_id"] for row in first["rows"]], ["A1", "A2"])
+        self.assertTrue(first["has_more"])
+        self.assertTrue(first["next_cursor"])
+        self.assertEqual(first["total"], 3)
+        self.assertEqual([row["author_id"] for row in second["rows"]], ["A3"])
+        self.assertFalse(second["has_more"])
+        self.assertEqual(second["total"], 3)
+        self.assertEqual(second["offset"], 2)
+
+    def test_metric_distribution_reads_full_scope_with_duckdb_sql(self) -> None:
+        fields = ["run_id", "fraction_mode", "author_id", "author_display_name", "h", "p", "c", "c_frac", "i10", "g"]
+        rows = [
+            {"run_id": "run_a", "fraction_mode": "integer", "author_id": "A1", "author_display_name": "First", "h": 0, "p": 1, "c": 0, "c_frac": 0.0, "i10": 0, "g": 0},
+            {"run_id": "run_a", "fraction_mode": "integer", "author_id": "A2", "author_display_name": "Second", "h": 2, "p": 3, "c": 7, "c_frac": 3.5, "i10": 0, "g": 2},
+            {"run_id": "run_a", "fraction_mode": "integer", "author_id": "A3", "author_display_name": "Third", "h": 4, "p": 5, "c": 12, "c_frac": 4.0, "i10": 1, "g": 4},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "indices.parquet"
+            write_parquet_dicts(path, rows, fields)
+            with (
+                patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": "dump_a"}),
+                patch.object(warehouse, "resolve_scoped_table_path", side_effect=lambda name, **_kwargs: path if name == "indices" else None),
+            ):
+                payload = warehouse.metric_distribution("integer", "h", run_id="run_a", dump_id="dump_a")
+
+        self.assertEqual(payload["execution_engine"], "duckdb_sql_full_filtered_slice")
+        self.assertEqual(payload["n"], 3)
+        self.assertEqual(payload["median"], 2)
+        self.assertEqual(payload["chart_readiness"]["status"], "ok")
+
     def test_selected_index_rows_reads_precomputed_indices_without_slice_filters(self) -> None:
         with (
             patch.object(warehouse, "table_exists", return_value=True),

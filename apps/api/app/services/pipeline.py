@@ -183,6 +183,20 @@ def import_local_file(
         _clear_stale_dump_manifest(dump_id)
     _emit_progress(progress_callback, max(0, compute_progress_base - 4), "Нормализация локального среза", {"source_path": str(source), "dump_id": dump_id})
     quality, dump_table_sources, quality_report = _normalize_dump_to_scope(source, dump_id)
+    analysis_eligibility = _apply_quality_eligibility_guard(
+        analysis_eligibility,
+        quality,
+        dump_manifest=dump_manifest,
+    )
+    if dump_manifest:
+        dump_manifest = {
+            **dump_manifest,
+            "analysis_eligibility": analysis_eligibility,
+            "allowed_for_final_analysis": bool(analysis_eligibility.get("allowed_for_final_analysis")),
+            "quality_gate": analysis_eligibility.get("quality_gate") or {},
+        }
+        dump_manifest_path = _write_dump_manifest_if_present(dump_id, dump_manifest)
+        metadata_store.record_slice_dump(dump_manifest)
     _emit_progress(progress_callback, max(0, compute_progress_base - 2), "Подготовка таблиц среза", {"dump_id": dump_id, "works": quality.get("raw_works")})
     input_tables = _materialize_dump_tables_from_sources(dump_id, dump_table_sources)
     _cleanup_dump_staging(dump_id)
@@ -797,6 +811,49 @@ def analysis_eligibility_from_dump(dump: dict[str, Any], *, dev_override: bool =
             "compatible": bool(signatures.get("compatible")),
         },
         "warning": "" if allowed else "This analysis is not eligible for final dissertation-grade conclusions.",
+    }
+
+
+def _apply_quality_eligibility_guard(
+    eligibility: dict[str, Any],
+    quality: dict[str, Any],
+    *,
+    dump_manifest: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Apply post-normalization quality gates that are unknowable at download time."""
+    counts = quality.get("quality_counts") if isinstance(quality.get("quality_counts"), dict) else {}
+    truncated_works = int(counts.get("works_with_truncated_authorships") or 0)
+    backfill_status = str((dump_manifest or {}).get("backfill_status") or "").strip().lower()
+    if truncated_works <= 0 or backfill_status in {"complete", "completed", "not_required"}:
+        return eligibility
+    blockers = list(eligibility.get("quality_blockers") or [])
+    blockers.append(
+        {
+            "code": "truncated_authorships_require_backfill",
+            "message": (
+                "В срезе есть работы с обрезанным списком авторов. "
+                "Для финального анализа требуется восстановить authorships по singleton work records "
+                "или явно исключить такие работы политикой анализа."
+            ),
+            "works": truncated_works,
+            "required_action": "Запустите восстановление среза и повторите расчет индексов.",
+        }
+    )
+    return {
+        **eligibility,
+        "status": "blocked_backfill_required",
+        "allowed_for_final_analysis": False,
+        "warning": (
+            "Финальный анализ запрещен: обнаружены работы с обрезанным списком авторов, "
+            "а восстановление authorships не завершено."
+        ),
+        "quality_gate": {
+            "status": "blocked",
+            "reason": "truncated_authorships_require_backfill",
+            "works_with_truncated_authorships": truncated_works,
+            "backfill_status": backfill_status or "missing",
+        },
+        "quality_blockers": blockers,
     }
 
 

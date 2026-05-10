@@ -8,6 +8,8 @@ export type TableResponse = {
   total_exact?: boolean;
   has_more?: boolean;
   next_offset?: number | null;
+  next_cursor?: string | null;
+  cursor?: string;
   limit: number;
   offset: number;
   scope_status?: string;

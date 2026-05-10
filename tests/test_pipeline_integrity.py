@@ -533,6 +533,36 @@ class PipelineIntegrityTests(unittest.TestCase):
                 jobs._dispatch("run_blocked", "build_from_openalex", {"accepted_estimate_signature": "e", "accepted_download_signature": "d"})
         self.assertIn("не допущен", str(raised.exception))
 
+    def test_quality_gate_blocks_final_analysis_for_truncated_authorships_without_backfill(self) -> None:
+        eligibility = {
+            "status": "final",
+            "allowed_for_final_analysis": True,
+            "dump_id": "dump_truncated",
+        }
+        guarded = pipeline._apply_quality_eligibility_guard(
+            eligibility,
+            {"quality_counts": {"works_with_truncated_authorships": 2}},
+            dump_manifest={"dump_id": "dump_truncated"},
+        )
+
+        self.assertFalse(guarded["allowed_for_final_analysis"])
+        self.assertEqual(guarded["status"], "blocked_backfill_required")
+        self.assertEqual(guarded["quality_gate"]["works_with_truncated_authorships"], 2)
+
+    def test_quality_gate_allows_final_analysis_when_backfill_complete(self) -> None:
+        eligibility = {
+            "status": "final",
+            "allowed_for_final_analysis": True,
+            "dump_id": "dump_backfilled",
+        }
+        guarded = pipeline._apply_quality_eligibility_guard(
+            eligibility,
+            {"quality_counts": {"works_with_truncated_authorships": 2}},
+            dump_manifest={"dump_id": "dump_backfilled", "backfill_status": "complete"},
+        )
+
+        self.assertEqual(guarded, eligibility)
+
     def test_dev_unchecked_build_marks_report_not_final(self) -> None:
         dump = {
             "dump_id": "dump_dev",

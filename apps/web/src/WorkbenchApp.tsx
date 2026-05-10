@@ -142,6 +142,7 @@ function Workbench() {
   const [rankingDirection, setRankingDirection] = useState<"asc" | "desc">("desc");
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
   const [dataOffset, setDataOffset] = useState(0);
+  const [dataPageCursors, setDataPageCursors] = useState<Record<number, string>>({ 0: "" });
   const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
   const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "i10", "g", "custom_added_rating"]);
   const [baselineMetric, setBaselineMetric] = useState("h");
@@ -337,23 +338,31 @@ function Workbench() {
   }, [workbench.isFetched, workbench.isError, workflowNav.map((item) => `${item.id}:${item.unlocked}`).join("|"), view]);
   useEffect(() => {
     setDataOffset(0);
+    setDataPageCursors({ 0: "" });
   }, [localDataKind, dataSearch, dataFilterKey, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId]);
   useEffect(() => {
     const selected = new Set(selectedAuthorIds.map(String));
     setSelectedAuthorRows((rows) => rows.filter((row) => selected.has(String(row.author_id ?? ""))));
   }, [selectedAuthorIds.join("|")]);
   const effectiveDataOffset = dataOffset;
+  const effectiveDataCursor = dataPageCursors[effectiveDataOffset] ?? "";
   const dataPreviewLimit = DATA_PREVIEW_PAGE_SIZE;
-  const previewPageKey = `${effectiveDataOffset}:${dataPreviewLimit}`;
+  const previewPageKey = `${effectiveDataOffset}:${dataPreviewLimit}:${effectiveDataCursor}`;
   const rankingPreviewLimit = DATA_PREVIEW_PAGE_SIZE;
   const analysisRankTopN = 0;
   const table = useQuery({
     queryKey: ["local-data-preview", localDataKind, debouncedDataSearch, debouncedDataFilterKey, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId, previewPageKey],
-    queryFn: ({ signal }) => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: debouncedDataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: dataPreviewLimit, offset: effectiveDataOffset, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: debouncedDataColumnFilters }), { signal }),
+    queryFn: ({ signal }) => getJson<TableResponse>(localDataPreviewUrl(localDataKind, { q: debouncedDataSearch, runId: effectiveRunId, dumpId: effectiveDumpId, limit: dataPreviewLimit, offset: effectiveDataOffset, cursor: effectiveDataCursor, sort: dataSort, direction: dataDirection, fractionMode, dataFilters: debouncedDataColumnFilters }), { signal }),
     enabled: dataViewActive && scopeReady && localDataKindAvailable,
     placeholderData: (previous) => previous,
     staleTime: 60_000,
   });
+  useEffect(() => {
+    const nextCursor = String(table.data?.next_cursor ?? "");
+    if (!nextCursor || !table.data?.has_more) return;
+    const nextOffset = effectiveDataOffset + dataPreviewLimit;
+    setDataPageCursors((current) => current[nextOffset] === nextCursor ? current : { ...current, [nextOffset]: nextCursor });
+  }, [table.data?.next_cursor, table.data?.has_more, effectiveDataOffset, dataPreviewLimit]);
   const tableSchema = useQuery({
     queryKey: ["local-data-schema", localDataKind, effectiveRunId, effectiveDumpId],
     queryFn: ({ signal }) => getJson<TableSchemaResponse>(localDataSchemaUrl(localDataKind, effectiveRunId, effectiveDumpId), { signal }),
