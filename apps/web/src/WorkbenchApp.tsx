@@ -151,6 +151,7 @@ function Workbench() {
   const [dataDirection, setDataDirection] = useState<"asc" | "desc">("desc");
   const [dataSearch, setDataSearch] = useState("");
   const [selectedAuthorIds, setSelectedAuthorIds] = useState<string[]>([]);
+  const [selectedAuthorRows, setSelectedAuthorRows] = useState<Record<string, unknown>[]>([]);
   const [sourceStrategy, setSourceStrategy] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [sliceDoc, setSliceDoc] = useState<WorkbenchSlice | null>(null);
@@ -335,6 +336,10 @@ function Workbench() {
   useEffect(() => {
     setDataOffset(0);
   }, [localDataKind, dataSearch, dataFilterKey, dataSort, dataDirection, fractionMode, effectiveRunId, effectiveDumpId]);
+  useEffect(() => {
+    const selected = new Set(selectedAuthorIds.map(String));
+    setSelectedAuthorRows((rows) => rows.filter((row) => selected.has(String(row.author_id ?? ""))));
+  }, [selectedAuthorIds.join("|")]);
   const effectiveDataOffset = dataOffset;
   const dataPreviewLimit = DATA_PREVIEW_PAGE_SIZE;
   const previewPageKey = `${effectiveDataOffset}:${dataPreviewLimit}`;
@@ -926,6 +931,9 @@ function Workbench() {
             dataFilters={dataColumnFilters}
             dataSearch={dataSearch}
             selectedAuthorIds={selectedAuthorIds}
+            setSelectedAuthorIds={setSelectedAuthorIds}
+            selectedAuthorRows={selectedAuthorRows}
+            setSelectedAuthorRows={setSelectedAuthorRows}
             dataSort={dataSort}
             dataDirection={dataDirection}
           />

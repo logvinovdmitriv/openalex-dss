@@ -102,11 +102,6 @@ export function DataView({
       ? `Показаны строки ${fmt(pageStart)}-${fmt(pageEnd)} из ${fmt(selectedTotal)}`
       : `Показаны строки ${fmt(pageStart)}-${fmt(pageEnd)}${table?.has_more ? " · есть следующие строки" : " · конец выборки"}`
     : "Строк нет";
-  const visibleAuthorIds = useMemo(() => {
-    if (localDataKind !== "indices") return [];
-    return [...new Set((table?.rows ?? []).map((row) => String(row.author_id ?? "").trim()).filter(Boolean))];
-  }, [localDataKind, table?.rows]);
-  const allVisibleAuthorsSelected = visibleAuthorIds.length > 0 && visibleAuthorIds.every((id) => selectedAuthorIds.includes(id));
   const resetDataRestrictions = () => {
     setDataColumnFilters({});
     setDataSearch("");
@@ -188,15 +183,6 @@ export function DataView({
         </div>
         <div className="action-row">
           {!missingScope.missing && hasAvailableTables && <a className="button-link" href={csvUrl}>Скачать текущую выборку</a>}
-          {localDataKind === "indices" && visibleAuthorIds.length > 0 && (
-            <button
-              type="button"
-              className={allVisibleAuthorsSelected ? "choice-pill active" : "choice-pill"}
-              onClick={() => setSelectedAuthorIds(allVisibleAuthorsSelected ? [] : visibleAuthorIds)}
-            >
-              {allVisibleAuthorsSelected ? "Снять точки с графиков" : "Показать всех авторов точками"}
-            </button>
-          )}
           {hasDataRestrictions && <button type="button" className="ghost-button" onClick={resetDataRestrictions}>{hasTableRestrictions ? "Сбросить ограничения" : "Снять точки"}</button>}
         </div>
         <DataRestrictionChips

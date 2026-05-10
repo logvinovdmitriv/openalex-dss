@@ -2169,6 +2169,31 @@ input[aria-invalid="true"] {
   color: #172127;
 }
 
+.author-marker-panel .form-grid {
+  margin-top: 10px;
+}
+
+.author-marker-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.author-marker-results .choice-pill {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  max-width: min(100%, 360px);
+  text-align: left;
+}
+
+.author-marker-results .choice-pill span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .selection-chip {
   min-height: 28px;
   border: 1px solid #b7d2ff;

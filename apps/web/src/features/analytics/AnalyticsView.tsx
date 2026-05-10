@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2, Sigma } from "lucide-react";
 import { Area, Brush, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
-import { API_BASE, type CustomMetricDefinition, type TableColumnFilters, type TableResponse } from "../../api";
+import { API_BASE, getJson, type CustomMetricDefinition, type TableColumnFilters, type TableResponse } from "../../api";
 import { filterParams, fmt, metricLabel, type ActiveFilters } from "../../domain";
 import { DownloadLink, EmptyState, MetricCard } from "../../components/ui";
-import { customMetricDefsQuery, dataSelectionQuery, mutationError, type ScientometricAnalysisPayload, type ScientometricFinding } from "../../workbench";
+import { customMetricDefsQuery, dataSelectionQuery, localDataPreviewUrl, mutationError, type ScientometricAnalysisPayload, type ScientometricFinding } from "../../workbench";
 import { metricLabelFor } from "../formulas/FormulaBuilder";
 import { selectedAuthorIndexTable } from "../indices/IndicesView";
 
@@ -30,6 +31,9 @@ export function AnalyticsView({
   dataFilters,
   dataSearch,
   selectedAuthorIds,
+  setSelectedAuthorIds,
+  selectedAuthorRows: savedSelectedAuthorRows,
+  setSelectedAuthorRows,
   dataSort,
   dataDirection,
 }: {
@@ -54,6 +58,9 @@ export function AnalyticsView({
   dataFilters: TableColumnFilters;
   dataSearch: string;
   selectedAuthorIds: string[];
+  setSelectedAuthorIds: (value: string[]) => void;
+  selectedAuthorRows: Record<string, unknown>[];
+  setSelectedAuthorRows: (value: Record<string, unknown>[]) => void;
   dataSort: string;
   dataDirection: "asc" | "desc";
 }) {
@@ -61,7 +68,25 @@ export function AnalyticsView({
   const analyticsMetrics = metrics.length ? metrics : [metric].filter(Boolean);
   const warnings = (scientometrics?.warnings ?? []).filter((warning) => !/Кендалл|Kendall/i.test(String(warning)));
   const [showBoxplot, setShowBoxplot] = useState(true);
-  const selectedAuthorRows = selectedAuthorIndexTable(authorIndexTable, analyticsMetrics, selectedAuthorIds)?.rows ?? [];
+  const [authorSearch, setAuthorSearch] = useState("");
+  const pageSelectedAuthorRows = selectedAuthorIndexTable(authorIndexTable, analyticsMetrics, selectedAuthorIds)?.rows ?? [];
+  const selectedAuthorRows = mergeAuthorRows(savedSelectedAuthorRows, pageSelectedAuthorRows, selectedAuthorIds);
+  const authorSearchQuery = useQuery({
+    queryKey: ["analytics-author-marker-search", runId, dumpId, fractionMode, authorSearch.trim(), JSON.stringify(dataFilters)],
+    queryFn: ({ signal }) => getJson<TableResponse>(localDataPreviewUrl("indices", {
+      q: authorSearch,
+      runId,
+      dumpId,
+      limit: 12,
+      offset: 0,
+      sort: "author_display_name",
+      direction: "asc",
+      fractionMode,
+      dataFilters,
+    }), { signal }),
+    enabled: Boolean((runId || dumpId) && authorSearch.trim().length >= 2),
+    staleTime: 60_000,
+  });
   const scientometricMetricParam = scientometricMetrics.join(",");
   const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: dataSort, direction: dataDirection, limit: 0 });
   const scientometricParams = filterParams(filters, {
@@ -86,7 +111,7 @@ export function AnalyticsView({
     <div className="stack">
       <section className="notice">
         <b>Аналитика построена по выборке из “Данных”</b>
-        <span>Поиск, фильтры и сортировка задаются во вкладке “Данные”. Расчеты используют всех авторов после этих ограничений, а отмеченные авторы подсвечиваются точками на графиках.</span>
+        <span>Поиск, фильтры и сортировка задаются во вкладке “Данные”. Расчеты используют всех авторов после этих ограничений. На графиках точками показываются только авторы, которых вы явно выбрали ниже.</span>
       </section>
       {!hasAuthorIndices && (
         <section className="notice warn action-notice">
@@ -110,7 +135,7 @@ export function AnalyticsView({
           <div>
             <span className="step-badge">Аналитика</span>
             <h2>Аналитика выбранной выборки</h2>
-            <p>На этой странице нет отдельных фильтров. Все графики ниже автоматически используют поиск, ограничения и сортировку из вкладки “Данные”. Отмеченные авторы показываются отдельными точками.</p>
+            <p>На этой странице нет отдельных фильтров. Все графики ниже автоматически используют поиск, ограничения и сортировку из вкладки “Данные”. Чтобы увидеть конкретных авторов на распределениях, найдите их в поле ниже и добавьте как точки.</p>
           </div>
           {loadingScientometrics && <span className="status-chip"><Loader2 size={14} className="spin" /> Обновление</span>}
         </div>
@@ -134,10 +159,78 @@ export function AnalyticsView({
           </ul>
         </section>
       )}
+      <section className="panel author-marker-panel">
+        <div className="panel-head split">
+          <div>
+            <span className="step-badge">Авторы на графиках</span>
+            <h2>Показать выбранных авторов точками</h2>
+            <p>Распределения строятся агрегированно по всем авторам выборки. Отдельные точки добавляются только для выбранных авторов, чтобы графики не перегружались на больших срезах.</p>
+          </div>
+          {selectedAuthorIds.length > 0 && <button type="button" className="ghost-button" onClick={() => { setSelectedAuthorIds([]); setSelectedAuthorRows([]); }}>Снять все точки</button>}
+        </div>
+        <div className="form-grid tight">
+          <label>
+            <span>Поиск автора</span>
+            <input value={authorSearch} onChange={(event) => setAuthorSearch(event.target.value)} placeholder="Введите фамилию, имя или OpenAlex ID" />
+          </label>
+        </div>
+        {authorSearch.trim().length > 0 && authorSearch.trim().length < 2 && <small className="field-hint">Введите минимум 2 символа.</small>}
+        {authorSearchQuery.isFetching && <div className="table-loading-line" aria-label="Поиск авторов" />}
+        {authorSearchQuery.data?.rows?.length ? (
+          <div className="author-marker-results" role="list" aria-label="Найденные авторы">
+            {authorSearchQuery.data.rows.map((row) => {
+              const id = String(row.author_id ?? "");
+              const selected = selectedAuthorIds.includes(id);
+              return (
+                <button
+                  type="button"
+                  key={id || String(row.author_display_name)}
+                  className={selected ? "choice-pill active" : "choice-pill"}
+                  onClick={() => {
+                    if (!id) return;
+                    if (selected) {
+                      setSelectedAuthorIds(selectedAuthorIds.filter((item) => item !== id));
+                      setSelectedAuthorRows(savedSelectedAuthorRows.filter((item) => String(item.author_id ?? "") !== id));
+                    } else {
+                      setSelectedAuthorIds([...selectedAuthorIds, id]);
+                      setSelectedAuthorRows(mergeAuthorRows([...savedSelectedAuthorRows, row], [], [...selectedAuthorIds, id]));
+                    }
+                  }}
+                >
+                  <b>{String(row.author_display_name || row.author_name || id)}</b>
+                  <span>{fmt(row.p ?? 0)} публ. · h={fmt(row.h ?? 0)} · цит. {fmt(row.c ?? 0)}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : authorSearch.trim().length >= 2 && !authorSearchQuery.isFetching ? (
+          <EmptyState title="Автор не найден" detail="Проверьте написание или измените ограничения во вкладке “Данные”." />
+        ) : null}
+        {selectedAuthorRows.length > 0 ? (
+          <div className="selection-summary active">
+            <b>Точки на графиках:</b>
+            {selectedAuthorRows.map((row) => {
+              const id = String(row.author_id ?? "");
+              return (
+                <button key={id} type="button" className="selection-chip active" onClick={() => {
+                  setSelectedAuthorIds(selectedAuthorIds.filter((item) => item !== id));
+                  setSelectedAuthorRows(savedSelectedAuthorRows.filter((item) => String(item.author_id ?? "") !== id));
+                }}>
+                  {String(row.author_display_name || id)} ×
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="selection-summary">
+            <span>Авторы не выбраны. Графики показывают только распределение, без отдельных точек.</span>
+          </div>
+        )}
+      </section>
       {selectedAuthorIds.length > 0 && (
         <section className="notice success">
           <b>На графиках отмечены выбранные авторы</b>
-          <span>Красные точки показывают {authorCountText(selectedAuthorIds.length)}, отмеченных в таблице “Данные”. Распределения и матрицы продолжают считаться по всей отфильтрованной выборке.</span>
+          <span>Красные точки показывают {authorCountText(selectedAuthorIds.length)}, выбранных через поиск или чекбоксы в таблице “Данные”. Распределения и матрицы продолжают считаться по всей отфильтрованной выборке.</span>
         </section>
       )}
       {dataSearch.trim() && selectedAuthorIds.length === 0 && (
@@ -284,6 +377,20 @@ function DescriptiveStatsPanel({
       </div>
     </section>
   );
+}
+
+function mergeAuthorRows(
+  savedRows: Record<string, unknown>[],
+  pageRows: Record<string, unknown>[],
+  selectedAuthorIds: string[],
+) {
+  const selected = new Set(selectedAuthorIds.map(String));
+  const byId = new Map<string, Record<string, unknown>>();
+  [...savedRows, ...pageRows].forEach((row) => {
+    const id = String(row.author_id ?? "");
+    if (id && selected.has(id)) byId.set(id, row);
+  });
+  return selectedAuthorIds.map((id) => byId.get(String(id))).filter(Boolean) as Record<string, unknown>[];
 }
 
 function formatNullableAnalysisValue(value: number | null) {

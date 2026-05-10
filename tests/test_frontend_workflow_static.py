@@ -54,3 +54,12 @@ def test_analytics_and_indices_are_feature_views() -> None:
     assert "function RankingsPage" not in main
     assert "export function AnalyticsView" in analytics
     assert "export function IndicesView" in indices
+
+
+def test_analytics_uses_explicit_author_marker_search() -> None:
+    analytics = (ROOT / "apps/web/src/features/analytics/AnalyticsView.tsx").read_text(encoding="utf-8")
+    data_view = (ROOT / "apps/web/src/features/data/DataView.tsx").read_text(encoding="utf-8")
+    assert "analytics-author-marker-search" in analytics
+    assert "Показать выбранных авторов точками" in analytics
+    assert "Распределения строятся агрегированно по всем авторам выборки" in analytics
+    assert "Показать всех авторов точками" not in data_view
