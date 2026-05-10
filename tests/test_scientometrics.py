@@ -96,6 +96,24 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(boxplot["display_outlier_count"], 1)
         self.assertEqual(boxplot["display_outliers"][0]["author_id"], "A5")
         self.assertEqual(boxplot["outlier_rule"], "iqr_zero_no_outlier_fence")
+        self.assertIn("views", boxplot)
+        self.assertEqual(boxplot["views"]["nonzero"]["n"], 5)
+        self.assertEqual(boxplot["views"]["central_95"]["n"], 4)
+
+    def test_boxplot_metrics_exposes_nonzero_view_for_zero_inflated_metrics(self) -> None:
+        rows = [
+            {"author_id": "A1", "c": 0},
+            {"author_id": "A2", "c": 0},
+            {"author_id": "A3", "c": 1},
+            {"author_id": "A4", "c": 2},
+            {"author_id": "A5", "c": 10},
+        ]
+
+        boxplot = scientometrics.boxplot_metrics(rows, ["c"])["c"]
+
+        self.assertEqual(boxplot["median"], 1.0)
+        self.assertEqual(boxplot["views"]["nonzero"]["n"], 3)
+        self.assertGreater(boxplot["views"]["nonzero"]["median"], 1.0)
 
     def test_top_overlap_exact_n_does_not_expand_tied_rank_cut(self) -> None:
         rows = [

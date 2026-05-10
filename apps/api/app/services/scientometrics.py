@@ -1522,9 +1522,25 @@ def _describe_values(values: list[float], n_total: int) -> dict[str, Any]:
 
 def _boxplot_values(rows: list[dict[str, Any]], raw_values: list[float | None]) -> dict[str, Any]:
     pairs = [(row, value) for row, value in zip(rows, raw_values) if value is not None and math.isfinite(value)]
+    payload = _boxplot_payload(pairs)
+    values = sorted(value for _, value in pairs)
+    if values:
+        low95 = _quantile_sorted(values, 0.025)
+        high95 = _quantile_sorted(values, 0.975)
+        payload["views"] = {
+            "nonzero": _boxplot_payload([(row, value) for row, value in pairs if value != 0.0]),
+            "central_95": _boxplot_payload([(row, value) for row, value in pairs if low95 <= value <= high95]),
+        }
+    else:
+        payload["views"] = {"nonzero": _boxplot_payload([]), "central_95": _boxplot_payload([])}
+    return payload
+
+
+def _boxplot_payload(pairs: list[tuple[dict[str, Any], float]]) -> dict[str, Any]:
     values = sorted(value for _, value in pairs)
     if not values:
         return {
+            "n": 0,
             "min": None,
             "min_whisker": None,
             "q1": None,
@@ -1551,6 +1567,7 @@ def _boxplot_values(rows: list[dict[str, Any]], raw_values: list[float | None]) 
         ]
         display_outliers.sort(key=lambda item: (-float(item["value"]), str(item["author_id"])))
         return {
+            "n": len(values),
             "min": values[0],
             "min_whisker": q1,
             "q1": q1,
@@ -1583,6 +1600,7 @@ def _boxplot_values(rows: list[dict[str, Any]], raw_values: list[float | None]) 
     ]
     outliers.sort(key=lambda item: (-float(item["value"]), str(item["author_id"])))
     return {
+        "n": len(values),
         "min": values[0],
         "min_whisker": min(inner) if inner else values[0],
         "q1": q1,
