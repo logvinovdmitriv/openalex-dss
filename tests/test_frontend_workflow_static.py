@@ -68,3 +68,11 @@ def test_analytics_uses_explicit_author_marker_search() -> None:
     assert "Показать выбранных авторов точками" in analytics
     assert "Распределения строятся агрегированно по всем авторам выборки" in analytics
     assert "Показать всех авторов точками" not in data_view
+
+
+def test_collapsed_boxplot_does_not_stretch_to_extreme_values() -> None:
+    analytics = (ROOT / "apps/web/src/features/analytics/AnalyticsView.tsx").read_text(encoding="utf-8")
+    assert "const collapsed = Boolean" in analytics
+    assert "const min = collapsed ? q1" in analytics
+    assert "const max = collapsed ? q3" in analytics
+    assert "expandedBoxplotDomain(row.domainMin, row.domainMax, row.observedMin, row.observedMax, !row.collapsed)" in analytics
