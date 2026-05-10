@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.paths import DATA
-from app.services import cohorts, custom_metrics, warehouse
+from app.services import cohorts, custom_metrics, distribution_engine, warehouse
 from app.services.analysis_filters import clean_analysis_filters
 
 
@@ -148,6 +148,7 @@ def build_scientometric_analysis(
     metric_rank_summary = _metric_rank_summary(selected_metrics, value_vectors, descriptive)
     boxplots = _boxplot_metrics_from_vectors(rows, selected_metrics, value_vectors)
     histograms = _histogram_metrics_from_vectors(selected_metrics, value_vectors)
+    chart_readiness = _chart_readiness_from_vectors(selected_metrics, value_vectors)
     normality = _normality_metrics_from_vectors(selected_metrics, value_vectors)
     correlations = correlation_matrices(rows, selected_metrics, value_vectors=value_vectors, rank_vectors=rank_vectors)
     rank_comparison_payload = rank_comparisons(
@@ -230,6 +231,7 @@ def build_scientometric_analysis(
         "metric_rank_summary": metric_rank_summary,
         "boxplots": boxplots,
         "histograms": histograms,
+        "chart_readiness": chart_readiness,
         "normality": normality,
         "correlations": correlations,
         "rank_top_n": rank_top_n,
@@ -458,6 +460,20 @@ def _histogram_metrics_from_vectors(
             "log1p": _histogram([math.log1p(max(0.0, value)) for value in values], bins=bins),
         }
     return payload
+
+
+def _chart_readiness_from_vectors(
+    metrics: list[str] | tuple[str, ...],
+    value_vectors: dict[str, list[float | None]],
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for metric in metrics:
+        values = [value for value in value_vectors.get(metric, []) if value is not None]
+        out[metric] = {
+            "histogram": distribution_engine.chart_readiness(values, chart_type="histogram"),
+            "boxplot": distribution_engine.chart_readiness(values, chart_type="boxplot"),
+        }
+    return out
 
 
 def normality_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, Any]:

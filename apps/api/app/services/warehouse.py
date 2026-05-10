@@ -27,6 +27,15 @@ RUN_JSON_DOCS = storage_paths.RUN_JSON_DOCS
 _safe_id = storage_paths.safe_id
 _ANALYTICS_CACHE_LIMIT = cache_engine.DEFAULT_FILTERED_CACHE_ENTRIES_PER_RUN
 _SLOW_QUERY_SECONDS = 1.0
+_MIN_SEARCH_LENGTH = 2
+_SEARCHABLE_FIELDS_BY_TABLE = {
+    "indices": {"author_display_name", "author_id", "orcid"},
+    "ratings": {"author_display_name", "author_id", "metric_name"},
+    "works": {"display_name", "doi", "work_id", "source_display_name", "primary_topic_display_name"},
+    "authorships": {"author_display_name", "author_id", "work_id", "institution_display_name"},
+    "author_work": {"author_display_name", "author_id", "work_id", "work_display_name"},
+    "work_topics": {"work_id", "topic_display_name", "subfield_display_name", "field_display_name"},
+}
 logger = logging.getLogger(__name__)
 
 
@@ -503,6 +512,7 @@ def _query_registered_table(
     started = time.perf_counter()
     _validate_table_selection(fields, sort=sort, data_filters=data_filters)
     where_sql, order_sql, args = _table_query_parts(
+        table,
         fields,
         q=q,
         fraction_mode=fraction_mode,
@@ -571,6 +581,7 @@ def _query_registered_table(
 
 
 def _table_query_parts(
+    table: str,
     fields: list[str],
     *,
     q: str = "",
@@ -584,10 +595,13 @@ def _table_query_parts(
 ) -> tuple[str, str, list[Any]]:
     where: list[str] = []
     args: list[Any] = []
-    if q:
-        expr = " OR ".join([f"CAST({field} AS VARCHAR) ILIKE ?" for field in fields])
-        where.append(f"({expr})")
-        args.extend([f"%{q}%"] * len(fields))
+    search = str(q or "").strip()
+    if search and len(search) >= _MIN_SEARCH_LENGTH:
+        searchable_fields = _searchable_fields(table, fields)
+        if searchable_fields:
+            expr = " OR ".join([f"CAST({_quote_sql_identifier(field)} AS VARCHAR) ILIKE ?" for field in searchable_fields])
+            where.append(f"({expr})")
+            args.extend([f"%{search}%"] * len(searchable_fields))
     if fraction_mode and "fraction_mode" in fields:
         where.append("fraction_mode = ?")
         args.append(fraction_mode)
@@ -605,8 +619,36 @@ def _table_query_parts(
     where_sql = "WHERE " + " AND ".join(where) if where else ""
     order_sql = ""
     if sort and sort in fields:
-        order_sql = f"ORDER BY {sort} {'DESC' if direction == 'desc' else 'ASC'}"
+        order_sql = _stable_order_sql(fields, sort, direction)
     return where_sql, order_sql, args
+
+
+def _searchable_fields(table: str, fields: list[str] | set[str]) -> list[str]:
+    field_set = set(fields)
+    preferred = _SEARCHABLE_FIELDS_BY_TABLE.get(str(table or ""), set())
+    selected = [field for field in preferred if field in field_set]
+    if selected:
+        return selected
+    return [
+        field
+        for field in field_set
+        if _column_filterable(field)
+        and (
+            field.endswith("_name")
+            or field.endswith("_display_name")
+            or field in {"author_id", "work_id", "doi", "orcid", "metric_name"}
+        )
+    ]
+
+
+def _stable_order_sql(fields: list[str] | set[str], sort: str, direction: str = "desc") -> str:
+    field_set = set(fields)
+    safe_direction = "DESC" if str(direction or "desc").strip().lower() == "desc" else "ASC"
+    order: list[str] = [f"{_quote_sql_identifier(sort)} {safe_direction}"]
+    for tie_field, tie_direction in (("c", "DESC"), ("p", "DESC"), ("author_display_name", "ASC"), ("author_id", "ASC"), ("work_id", "ASC")):
+        if tie_field in field_set and tie_field != sort:
+            order.append(f"{_quote_sql_identifier(tie_field)} {tie_direction}")
+    return "ORDER BY " + ", ".join(order)
 
 
 def _selected_table_fields(fields: list[str], select_fields: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
@@ -719,6 +761,7 @@ def iter_table_csv(table: str, **kwargs: Any) -> Iterator[str]:
 
     _validate_table_selection(fields, sort=sort, data_filters=data_filters)
     where_sql, order_sql, args = _table_query_parts(
+        table,
         fields,
         q=q,
         fraction_mode=fraction_mode,
@@ -1803,6 +1846,27 @@ def metric_ranking(
 ) -> dict[str, Any]:
     if not _metric_supported(metric, custom_metric_defs):
         raise ValueError(f"Unsupported metric: {metric}")
+    sql_payload = _metric_ranking_sql_payload(
+        fraction_mode,
+        metric,
+        filters,
+        limit=limit,
+        max_limit=max_limit,
+        run_id=run_id,
+        dump_id=dump_id,
+        author_ids=author_ids,
+        data_filters=data_filters,
+        data_kind=data_kind,
+        data_search=data_search,
+        data_sort=data_sort,
+        data_direction=data_direction,
+        data_limit=data_limit,
+        rank_direction=rank_direction,
+        custom_metric_defs=custom_metric_defs,
+    )
+    if sql_payload is not None:
+        sql_payload["analytics_cache"] = analytics_cache_info()
+        return sql_payload
     rows = selected_index_rows(
         fraction_mode,
         filters,
@@ -1831,6 +1895,114 @@ def metric_ranking(
     )
     payload["analytics_cache"] = analytics_cache_info()
     return payload
+
+
+def _metric_ranking_sql_payload(
+    fraction_mode: str,
+    metric: str,
+    filters: FilterSet | None = None,
+    *,
+    limit: int,
+    max_limit: int,
+    run_id: str,
+    dump_id: str,
+    author_ids: set[str] | list[str] | tuple[str, ...] | None,
+    data_filters: dict[str, Any] | None,
+    data_kind: str,
+    data_search: str,
+    data_sort: str,
+    data_direction: str,
+    data_limit: int,
+    rank_direction: str,
+    custom_metric_defs: list[dict[str, str]] | None,
+) -> dict[str, Any] | None:
+    """Build ranking directly in DuckDB when author-level indices are already materialized."""
+    parsed_filters = parse_column_filters(data_filters)
+    data_kind = _normalize_data_kind(data_kind)
+    source_path: Path | None = None
+    source_is_cached = False
+    cache_was_created = False
+    scope = resolve_analysis_scope(run_id=run_id, dump_id=dump_id)
+    run_id = scope["run_id"]
+    dump_id = scope["dump_id"]
+    if data_kind != "indices" and (parsed_filters or str(data_search or "").strip()):
+        return None
+    if _can_use_precomputed_indices(filters, run_id=run_id, dump_id=dump_id):
+        _set_analytics_cache_info({"status": "not_used", "key": "", "rows": count_rows("indices", run_id=run_id, dump_id=dump_id)})
+    else:
+        cached = _filtered_indices_cache_hit(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+        if not cached:
+            filtered_indices(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+            cached = _filtered_indices_cache_hit(fraction_mode, filters, run_id=run_id, dump_id=dump_id)
+            cache_was_created = True
+        if not cached:
+            return None
+        source_path = cached["indices_path"]
+        source_is_cached = True
+
+    if source_is_cached and source_path is not None:
+        conn = duckdb.connect(":memory:")
+        escaped = str(source_path).replace("'", "''")
+        conn.execute(f"CREATE VIEW ranking_indices AS SELECT * FROM read_parquet('{escaped}')")
+        close_conn = True
+    else:
+        conn = connect_scope(run_id=run_id, dump_id=dump_id)
+        conn.execute("CREATE OR REPLACE VIEW ranking_indices AS SELECT * FROM indices")
+        close_conn = True
+    try:
+        fields = _registered_fields(conn, "ranking_indices")
+        table_name = "ranking_indices"
+        if custom_metric_defs:
+            table_name, field_set = _register_custom_metric_view(conn, "ranking_indices", "ranking_indices_with_custom_metrics", fields, custom_metric_defs)
+            fields = list(field_set)
+        if metric not in set(fields):
+            raise ValueError(f"Unsupported metric: {metric}")
+        sql, args, out_fields = _metric_ranking_sql_query(
+            table_name,
+            fields,
+            fraction_mode=fraction_mode,
+            metric=metric,
+            limit=limit,
+            max_limit=max_limit,
+            author_ids=author_ids,
+            data_filters=parsed_filters,
+            data_search=data_search,
+            data_sort=data_sort,
+            data_direction=data_direction,
+            data_limit=data_limit,
+            custom_metric_defs=custom_metric_defs,
+            rank_direction=rank_direction,
+            include_total=True,
+        )
+        rows = _records(conn.execute(sql, args), max_rows=max(1, min(int(limit or 0) or int(max_limit), int(max_limit))) + 1)
+        total = int(rows[0].pop("__total_rows", len(rows))) if rows else 0
+        for row in rows:
+            row.pop("__total_rows", None)
+        requested_limit = max(0, min(int(limit or 0), max(1, int(max_limit))))
+        if cache_was_created:
+            _set_analytics_cache_info({"status": "miss", "key": str(cached.get("key") or ""), "rows": int(cached.get("rows") or total)})
+        return {
+            "table": "filtered_rating",
+            "rank_metric": metric,
+            "rank_direction": "asc" if str(rank_direction or "").strip().lower() == "asc" else "desc",
+            "fraction_mode": fraction_mode,
+            "metric_scope": "filtered_recomputed",
+            "execution_engine": "duckdb_sql_full_filtered_slice",
+            "percentile_scope": "current filtered author set",
+            "filters": filters or {},
+            "metric_params": _run_metric_params(run_id),
+            "run_id": run_id,
+            "dump_id": dump_id,
+            "fields": [field for field in out_fields if field != "__total_rows"],
+            "rows": rows,
+            "total": total,
+            "limit": requested_limit,
+            "offset": 0,
+            "custom_metrics": custom_metrics.metric_catalog(custom_metric_defs),
+        }
+    finally:
+        if close_conn:
+            conn.close()
 
 
 def iter_metric_ranking_csv(
@@ -1902,7 +2074,7 @@ def iter_metric_ranking_csv(
                 fields = list(field_set)
             if metric not in set(fields):
                 raise ValueError(f"Unsupported metric: {metric}")
-            sql, args, csv_fields = _metric_ranking_csv_query(
+            sql, args, csv_fields = _metric_ranking_sql_query(
                 table_name,
                 fields,
                 fraction_mode=fraction_mode,
@@ -1916,6 +2088,8 @@ def iter_metric_ranking_csv(
                 data_direction=data_direction,
                 data_limit=data_limit,
                 custom_metric_defs=custom_metric_defs,
+                rank_direction="desc",
+                include_total=False,
             )
             result = conn.execute(sql, args)
             output = StringIO()
@@ -1936,7 +2110,7 @@ def iter_metric_ranking_csv(
     return generate()
 
 
-def _metric_ranking_csv_query(
+def _metric_ranking_sql_query(
     table_name: str,
     fields: list[str],
     *,
@@ -1951,6 +2125,8 @@ def _metric_ranking_csv_query(
     data_direction: str,
     data_limit: int,
     custom_metric_defs: list[dict[str, str]] | None,
+    rank_direction: str = "desc",
+    include_total: bool = False,
 ) -> tuple[str, list[Any], list[str]]:
     field_set = set(fields)
     where: list[str] = []
@@ -1959,10 +2135,11 @@ def _metric_ranking_csv_query(
         where.append("fraction_mode = ?")
         args.append(fraction_mode)
     search = str(data_search or "").strip()
-    if search:
-        expr = " OR ".join([f"CAST({_quote_sql_identifier(field)} AS VARCHAR) ILIKE ?" for field in fields])
+    if search and len(search) >= _MIN_SEARCH_LENGTH:
+        searchable = _searchable_fields("indices", fields)
+        expr = " OR ".join([f"CAST({_quote_sql_identifier(field)} AS VARCHAR) ILIKE ?" for field in searchable])
         where.append(f"({expr})")
-        args.extend([f"%{search}%"] * len(fields))
+        args.extend([f"%{search}%"] * len(searchable))
     ids = _author_id_values(author_ids)
     if ids and "author_id" in field_set:
         where.append(f"author_id IN ({', '.join('?' for _ in ids)})")
@@ -1974,21 +2151,27 @@ def _metric_ranking_csv_query(
     normalized_data_limit = max(0, min(int(data_limit or 0), 500_000))
     if normalized_data_limit > 0:
         if data_sort and data_sort in field_set:
-            direction = "ASC" if str(data_direction or "").lower() == "asc" else "DESC"
-            source_sql = f"{source_sql} ORDER BY {_quote_sql_identifier(data_sort)} {direction} LIMIT ?"
+            source_sql = f"{source_sql} {_stable_order_sql(field_set, data_sort, data_direction)} LIMIT ?"
         else:
             source_sql = f"{source_sql} LIMIT ?"
         source_args.append(normalized_data_limit)
     visible_metrics = _visible_metric_fields(fields, custom_metric_defs)
-    csv_fields = ["rank_competition", "author_display_name", "score", *visible_metrics, "author_id"]
+    csv_fields = ["rank_ordinal", "rank_competition", "rank_dense", "author_display_name", "score", *visible_metrics, "author_id"]
     select_exprs = [
+        "rank_ordinal",
         "rank_competition",
+        "rank_dense",
         "author_display_name",
         "score",
         *[_quote_sql_identifier(field) for field in visible_metrics],
         "author_id",
     ]
+    if include_total:
+        csv_fields.append("__total_rows")
+        select_exprs.append("__total_rows")
     score_expr = f"COALESCE(TRY_CAST({_quote_sql_identifier(metric)} AS DOUBLE), 0.0)"
+    score_direction = "ASC" if str(rank_direction or "").strip().lower() == "asc" else "DESC"
+    tie_order = _stable_order_sql(field_set | {"score"}, "score", "asc" if score_direction == "ASC" else "desc").replace("ORDER BY ", "")
     requested_limit = max(0, min(int(limit or 0), max(1, int(max_limit))))
     limit_sql = "LIMIT ?" if requested_limit > 0 else ""
     if requested_limit > 0:
@@ -1999,10 +2182,13 @@ def _metric_ranking_csv_query(
           SELECT
             *,
             {score_expr} AS score,
-            RANK() OVER (ORDER BY {score_expr} DESC, author_display_name ASC, author_id ASC) AS rank_competition
+            ROW_NUMBER() OVER (ORDER BY {tie_order}) AS rank_ordinal,
+            RANK() OVER (ORDER BY {score_expr} {score_direction}) AS rank_competition,
+            DENSE_RANK() OVER (ORDER BY {score_expr} {score_direction}) AS rank_dense,
+            COUNT(*) OVER () AS __total_rows
           FROM ({source_sql}) selected_indices
         ) ranked_indices
-        ORDER BY rank_competition ASC, author_display_name ASC, author_id ASC
+        ORDER BY rank_ordinal ASC
         {limit_sql}
     """
     return sql, source_args, csv_fields
@@ -2149,6 +2335,7 @@ def metric_distribution_from_rows(
     values = sorted(_as_float(row.get(metric)) for row in rows)
     summary = distribution_engine.describe(values)
     summary["histogram"] = distribution_engine.histogram(values, bins=8)
+    summary["chart_readiness"] = distribution_engine.chart_readiness(values, chart_type="distribution")
     summary["run_id"] = scope["run_id"]
     summary["dump_id"] = scope["dump_id"]
     summary["metric_scope"] = "filtered_recomputed"

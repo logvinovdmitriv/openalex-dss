@@ -708,6 +708,22 @@ input[aria-invalid="true"] {
   background: #fff;
 }
 
+.boxplot-svg-row.not-chartable {
+  background: #f8fafc;
+}
+
+.empty-chart-note {
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+  color: #607286;
+  font-weight: 700;
+  text-align: center;
+  border: 1px dashed #c9d6e2;
+  border-radius: 8px;
+  padding: 16px;
+}
+
 .boxplot-svg-title {
   display: flex;
   flex-wrap: wrap;

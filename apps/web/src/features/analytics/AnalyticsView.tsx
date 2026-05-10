@@ -566,6 +566,8 @@ function nearestRawDistributionBin(rows: ReturnType<typeof rawDistributionRows>,
 }
 
 function rawDistributionRows(payload: ScientometricAnalysisPayload, metricName: string) {
+  const readiness = chartReadiness(payload, metricName, "histogram");
+  if (readiness && readiness.is_chartable === false) return [];
   const histogram = ((payload.histograms ?? {})[metricName]?.raw ?? []) as Array<Record<string, unknown>>;
   return histogram
     .map((row, index) => ({
@@ -584,6 +586,7 @@ type BoxplotDataMode = "all" | "nonzero" | "central95";
 function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode, dataMode }: { payload: ScientometricAnalysisPayload; metrics: string[]; metricLabels?: Record<string, string>; scaleMode: BoxplotScaleMode; dataMode: BoxplotDataMode }) {
   const rows = metrics
     .map((metricName) => {
+      const readiness = chartReadiness(payload, metricName, "boxplot");
       const fullBoxplot = (payload.boxplots ?? {})[metricName] ?? {};
       const boxplot = boxplotForDataMode(fullBoxplot, dataMode);
       const descriptive = (payload.descriptive ?? {})[metricName] ?? {};
@@ -595,6 +598,14 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode, dataMod
       const min = collapsed ? q1 : numberOrNull(boxplot.min_whisker ?? boxplot.min);
       const max = collapsed ? q3 : numberOrNull(boxplot.max_whisker ?? boxplot.max);
       if (![min, q1, median, q3, max].every((value) => value !== null)) return null;
+      if (readiness && readiness.is_chartable === false) {
+        return {
+          metricName,
+          skipped: true,
+          message: String(readiness.message || "График не показан: распределение неинформативно."),
+          n: Number(readiness.n ?? 0),
+        };
+      }
       const left = Math.min(min as number, q1 as number, median as number, q3 as number, max as number);
       const right = Math.max(min as number, q1 as number, median as number, q3 as number, max as number);
       const observedMax = numberOrNull(fullBoxplot.max);
@@ -617,8 +628,16 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode, dataMod
         collapsed,
       };
     })
-    .filter(Boolean) as Array<{
+    .filter(Boolean) as Array<
+    | {
       metricName: string;
+      skipped: true;
+      message: string;
+      n: number;
+    }
+    | {
+      metricName: string;
+      skipped?: false;
       min: number;
       q1: number;
       median: number;
@@ -640,6 +659,17 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode, dataMod
   return (
     <div className="boxplot-svg-list">
       {rows.map((row) => {
+        if (row.skipped) {
+          return (
+            <div key={row.metricName} className="boxplot-svg-row not-chartable">
+              <div className="boxplot-svg-title">
+                <b>{metricLabelFor(row.metricName, metricLabels)}</b>
+                <span>{row.message} Наблюдений: {fmt(row.n)}.</span>
+              </div>
+              <div className="empty-chart-note">График скрыт, чтобы не показывать ложную или нечитаемую диаграмму.</div>
+            </div>
+          );
+        }
         const scaleMax = row.scaleCap ?? row.observedMax;
         const visualMin = Math.min(row.domainMin, row.observedMin ?? row.domainMin);
         const visualMax = Math.max(row.domainMax, scaleMax ?? row.domainMax);
@@ -710,6 +740,12 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode, dataMod
       })}
     </div>
   );
+}
+
+function chartReadiness(payload: ScientometricAnalysisPayload, metricName: string, chartType: "histogram" | "boxplot") {
+  const readinessRoot = payload as ScientometricAnalysisPayload & { chart_readiness?: Record<string, Record<string, Record<string, unknown>>> };
+  const readiness = readinessRoot.chart_readiness?.[metricName]?.[chartType];
+  return readiness && typeof readiness === "object" ? readiness : null;
 }
 
 function boxplotScaleCap(mode: BoxplotScaleMode, descriptive: Record<string, unknown>, observedMax: number | null) {
