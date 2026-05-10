@@ -693,6 +693,7 @@ input[aria-invalid="true"] {
 
 .boxplot-svg-list {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 14px;
   margin-top: 14px;
 }
@@ -725,7 +726,7 @@ input[aria-invalid="true"] {
   display: block;
   width: 100%;
   height: auto;
-  min-height: 88px;
+  min-height: 260px;
   overflow: visible;
 }
 
@@ -752,6 +753,11 @@ input[aria-invalid="true"] {
   fill: rgba(21, 94, 117, 0.14);
   stroke: #155e75;
   stroke-width: 3;
+}
+
+.boxplot-box.collapsed {
+  fill: rgba(21, 94, 117, 0.08);
+  stroke-dasharray: 4 3;
 }
 
 .boxplot-median {

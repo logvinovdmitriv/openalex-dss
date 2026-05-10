@@ -611,25 +611,26 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
   return (
     <div className="boxplot-svg-list">
       {rows.map((row) => {
-        const x = (value: number) => {
-          const leftPad = 64;
-          const rightPad = 38;
-          const width = 1000 - leftPad - rightPad;
-          const domain = expandedBoxplotDomain(row.domainMin, row.domainMax, row.observedMin, row.observedMax, !row.collapsed);
-          return leftPad + ((value - domain.min) / (domain.max - domain.min)) * width;
+        const domain = expandedBoxplotDomain(row.domainMin, row.domainMax, row.observedMin, row.observedMax, true);
+        const y = (value: number) => {
+          const top = 24;
+          const bottom = 224;
+          const height = bottom - top;
+          return bottom - ((value - domain.min) / (domain.max - domain.min)) * height;
         };
-        const xClamped = (value: number) => {
-          const raw = x(value);
-          return Math.max(70, Math.min(956, raw));
+        const yClamped = (value: number) => {
+          const raw = y(value);
+          return Math.max(24, Math.min(224, raw));
         };
-        const minX = x(row.min);
-        const q1X = x(row.q1);
-        const medianX = x(row.median);
-        const q3X = x(row.q3);
-        const maxX = x(row.max);
-        const boxX = Math.min(q1X, q3X);
-        const boxWidth = Math.max(4, Math.abs(q3X - q1X));
-        const axisValues = uniqueAxisValues(row.collapsed ? [row.q1] : [row.domainMin, row.q1, row.median, row.q3, row.domainMax]);
+        const minY = yClamped(row.min);
+        const q1Y = yClamped(row.q1);
+        const medianY = yClamped(row.median);
+        const q3Y = yClamped(row.q3);
+        const maxY = yClamped(row.max);
+        const boxY = Math.min(q1Y, q3Y);
+        const boxHeight = Math.max(6, Math.abs(q3Y - q1Y));
+        const boxCenterX = 178;
+        const axisValues = boxplotAxisValues(domain.min, domain.max);
         return (
           <div key={row.metricName} className="boxplot-svg-row">
             <div className="boxplot-svg-title">
@@ -642,24 +643,29 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
                 {row.observedMax !== null && row.observedMax > row.max ? ` · максимум ${formatAnalysisValue(row.observedMax)}` : ""}
               </span>
             </div>
-            <svg viewBox="0 0 1000 88" role="img" aria-label={`Ящик с усами для ${metricLabelFor(row.metricName, metricLabels)}`} className="boxplot-svg">
-              <line x1="64" y1="62" x2="962" y2="62" className="boxplot-axis" />
+            <svg viewBox="0 0 360 260" role="img" aria-label={`Ящик с усами для ${metricLabelFor(row.metricName, metricLabels)}`} className="boxplot-svg">
+              <line x1="58" y1="24" x2="58" y2="224" className="boxplot-axis" />
               {axisValues.map((value, index) => (
                 <g key={`${row.metricName}-${index}-${value}`}>
-                  <line x1={x(value)} y1="57" x2={x(value)} y2="67" className="boxplot-axis-tick" />
-                  <text x={x(value)} y="82" textAnchor="middle">{formatAnalysisValue(value)}</text>
+                  <line x1="52" y1={y(value)} x2="64" y2={y(value)} className="boxplot-axis-tick" />
+                  <text x="46" y={y(value) + 4} textAnchor="end">{formatAnalysisValue(value)}</text>
                 </g>
               ))}
-              <line x1={minX} y1="34" x2={maxX} y2="34" className="boxplot-whisker" />
-              <line x1={minX} y1="22" x2={minX} y2="46" className="boxplot-cap" />
-              <line x1={maxX} y1="22" x2={maxX} y2="46" className="boxplot-cap" />
-              <rect x={boxX} y="18" width={boxWidth} height="32" rx="2" className="boxplot-box" />
-              <line x1={medianX} y1="14" x2={medianX} y2="54" className="boxplot-median" />
+              <line x1={boxCenterX} y1={maxY} x2={boxCenterX} y2={minY} className="boxplot-whisker" />
+              <line x1={boxCenterX - 24} y1={maxY} x2={boxCenterX + 24} y2={maxY} className="boxplot-cap" />
+              <line x1={boxCenterX - 24} y1={minY} x2={boxCenterX + 24} y2={minY} className="boxplot-cap" />
+              <rect x={boxCenterX - 36} y={boxY} width="72" height={boxHeight} rx="2" className={row.collapsed ? "boxplot-box collapsed" : "boxplot-box"} />
+              <line x1={boxCenterX - 42} y1={medianY} x2={boxCenterX + 42} y2={medianY} className="boxplot-median" />
               {row.outlierValues.map((value, index) => (
-                <circle key={`${row.metricName}-outlier-${index}`} cx={xClamped(value)} cy="34" r="4" className="boxplot-outlier">
-                  <title>{`${row.compactOutliers ? "Значение вне основной шкалы" : "Выделяющееся значение"}: ${formatAnalysisValue(value)}`}</title>
+                <circle key={`${row.metricName}-outlier-${index}`} cx={boxCenterX + 72 + ((index % 5) - 2) * 6} cy={yClamped(value)} r="4" className="boxplot-outlier">
+                  <title>{`${row.compactOutliers ? "Отдельное значение вне основной массы" : "Выделяющееся значение"}: ${formatAnalysisValue(value)}`}</title>
                 </circle>
               ))}
+              <text x="76" y={maxY - 6} textAnchor="start">верхняя граница</text>
+              <text x="76" y={q3Y - 6} textAnchor="start">Q3</text>
+              <text x="76" y={medianY + 4} textAnchor="start">медиана</text>
+              <text x="76" y={q1Y + 14} textAnchor="start">Q1</text>
+              <text x="76" y={minY + 16} textAnchor="start">нижняя граница</text>
             </svg>
           </div>
         );
@@ -686,6 +692,12 @@ function uniqueAxisValues(values: number[]) {
     if (!out.some((existing) => Math.abs(existing - value) < 1e-9)) out.push(value);
   }
   return out;
+}
+
+function boxplotAxisValues(min: number, max: number) {
+  if (!(max > min)) return [min];
+  const step = (max - min) / 4;
+  return uniqueAxisValues([min, min + step, min + step * 2, min + step * 3, max]);
 }
 
 function numberOrNull(value: unknown) {

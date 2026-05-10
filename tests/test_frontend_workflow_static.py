@@ -75,4 +75,6 @@ def test_collapsed_boxplot_does_not_stretch_to_extreme_values() -> None:
     assert "const collapsed = Boolean" in analytics
     assert "const min = collapsed ? q1" in analytics
     assert "const max = collapsed ? q3" in analytics
-    assert "expandedBoxplotDomain(row.domainMin, row.domainMax, row.observedMin, row.observedMax, !row.collapsed)" in analytics
+    assert "viewBox=\"0 0 360 260\"" in analytics
+    assert "boxplotAxisValues" in analytics
+    assert "className={row.collapsed ? \"boxplot-box collapsed\" : \"boxplot-box\"}" in analytics
