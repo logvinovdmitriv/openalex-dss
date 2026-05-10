@@ -62,6 +62,40 @@ class WarehouseTests(unittest.TestCase):
 
         self.assertEqual([row["author_id"] for row in selected], ["A3"])
 
+    def test_table_column_schema_marks_service_fields_not_sortable(self) -> None:
+        with (
+            patch.object(warehouse, "table_exists", return_value=True),
+            patch.object(warehouse, "connect_scope") as connect_scope,
+        ):
+            conn = connect_scope.return_value.__enter__.return_value
+            conn.execute.return_value.fetchmany.return_value = [
+                (0, "run_id", "VARCHAR"),
+                (1, "author_display_name", "VARCHAR"),
+                (2, "h", "BIGINT"),
+                (3, "raw_affiliation_strings_csv", "VARCHAR"),
+            ]
+
+            schema = warehouse.table_column_schema("indices", run_id="run_a")
+
+        by_field = {item["field"]: item for item in schema}
+        self.assertEqual(by_field["run_id"]["sortable"], False)
+        self.assertEqual(by_field["run_id"]["filterable"], False)
+        self.assertEqual(by_field["author_display_name"]["sortable"], True)
+        self.assertEqual(by_field["author_display_name"]["filterable"], True)
+        self.assertEqual(by_field["h"]["type"], "number")
+        self.assertEqual(by_field["h"]["sortable"], True)
+        self.assertEqual(by_field["raw_affiliation_strings_csv"]["sortable"], False)
+
+    def test_query_table_rejects_non_sortable_service_fields(self) -> None:
+        with (
+            patch.object(warehouse, "resolve_analysis_scope", return_value={"run_id": "run_a", "dump_id": ""}),
+            patch.object(warehouse, "table_schema", return_value=["run_id", "author_display_name", "h"]),
+        ):
+            with self.assertRaises(ValueError) as raised:
+                warehouse.query_table("indices", run_id="run_a", sort="run_id")
+
+        self.assertIn("нельзя использовать для сортировки", str(raised.exception))
+
     def test_selected_index_rows_reads_precomputed_indices_without_slice_filters(self) -> None:
         with (
             patch.object(warehouse, "table_exists", return_value=True),

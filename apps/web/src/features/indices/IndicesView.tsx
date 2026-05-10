@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Loader2, Sigma } from "lucide-react";
-import type { CustomMetricDefinition, TableResponse } from "../../api";
+import type { CustomMetricDefinition, TableColumnSchema, TableResponse } from "../../api";
 import { fmt, metricLabel, modeLabel, type SelectOption } from "../../domain";
 import { DataGrid, Field, MetricCard } from "../../components/ui";
 import { FormulaBuilderDialog, MetricInfoPopover, metricLabelFor } from "../formulas/FormulaBuilder";
@@ -63,6 +63,16 @@ export function IndicesView({
   const [formulaBuilderOpen, setFormulaBuilderOpen] = useState(false);
   const rankingTable = useMemo(() => selectedAuthorIndexTable(authorIndexTable ?? ranking, visibleMetrics, selectedAuthorIds), [authorIndexTable, ranking, visibleMetrics.join(","), selectedAuthorIds.join("|")]);
   const sortableMetricIds = useMemo(() => new Set(displayMetricOptions.map((item) => item.value)), [displayMetricOptions]);
+  const rankingColumnSchema = useMemo<TableColumnSchema[]>(() => {
+    const metricSet = new Set(visibleMetrics);
+    return (rankingTable?.fields ?? []).map((field) => ({
+      field,
+      label: metricLabels[field] ?? (field === "author_display_name" ? "Автор" : field === "country_code" ? "Страна" : field === "subject_name" ? "Направление" : metricLabel(field)),
+      type: metricSet.has(field) ? "number" : "text",
+      sortable: metricSet.has(field),
+      filterable: false,
+    }));
+  }, [rankingTable?.fields?.join("|"), visibleMetrics.join("|"), JSON.stringify(metricLabels)]);
   const onRankingSortChange = (field: string, direction: "asc" | "desc" | "") => {
     if (!field || !sortableMetricIds.has(field)) {
       setRankingDirection("desc");
@@ -207,6 +217,7 @@ export function IndicesView({
           onSelect={onSelect}
           hiddenFields={["author_id"]}
           fieldLabels={metricLabels}
+          columnSchema={rankingColumnSchema}
           sortField={metric}
           sortDirection={rankingDirection}
           onSortChange={onRankingSortChange}

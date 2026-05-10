@@ -7,6 +7,7 @@ export function DataRestrictionChips({
   sortDirection,
   search,
   selectedAuthorIds,
+  fieldLabels = {},
   onResetSearch,
   onRemoveFilter,
   onResetSort,
@@ -16,6 +17,7 @@ export function DataRestrictionChips({
   sortDirection: "asc" | "desc";
   search: string;
   selectedAuthorIds: string[];
+  fieldLabels?: Record<string, string>;
   onResetSearch: () => void;
   onRemoveFilter: (field: string) => void;
   onResetSort: () => void;
@@ -36,7 +38,7 @@ export function DataRestrictionChips({
       <b>Активная выборка</b>
       {sortField && (
         <button type="button" className="selection-chip" onClick={onResetSort}>
-          Сортировка: {columnLabel(sortField)} {sortDirection === "asc" ? "по возрастанию" : "по убыванию"} ×
+          Сортировка: {fieldLabels[sortField] ?? columnLabel(sortField)} {sortDirection === "asc" ? "по возрастанию" : "по убыванию"} ×
         </button>
       )}
       {hasSearch && (
@@ -47,7 +49,7 @@ export function DataRestrictionChips({
       {hasSelectedAuthors && <span className="selection-chip passive">Точки на графиках: {fmt(selectedAuthorIds.length)}</span>}
       {filterEntries.map(([field, filter]) => (
         <button key={field} type="button" className="selection-chip" onClick={() => onRemoveFilter(field)}>
-          {columnLabel(field)}: {columnFilterSummary(filter)} ×
+          {fieldLabels[field] ?? columnLabel(field)}: {columnFilterSummary(filter)} ×
         </button>
       ))}
       <span>Для расчетов берутся все строки после поиска и фильтров; сортировка влияет только на просмотр таблицы</span>

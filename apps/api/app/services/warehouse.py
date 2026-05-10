@@ -197,6 +197,31 @@ _COLUMN_DESCRIPTIONS: dict[str, str] = {
     "qf_authorship_truncated": "Признак того, что список авторов публикации был обрезан источником.",
 }
 
+_NON_SORTABLE_FIELDS = {
+    "run_id",
+    "dump_id",
+    "slice_id",
+    "source_run_id",
+    "source_dump_id",
+    "fraction_mode",
+    "work_id",
+    "author_id",
+    "primary_topic_id",
+    "primary_subfield_id",
+    "primary_field_id",
+    "doi",
+    "institution_ids_csv",
+    "raw_affiliation_strings_csv",
+}
+
+_NON_FILTERABLE_FIELDS = {
+    "run_id",
+    "dump_id",
+    "slice_id",
+    "source_run_id",
+    "source_dump_id",
+}
+
 def connect_scope(*, run_id: str = "", dump_id: str = "") -> duckdb.DuckDBPyConnection:
     WAREHOUSE.parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(":memory:")
@@ -326,11 +351,33 @@ def table_column_schema(table: str, *, run_id: str = "", dump_id: str = "") -> l
                 "description": description or _COLUMN_DESCRIPTIONS.get(field, ""),
                 "type": _filter_type_for_duckdb_type(physical_type, field),
                 "physical_type": physical_type,
-                "sortable": True,
-                "filterable": True,
+                "sortable": _column_sortable(field, physical_type),
+                "filterable": _column_filterable(field, physical_type),
             }
         )
     return schema
+
+
+def _column_sortable(field: str, physical_type: str = "") -> bool:
+    if field in _NON_SORTABLE_FIELDS:
+        return False
+    if field.endswith("_ids_csv") or field.endswith("_json"):
+        return False
+    if field.endswith("_id") and field not in {"orcid"}:
+        return False
+    upper = str(physical_type or "").upper()
+    if any(token in upper for token in ("BLOB", "STRUCT", "MAP", "LIST", "UNION")):
+        return False
+    return True
+
+
+def _column_filterable(field: str, physical_type: str = "") -> bool:
+    if field in _NON_FILTERABLE_FIELDS:
+        return False
+    upper = str(physical_type or "").upper()
+    if any(token in upper for token in ("BLOB", "STRUCT", "MAP", "LIST", "UNION")):
+        return False
+    return True
 
 
 def _filter_type_for_duckdb_type(physical_type: str, field: str) -> str:
@@ -408,6 +455,7 @@ def query_table(
             "run_id": run_id,
             "dump_id": dump_id,
         }
+    _validate_table_selection(fields, sort=sort, data_filters=data_filters)
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
         payload = _query_registered_table(
             conn,
@@ -453,6 +501,7 @@ def _query_registered_table(
     include_total: bool = True,
 ) -> dict[str, Any]:
     started = time.perf_counter()
+    _validate_table_selection(fields, sort=sort, data_filters=data_filters)
     where_sql, order_sql, args = _table_query_parts(
         fields,
         q=q,
@@ -637,6 +686,7 @@ def iter_table_csv(table: str, **kwargs: Any) -> Iterator[str]:
     raw_limit = max(0, min(500_000, int(kwargs.get("limit") or 0)))
     offset = max(0, int(kwargs.get("offset") or 0))
 
+    _validate_table_selection(fields, sort=sort, data_filters=data_filters)
     where_sql, order_sql, args = _table_query_parts(
         fields,
         q=q,
@@ -654,6 +704,22 @@ def iter_table_csv(table: str, **kwargs: Any) -> Iterator[str]:
         query_args = [*args, raw_limit, offset]
     sql = f"SELECT * FROM {table} {where_sql} {order_sql} {limit_sql} OFFSET ?"
     return _iter_registered_table_csv(sql, query_args, fields, run_id=run_id, dump_id=dump_id)
+
+
+def _validate_table_selection(fields: list[str] | set[str], *, sort: str = "", data_filters: dict[str, Any] | None = None) -> None:
+    field_set = set(fields)
+    sort_field = str(sort or "").strip()
+    if sort_field:
+        if sort_field not in field_set:
+            raise ValueError(f"Поле «{sort_field}» отсутствует в выбранной таблице.")
+        if not _column_sortable(sort_field):
+            raise ValueError(f"Поле «{_COLUMN_LABELS.get(sort_field, sort_field)}» нельзя использовать для сортировки.")
+    filters = parse_column_filters(data_filters)
+    for field in filters:
+        if field not in field_set:
+            raise ValueError(f"Поле «{field}» отсутствует в выбранной таблице.")
+        if not _column_filterable(field):
+            raise ValueError(f"Поле «{_COLUMN_LABELS.get(field, field)}» нельзя использовать для фильтрации.")
 
 
 def _iter_registered_table_csv(

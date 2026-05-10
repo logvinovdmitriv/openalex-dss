@@ -36,6 +36,8 @@ def test_data_sorting_does_not_eagerly_refresh_heavy_analytics() -> None:
     assert "{ signal }) => getJson<TableResponse>" in main
     assert "data: rows" in grid
     assert "manualSorting: Boolean(onSortChange)" in grid
+    assert "schema?.sortable === true" in grid
+    assert "schema?.filterable === true" in grid
     assert "getSortedRowModel" not in grid
     assert "rows.filter" not in grid
 

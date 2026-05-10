@@ -208,14 +208,16 @@ export function DataGrid({
               const field = String(h.column.id);
               const schema = columnSchemaByField.get(field);
               const active = hasColumnFilter(effectiveColumnFilters[field]) || activeSortField === field;
+              const sortable = backendSorting && schema?.sortable === true;
+              const filterable = enableColumnFilters && backendFiltering && schema?.filterable === true;
               return (
               <th key={h.id} className={active ? "column-active" : undefined}>
                 <div className="table-header-controls">
-                  <button type="button" className="table-sort-button" disabled={!backendSorting || schema?.sortable === false} onClick={() => toggleSort(field)} aria-label={`Сортировать столбец ${String(h.column.columnDef.header)}`}>
+                  <button type="button" className="table-sort-button" disabled={!sortable} onClick={() => toggleSort(field)} aria-label={sortable ? `Сортировать столбец ${String(h.column.columnDef.header)}` : `Столбец ${String(h.column.columnDef.header)} не сортируется`}>
                     <span>{flexRender(h.column.columnDef.header, h.getContext())}</span>
-                    <SortMark value={activeSortField === field && activeSortDirection ? activeSortDirection : false} />
+                    {sortable && <SortMark value={activeSortField === field && activeSortDirection ? activeSortDirection : false} />}
                   </button>
-                  {enableColumnFilters && backendFiltering && schema?.filterable !== false && (
+                  {filterable && (
                     <button type="button" className="column-filter-button" onClick={(event) => toggleColumnMenu(field, event.currentTarget.getBoundingClientRect())} aria-label={`Фильтр столбца ${String(h.column.columnDef.header)}`}>
                       <ListFilter size={14} />
                       {hasColumnFilter(effectiveColumnFilters[String(h.column.id)]) && <span className="filter-mark" aria-label="Есть ограничение" />}
@@ -230,7 +232,7 @@ export function DataGrid({
                     description={schema?.description ?? ""}
                     filter={effectiveColumnFilters[String(h.column.id)] ?? {}}
                     type={schema?.type ?? (rows.some((row) => isFiniteTableNumber((row as Record<string, unknown>)[String(h.column.id)])) ? "number" : "text")}
-                    enableFilters={enableColumnFilters && backendFiltering}
+                    enableFilters={filterable}
                     position={columnMenuPosition}
                     onSort={applySort}
                     onFilter={setColumnFilter}

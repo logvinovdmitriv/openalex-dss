@@ -182,8 +182,8 @@ export function DataView({
           </Field>
         </div>
         <div className="action-row">
-          {!missingScope.missing && hasAvailableTables && <a className="button-link" href={csvUrl}>Скачать текущую выборку</a>}
-          {hasDataRestrictions && <button type="button" className="ghost-button" onClick={resetDataRestrictions}>{hasTableRestrictions ? "Сбросить ограничения" : "Снять точки"}</button>}
+          {!missingScope.missing && hasAvailableTables && <a className="button-link" href={csvUrl}>Скачать все отфильтрованные строки</a>}
+          {hasDataRestrictions && <button type="button" className="ghost-button" onClick={resetDataRestrictions}>Сбросить все</button>}
         </div>
         <DataRestrictionChips
           filters={dataColumnFilters}
@@ -191,6 +191,7 @@ export function DataView({
           sortDirection={dataDirection}
           search={dataSearch}
           selectedAuthorIds={selectedAuthorIds}
+          fieldLabels={fieldLabels}
           onResetSearch={() => setDataSearch("")}
           onRemoveFilter={(field) => {
             const next = { ...dataColumnFilters };
