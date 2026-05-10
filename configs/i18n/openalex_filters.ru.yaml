@@ -1,0 +1,56 @@
+version: "2026-05-10"
+locale: "ru"
+filters:
+  subject_primary_topic:
+    label: "Основная тема работы"
+    short_label: "Основная тема"
+    description: "Работа попадает в срез, если ее основная тема OpenAlex относится к выбранной области, подобласти или теме."
+    user_hint: "Рекомендуемый режим для строгого baseline-среза."
+  subject_topics_any:
+    label: "Любая тема работы"
+    short_label: "Любая тема"
+    description: "Расширенный тематический режим: учитываются все темы работы, а не только основная."
+    user_hint: "Используйте для sensitivity-анализа, а не как основной baseline."
+  keyword:
+    label: "Ключевое слово OpenAlex"
+    short_label: "Ключевое слово"
+    description: "Отбирает работы по идентификатору keyword в OpenAlex."
+  country:
+    label: "Страна организации автора"
+    short_label: "Страна автора"
+    description: "Фильтр по стране организаций, указанных в authorships работы."
+    warning: "Для финального анализа применяется локально после материализации полного среза, чтобы не зависеть от обрезки authorships в list-ответах OpenAlex."
+  institution:
+    label: "Организация автора"
+    short_label: "Организация"
+    description: "Фильтр по организации, указанной в authorships работы."
+    warning: "Для финального анализа применяется локально после материализации полного среза."
+  author:
+    label: "Автор"
+    short_label: "Автор"
+    description: "Фильтр по OpenAlex ID автора."
+    warning: "Для финального анализа применяется локально после материализации полного среза."
+  work_type:
+    label: "Тип публикации"
+    short_label: "Тип"
+    description: "Ограничивает срез типами работ OpenAlex, например article, review или conference-paper."
+  from_publication_date:
+    label: "Дата публикации от"
+    short_label: "Дата от"
+    description: "Нижняя граница периода публикаций."
+  to_publication_date:
+    label: "Дата публикации до"
+    short_label: "Дата до"
+    description: "Верхняя граница периода публикаций."
+  is_retracted:
+    label: "Исключить отозванные работы"
+    short_label: "Без отозванных"
+    description: "Отозванные публикации не включаются в расчет."
+  is_paratext:
+    label: "Исключить служебные тексты"
+    short_label: "Без paratext"
+    description: "Служебные записи OpenAlex не включаются в расчет."
+  is_xpac:
+    label: "Исключить XPAC"
+    short_label: "Без XPAC"
+    description: "XPAC-записи исключаются по умолчанию из-за более низкой сопоставимости данных."

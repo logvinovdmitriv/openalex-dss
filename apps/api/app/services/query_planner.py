@@ -5,6 +5,7 @@ import os
 import sys
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 from datetime import datetime, timedelta, timezone
@@ -31,10 +32,11 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
     refresh_requested = bool(payload.get("refresh_estimate"))
     estimate, estimate_cache = _cached_estimate(cfg, limits, refresh=refresh_requested, api_key=str(payload.get("api_key") or "").strip())
 
+    storage_estimate = storage_estimate_from_openalex_estimate(estimate, download_dir=str(payload.get("download_dir") or ""))
     decision = choose_strategy(
         estimate_count=int(estimate["estimate_count"]),
         planned_api_requests=int(estimate["api_requests_planned"]),
-        estimated_raw_bytes=int(estimate.get("estimated_cli_metadata_bytes") or estimate["estimated_raw_bytes"]),
+        estimated_raw_bytes=int(storage_estimate.get("recommended_free_space_bytes") or estimate.get("estimated_cli_metadata_bytes") or estimate["estimated_raw_bytes"]),
         limits=limits,
     )
     consistency = estimate.get("download_consistency") or {}
@@ -63,6 +65,7 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "openalex_filter": build_filter(cfg),
         "estimate": estimate,
+        "storage_estimate": storage_estimate,
         "estimate_cache": estimate_cache,
         "decision": decision,
         "download_policy": download_policy,
@@ -208,6 +211,7 @@ def choose_strategy(
         "records_to_fetch": estimate_count,
         "api_requests_planned": planned_api_requests,
         "estimated_raw_mb": round(estimated_raw_bytes / (1024 * 1024), 3),
+        "estimated_disk_peak_mb": round(estimated_raw_bytes / (1024 * 1024), 3),
         "complete_slice_required": True,
         "allow_incomplete_preview": False,
         "can_execute": status != "no_data",
@@ -215,6 +219,40 @@ def choose_strategy(
         "reasons": reasons,
         "warnings": warnings,
         "notebook_policy": "Планировщик не ставит скрытый локальный лимит. Пользователь принимает решение после прогноза. Уже скачанные локальные срезы используются без API; новая загрузка среза OpenAlex может требовать ключ OpenAlex.",
+    }
+
+
+def storage_estimate_from_openalex_estimate(estimate: dict[str, Any], *, download_dir: str = "") -> dict[str, Any]:
+    byte_estimate = estimate.get("byte_estimate") if isinstance(estimate.get("byte_estimate"), dict) else {}
+    recommended = byte_estimate.get("recommended_free_space") if isinstance(byte_estimate.get("recommended_free_space"), dict) else {}
+    cli_peak = byte_estimate.get("cli_temp_files_peak") if isinstance(byte_estimate.get("cli_temp_files_peak"), dict) else {}
+    final_raw = byte_estimate.get("final_raw_jsonl_gz") if isinstance(byte_estimate.get("final_raw_jsonl_gz"), dict) else {}
+    parquet = byte_estimate.get("parquet_tables") if isinstance(byte_estimate.get("parquet_tables"), dict) else {}
+    recommended_bytes = int(recommended.get("bytes") or estimate.get("estimated_cli_metadata_bytes") or estimate.get("estimated_raw_bytes") or 0)
+    base_dir = Path(download_dir).expanduser() if download_dir else DATA
+    try:
+        usage = shutil.disk_usage(base_dir if base_dir.exists() else base_dir.parent)
+        free_bytes = int(usage.free)
+    except OSError:
+        free_bytes = 0
+    enough = bool(free_bytes <= 0 or free_bytes >= recommended_bytes)
+    return {
+        "schema": "storage_estimate_v1",
+        "download_dir": str(base_dir),
+        "recommended_free_space_bytes": recommended_bytes,
+        "recommended_free_space_mb": round(recommended_bytes / (1024 * 1024), 3),
+        "free_space_bytes": free_bytes,
+        "free_space_mb": round(free_bytes / (1024 * 1024), 3) if free_bytes else None,
+        "free_space_status": "ok" if enough else "insufficient",
+        "cli_temp_files_peak_bytes": int(cli_peak.get("p90_bytes") or 0),
+        "final_raw_jsonl_gz_bytes": int(final_raw.get("p90_bytes") or 0),
+        "parquet_tables_bytes": int(parquet.get("p90_bytes") or 0),
+        "confidence": str(byte_estimate.get("confidence") or "low"),
+        "message": (
+            "Свободного места достаточно для рекомендованного пикового объема."
+            if enough
+            else "Свободного места меньше рекомендованного пикового объема. Сузьте срез, выберите другой диск или задайте лимит загрузки."
+        ),
     }
 
 

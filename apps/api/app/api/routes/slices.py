@@ -66,6 +66,26 @@ def estimate_slice(slice_id: str, payload: SliceEstimateRequest = Body(default_f
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.post("/slices/{slice_id}/estimate-storage")
+def estimate_slice_storage(slice_id: str) -> dict[str, Any]:
+    try:
+        return slice_workbench.estimate_storage(slice_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Срез не найден") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/slices/{slice_id}/compatible-dumps")
+def compatible_dumps(slice_id: str, limit: int = Query(20, ge=1, le=50)) -> dict[str, Any]:
+    try:
+        return slice_workbench.compatible_dumps_for_slice(slice_id, limit=limit)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Срез не найден") from exc
+
+
 @router.post("/slices/{slice_id}/materialization-plans")
 def create_materialization_plan(slice_id: str, payload: MaterializationPlanRequest) -> dict[str, Any]:
     try:
@@ -126,6 +146,14 @@ def repair_dump(dump_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Локальный срез не найден") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/dumps/{dump_id}/health")
+def dump_health(dump_id: str) -> dict[str, Any]:
+    try:
+        return slice_workbench.dump_health(dump_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Локальный срез не найден") from exc
 
 
 @router.get("/workbench")

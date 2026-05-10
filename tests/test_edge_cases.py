@@ -293,6 +293,7 @@ class EdgeCaseTests(unittest.TestCase):
             get_json.side_effect = [
                 {"meta": {"count": 2}, "results": [_work("W1", "A1", 12)]},
                 {"meta": {"count": 2}, "results": [_work("W2", "A2", 5), _work("W3", "A3", 3)]},
+                {"meta": {"count": 2}, "results": [_work("W2", "A2", 5), _work("W3", "A3", 3)]},
                 {"group_by": [{"key": "article", "key_display_name": "article", "count": 2}]},
                 {"group_by": [{"key": "2020", "key_display_name": "2020", "count": 2}]},
                 {"group_by": [{"key": "RU", "key_display_name": "Russia", "count": 2}]},
@@ -307,6 +308,8 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertTrue(all("has_abstract" not in params.get("select", "") for params in called_params))
             self.assertNotIn("sort", called_params[1])
             self.assertIn("sample", called_params[1])
+            self.assertNotIn("select", called_params[2])
+            self.assertIn("byte_estimate", estimate)
 
     def test_estimate_works_maps_openalex_connectivity_failure_to_runtime_error(self) -> None:
         cfg = replace_config(load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"))

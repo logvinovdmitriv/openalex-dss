@@ -13,6 +13,74 @@ from app.services.work_type_labels import work_type_label
 
 
 OPENALEX_BASE = "https://api.openalex.org"
+FILTER_GROUPS = {
+    "subject_primary_topic": "topic",
+    "subject_topics_any": "topic",
+    "keyword": "topic",
+    "from_publication_date": "publication",
+    "to_publication_date": "publication",
+    "work_type": "publication",
+    "language": "publication",
+    "min_citations": "publication",
+    "doi": "publication",
+    "has_abstract": "publication",
+    "country": "authorship",
+    "institution": "authorship",
+    "author": "authorship",
+    "source": "source",
+    "source_type": "source",
+    "open_access": "access",
+    "is_retracted": "quality",
+    "is_paratext": "quality",
+    "is_xpac": "quality",
+    "min_local_h": "derived",
+    "min_local_publications": "derived",
+}
+FILTER_GROUP_LABELS_RU = {
+    "topic": "Тематика",
+    "publication": "Публикация",
+    "authorship": "Авторы и организации",
+    "source": "Источник",
+    "access": "Доступ",
+    "quality": "Качество данных",
+    "derived": "После расчета индексов",
+    "advanced": "Экспертные фильтры",
+}
+FILTER_INPUT_TYPES = {
+    "subject_primary_topic": "entity_select",
+    "subject_topics_any": "entity_select",
+    "keyword": "entity_select",
+    "country": "country_select",
+    "institution": "entity_select",
+    "author": "entity_select",
+    "source": "entity_select",
+    "work_type": "enum_multi",
+    "from_publication_date": "date",
+    "to_publication_date": "date",
+    "is_retracted": "boolean",
+    "is_paratext": "boolean",
+    "is_xpac": "boolean",
+    "language": "enum",
+    "open_access": "boolean",
+    "min_citations": "number",
+    "doi": "text",
+    "source_type": "enum",
+    "has_abstract": "boolean",
+    "min_local_h": "number",
+    "min_local_publications": "number",
+}
+FILTER_VALUE_SOURCES = {
+    "subject_primary_topic": "subjects",
+    "subject_topics_any": "subjects",
+    "keyword": "keywords",
+    "country": "countries",
+    "institution": "institutions",
+    "author": "authors",
+    "source": "sources",
+    "work_type": "work_types",
+    "language": "languages",
+    "source_type": "source_types",
+}
 
 
 def catalog_status() -> dict[str, Any]:
@@ -30,6 +98,135 @@ def catalog_status() -> dict[str, Any]:
         "languages": _entity_status(status, "language"),
         "source_types": _entity_status(status, "source_type"),
     }
+
+
+def filter_catalog(*, entity: str = "works", stage: str = "download") -> dict[str, Any]:
+    registry_doc = registry.registry().get("openalex_filter_registry") or {}
+    filters = registry_doc.get("filters") if isinstance(registry_doc.get("filters"), dict) else {}
+    groups: dict[str, dict[str, Any]] = {}
+    for filter_id, raw in filters.items():
+        if not isinstance(raw, dict):
+            continue
+        item = _filter_catalog_item(str(filter_id), raw, entity=entity)
+        if not _filter_in_stage(item, stage):
+            continue
+        group_id = item["group_id"]
+        groups.setdefault(
+            group_id,
+            {
+                "group_id": group_id,
+                "label_ru": FILTER_GROUP_LABELS_RU.get(group_id, group_id),
+                "filters": [],
+            },
+        )["filters"].append(item)
+    ordered_group_ids = ["topic", "publication", "authorship", "source", "access", "quality", "derived", "advanced"]
+    out_groups = [groups[group_id] for group_id in ordered_group_ids if group_id in groups]
+    out_groups.extend(group for group_id, group in groups.items() if group_id not in ordered_group_ids)
+    return {
+        "catalog_version": str(registry_doc.get("version") or "1.0"),
+        "entity": entity,
+        "stage": stage,
+        "groups": out_groups,
+        "policy": {
+            "frontend_contract": "Frontend renders controls from this catalog and sends normalized filter values back to backend.",
+            "final_analysis": "Risky authorship filters must be applied locally after materialization for final reports.",
+        },
+    }
+
+
+def filter_values(filter_id: str, q: str = "", *, limit: int = 20) -> dict[str, Any]:
+    value_source = FILTER_VALUE_SOURCES.get(str(filter_id or "").strip())
+    if value_source == "subjects":
+        return search_subjects(q, limit=min(limit, 12))
+    if value_source == "keywords":
+        return search_keywords(q, limit=min(limit, 12))
+    if value_source == "countries":
+        return search_countries(q, limit=min(limit, 50))
+    if value_source == "institutions":
+        return search_institutions(q, limit=min(limit, 12))
+    if value_source == "authors":
+        return search_authors(q, limit=min(limit, 12))
+    if value_source == "sources":
+        return search_sources(q, limit=min(limit, 12))
+    if value_source == "work_types":
+        return work_types(limit=min(limit, 50))
+    if value_source == "languages":
+        return languages(q, limit=min(limit, 50))
+    if value_source == "source_types":
+        return source_types(limit=min(limit, 50))
+    return {"results": [], "filter_id": filter_id, "message": "Для этого фильтра нет справочника значений."}
+
+
+def _filter_catalog_item(filter_id: str, item: dict[str, Any], *, entity: str) -> dict[str, Any]:
+    i18n_doc = registry.registry().get("openalex_filter_i18n") or {}
+    i18n_filters = i18n_doc.get("filters") if isinstance(i18n_doc.get("filters"), dict) else {}
+    i18n = i18n_filters.get(filter_id) if isinstance(i18n_filters.get(filter_id), dict) else {}
+    works_filter = item.get("works_filter") if isinstance(item.get("works_filter"), dict) else {}
+    openalex_field = str(works_filter.get("field") or item.get("derived_field") or "").strip()
+    filter_class = str(item.get("class") or "")
+    risky = filter_class == "fetch_pushdown_risky_authorship"
+    derived = filter_class == "derived_after_metrics"
+    safe_pushdown = filter_class == "openalex_pushdown"
+    return {
+        "filter_id": filter_id,
+        "entity": entity,
+        "openalex_field": openalex_field,
+        "label_ru": str(i18n.get("label") or item.get("label") or filter_id),
+        "short_label_ru": str(i18n.get("short_label") or i18n.get("label") or item.get("label") or filter_id),
+        "description_ru": str(i18n.get("description") or item.get("description_ru") or item.get("risk_reason") or ""),
+        "user_hint_ru": str(i18n.get("user_hint") or ""),
+        "warning_ru": str(i18n.get("warning") or ""),
+        "input_type": FILTER_INPUT_TYPES.get(filter_id, "text"),
+        "value_source": FILTER_VALUE_SOURCES.get(filter_id, ""),
+        "allowed_operators": _allowed_operators(works_filter, derived=derived),
+        "supports_or": bool(works_filter.get("max_or_values") or filter_id in {"work_type"}),
+        "supports_negation": filter_id in {"is_retracted", "is_paratext", "is_xpac"},
+        "supports_range": filter_id in {"from_publication_date", "to_publication_date", "min_citations", "min_local_h", "min_local_publications"},
+        "stage_class": filter_class,
+        "group_id": FILTER_GROUPS.get(filter_id, "advanced"),
+        "fetch_pushdown_status": "risky" if risky else ("safe" if safe_pushdown else ("derived" if derived else "advanced")),
+        "local_filter_equivalent": str(item.get("local_equivalent") or item.get("local_class") or ""),
+        "api_cursor_compatible": not derived,
+        "cli_compatible": safe_pushdown or risky,
+        "ids_hydrate_compatible": True,
+        "snapshot_compatible": True,
+        "risk_level": "high" if risky else ("low" if safe_pushdown else "medium"),
+        "risk_reason_ru": str(item.get("risk_reason") or ""),
+        "final_analysis_policy": str(item.get("final_analysis_policy") or ("local_after_materialization" if risky else "fetch_pushdown_safe")),
+        "docs_url": _filter_docs_url(filter_id),
+        "last_verified_at": "2026-05-10",
+    }
+
+
+def _filter_in_stage(item: dict[str, Any], stage: str) -> bool:
+    requested = str(stage or "download")
+    status = str(item.get("fetch_pushdown_status") or "")
+    if requested in {"all", "expert"}:
+        return True
+    if requested == "download":
+        return status in {"safe", "risky"}
+    if requested == "local":
+        return item.get("final_analysis_policy") == "local_after_materialization"
+    if requested == "derived":
+        return status == "derived"
+    return True
+
+
+def _allowed_operators(works_filter: dict[str, Any], *, derived: bool) -> list[str]:
+    if derived:
+        return ["gte"]
+    operator = str(works_filter.get("operator") or "eq")
+    if operator == ">":
+        return ["gt", "gte"]
+    return ["eq", "or"] if works_filter.get("max_or_values") else ["eq"]
+
+
+def _filter_docs_url(filter_id: str) -> str:
+    if filter_id in {"subject_primary_topic", "subject_topics_any"}:
+        return "https://docs.openalex.org/api-entities/works/get-lists-of-works"
+    if filter_id in {"country", "institution", "author"}:
+        return "https://docs.openalex.org/api-entities/authors/limitations"
+    return "https://docs.openalex.org/api-entities/works/get-lists-of-works"
 
 
 def search_subjects(q: str, *, limit: int = 8) -> dict[str, Any]:

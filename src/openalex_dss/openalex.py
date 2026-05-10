@@ -117,34 +117,57 @@ def estimate_works(
     sample_params.pop("sort", None)
     sample_params["sample"] = str(sample_page_size)
     sample_params["seed"] = str(cfg.random_seed)
+    full_sample_params = dict(sample_params)
+    full_sample_params.pop("select", None)
     api_key = os.environ.get(cfg.api_key_env)
     if api_key:
         count_params["api_key"] = api_key
         sample_params["api_key"] = api_key
+        full_sample_params["api_key"] = api_key
 
     before = cache_stats()
     count_payload = _get_json(API_BASE, count_params)
     sample_payload = _get_json(API_BASE, sample_params)
+    try:
+        full_sample_payload = _get_json(API_BASE, full_sample_params)
+    except RuntimeError:
+        full_sample_payload = sample_payload
     facet_payloads = _estimate_facets(cfg, count_params, api_key)
     after = cache_stats()
     meta = count_payload.get("meta") or {}
     results = sample_payload.get("results") or count_payload.get("results") or []
+    full_results = full_sample_payload.get("results") or results
     count = int(meta.get("count") or 0)
     record_sizes = [
         len((json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
         for row in results
     ]
+    full_record_sizes = [
+        len((json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
+        for row in full_results
+    ]
     sample_bytes = record_sizes[0] if record_sizes else 0
     estimated_record_bytes = max(_mean(record_sizes), 2048)
     p90_record_bytes = max(_quantile(record_sizes, 0.9), estimated_record_bytes)
+    full_record_bytes = max(_mean(full_record_sizes), estimated_record_bytes)
+    full_p90_record_bytes = max(_quantile(full_record_sizes, 0.9), full_record_bytes)
+    full_p95_record_bytes = max(_quantile(full_record_sizes, 0.95), full_p90_record_bytes)
     planned_records = count
     estimated_raw_bytes = count * estimated_record_bytes
     estimated_raw_bytes_p90 = count * p90_record_bytes
-    estimated_cli_metadata_bytes = int(max(estimated_raw_bytes_p90, estimated_raw_bytes * 2.0))
+    full_metadata_bytes = int(count * full_record_bytes)
+    full_metadata_bytes_p90 = int(count * full_p90_record_bytes)
+    full_metadata_bytes_p95 = int(count * full_p95_record_bytes)
+    estimated_cli_metadata_bytes = int(max(full_metadata_bytes_p95, estimated_raw_bytes_p90, estimated_raw_bytes * 2.0))
+    final_raw_jsonl_gz_bytes_p90 = int(max(estimated_cli_metadata_bytes * 0.35, estimated_raw_bytes_p90 * 0.5))
+    parquet_tables_bytes_p90 = int(max(planned_records * 512, full_metadata_bytes_p90 * 0.45))
+    cli_temp_peak_bytes_p90 = int(max(estimated_cli_metadata_bytes * 2.2, full_metadata_bytes_p90 * 2.5))
+    recommended_free_space_bytes = int((cli_temp_peak_bytes_p90 + final_raw_jsonl_gz_bytes_p90 + parquet_tables_bytes_p90) * 1.35)
     estimated_raw_bytes_for_budget = estimated_cli_metadata_bytes
     planned_pages = (planned_records + max(1, cfg.per_page) - 1) // max(1, cfg.per_page)
     public_params = {key: value for key, value in count_params.items() if key != "api_key"}
     public_sample_params = {key: value for key, value in sample_params.items() if key != "api_key"}
+    public_full_sample_params = {key: value for key, value in full_sample_params.items() if key != "api_key"}
     corpus = corpus_request(cfg)
     consistency = download_consistency(cfg)
     return {
@@ -154,6 +177,9 @@ def estimate_works(
         "sample_size": len(record_sizes),
         "estimated_record_bytes": estimated_record_bytes,
         "estimated_record_bytes_p90": p90_record_bytes,
+        "estimated_full_record_bytes": full_record_bytes,
+        "estimated_full_record_bytes_p90": full_p90_record_bytes,
+        "estimated_full_record_bytes_p95": full_p95_record_bytes,
         "planned_records": planned_records,
         "estimated_raw_bytes": estimated_raw_bytes,
         "estimated_raw_mb": round(estimated_raw_bytes / (1024 * 1024), 3),
@@ -163,6 +189,44 @@ def estimate_works(
         "estimated_selected_api_mb": round(estimated_raw_bytes / (1024 * 1024), 3),
         "estimated_cli_metadata_bytes": estimated_cli_metadata_bytes,
         "estimated_cli_metadata_mb": round(estimated_cli_metadata_bytes / (1024 * 1024), 3),
+        "byte_estimate": {
+            "schema": "openalex_storage_estimate_v1",
+            "selected_api_payload": {
+                "p50_bytes": int(estimated_raw_bytes),
+                "p90_bytes": int(estimated_raw_bytes_p90),
+                "p50_mb": round(estimated_raw_bytes / (1024 * 1024), 3),
+                "p90_mb": round(estimated_raw_bytes_p90 / (1024 * 1024), 3),
+                "sample_size": len(record_sizes),
+            },
+            "full_metadata_jsonl": {
+                "p50_bytes": full_metadata_bytes,
+                "p90_bytes": full_metadata_bytes_p90,
+                "p95_bytes": full_metadata_bytes_p95,
+                "p50_mb": round(full_metadata_bytes / (1024 * 1024), 3),
+                "p90_mb": round(full_metadata_bytes_p90 / (1024 * 1024), 3),
+                "p95_mb": round(full_metadata_bytes_p95 / (1024 * 1024), 3),
+                "sample_size": len(full_record_sizes),
+            },
+            "cli_temp_files_peak": {
+                "p90_bytes": cli_temp_peak_bytes_p90,
+                "p90_mb": round(cli_temp_peak_bytes_p90 / (1024 * 1024), 3),
+                "model": "max(full_metadata_p95, selected_p90, selected_p50*2) * temp safety factor",
+            },
+            "final_raw_jsonl_gz": {
+                "p90_bytes": final_raw_jsonl_gz_bytes_p90,
+                "p90_mb": round(final_raw_jsonl_gz_bytes_p90 / (1024 * 1024), 3),
+            },
+            "parquet_tables": {
+                "p90_bytes": parquet_tables_bytes_p90,
+                "p90_mb": round(parquet_tables_bytes_p90 / (1024 * 1024), 3),
+            },
+            "recommended_free_space": {
+                "bytes": recommended_free_space_bytes,
+                "mb": round(recommended_free_space_bytes / (1024 * 1024), 3),
+                "reason": "cli_temp_peak_p90 + final_raw_jsonl_gz_p90 + parquet_tables_p90 with safety margin",
+            },
+            "confidence": "medium" if len(full_record_sizes) >= min(20, sample_page_size) else "low",
+        },
         "estimate_scope": {
             "api_sample": "выборка Works для оценки объема и фасетов",
             "downloader_payload": "полные метаданные Works для локального среза; прогноз консервативный, потому что загрузчик не поддерживает select-проекцию",
@@ -179,9 +243,10 @@ def estimate_works(
         "download_consistency": consistency,
         "openalex_request": public_params,
         "sample_request": public_sample_params,
+        "full_sample_request": public_full_sample_params,
         "facets": facet_payloads,
         "rate_limit": rate_limit_status(),
-        "estimated_cost_usd": _payload_cost(count_payload) + _payload_cost(sample_payload) + _facets_cost(facet_payloads),
+        "estimated_cost_usd": _payload_cost(count_payload) + _payload_cost(sample_payload) + _payload_cost(full_sample_payload) + _facets_cost(facet_payloads),
         "cache": {
             "hits_delta": after["hits"] - before["hits"],
             "misses_delta": after["misses"] - before["misses"],

@@ -21,6 +21,16 @@ def catalog_status() -> dict[str, Any]:
     return openalex_catalog.catalog_status()
 
 
+@router.get("/openalex/filter-catalog")
+def filter_catalog(entity: str = "works", stage: str = "download") -> dict[str, Any]:
+    return openalex_catalog.filter_catalog(entity=entity, stage=stage)
+
+
+@router.get("/openalex/filter-values/{filter_id}")
+def filter_values(filter_id: str, q: str = Query("", min_length=0), limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
+    return _openalex_call(lambda: openalex_catalog.filter_values(filter_id, q, limit=limit))
+
+
 @router.post("/openalex/catalog/sync-subjects")
 def sync_subjects(include_topics: bool = True, max_topics: int = Query(50_000, ge=0, le=250_000)) -> dict[str, Any]:
     return _openalex_call(lambda: openalex_catalog.sync_subject_catalog(include_topics=include_topics, max_topics=max_topics))

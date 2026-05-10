@@ -36,6 +36,7 @@ def registry() -> dict[str, Any]:
         "ui_options": ui_options,
         "data_sources": data_sources.get("sources", []),
         "openalex_filter_registry": _read_yaml("openalex_filter_registry.yaml"),
+        "openalex_filter_i18n": _read_yaml("i18n/openalex_filters.ru.yaml"),
     }
 
 

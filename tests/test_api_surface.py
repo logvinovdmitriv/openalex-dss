@@ -87,6 +87,27 @@ class PublicApiSurfaceTests(unittest.TestCase):
         self.assertIn("/api/v1/local-data/preview", route_paths)
         self.assertIn("/api/v1/local-data/preview.csv", route_paths)
 
+    def test_openalex_filter_catalog_routes_are_public(self) -> None:
+        route_paths = {getattr(route, "path", "") for route in app.routes}
+
+        self.assertIn("/api/v1/openalex/filter-catalog", route_paths)
+        self.assertIn("/api/v1/openalex/filter-values/{filter_id}", route_paths)
+        self.assertIn("/api/v1/slices/{slice_id}/estimate-storage", route_paths)
+        self.assertIn("/api/v1/slices/{slice_id}/compatible-dumps", route_paths)
+        self.assertIn("/api/v1/dumps/{dump_id}/health", route_paths)
+
+    def test_openalex_filter_catalog_marks_authorship_filters_risky(self) -> None:
+        payload = openalex_routes.filter_catalog(entity="works", stage="download")
+        filters = {
+            item["filter_id"]: item
+            for group in payload["groups"]
+            for item in group["filters"]
+        }
+
+        self.assertEqual(filters["country"]["fetch_pushdown_status"], "risky")
+        self.assertEqual(filters["country"]["final_analysis_policy"], "local_after_materialization")
+        self.assertEqual(filters["subject_primary_topic"]["fetch_pushdown_status"], "safe")
+
     def test_generic_table_browser_routes_are_not_public(self) -> None:
         route_paths = {getattr(route, "path", "") for route in app.routes}
 

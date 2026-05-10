@@ -142,10 +142,12 @@ def estimate_slice(slice_id: str, payload: dict[str, Any] | None = None) -> dict
         "status": plan["decision"]["status"],
         "decision": plan["decision"],
         "estimate": plan["estimate"],
+        "storage_estimate": plan.get("storage_estimate") or {},
         "openalex_filter": plan["openalex_filter"],
         "filter_classes": plan["filter_classes"],
         "download_policy": plan["download_policy"],
         "execution_limits": plan["limits"],
+        "existing_dump_candidates": compatible_dumps_for_slice(slice_id, limit=5)["candidates"],
     }
     cfg = author_slice.config_from_payload({**merged_payload, "workflow_mode": "strict_works"})
     doc["technical_payload"] = _public_payload(_canonical_payload(cfg, slice_name=slice_id))
@@ -214,6 +216,8 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         "download_dir": download_dir,
         "download_policy": download_policy,
         "estimated": estimate,
+        "storage_estimate": estimate.get("storage_estimate") or {},
+        "existing_dump_candidates": compatible_dumps_for_slice(slice_id, limit=5)["candidates"],
         "accepted_estimate_signature": (estimate.get("estimate") or {}).get("estimate_signature"),
         "accepted_download_signature": (estimate.get("estimate") or {}).get("download_signature"),
         "technical_payload": technical_payload,
@@ -241,6 +245,58 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
     doc["lifecycle"] = _lifecycle(doc["state"])
     _write_slice(doc)
     return materialization
+
+
+def estimate_storage(slice_id: str) -> dict[str, Any]:
+    doc = get_slice(slice_id)
+    cfg = author_slice.config_from_payload({**doc["technical_payload"], "workflow_mode": "strict_works"})
+    estimate = _current_estimate_or_refresh(slice_id, doc, cfg, _download_policy({}, fallback=doc.get("download_policy_default")))
+    return {
+        "slice_id": slice_id,
+        "storage_estimate": estimate.get("storage_estimate") or {},
+        "byte_estimate": (estimate.get("estimate") or {}).get("byte_estimate") or {},
+        "existing_dump_candidates": compatible_dumps_for_slice(slice_id, limit=5)["candidates"],
+    }
+
+
+def compatible_dumps_for_slice(slice_id: str, *, limit: int = 20) -> dict[str, Any]:
+    doc = get_slice(slice_id)
+    cfg = author_slice.config_from_payload({**doc["technical_payload"], "workflow_mode": "strict_works"})
+    expected_filter = str(corpus_request(cfg).get("filter") or "")
+    expected_estimate_signature = corpus_signature(cfg)
+    expected_download_signature = cli_download_signature(cfg)
+    candidates = []
+    for dump in _merged_dump_records(limit=250):
+        match = _dump_match_status(
+            dump,
+            expected_filter=expected_filter,
+            expected_estimate_signature=expected_estimate_signature,
+            expected_download_signature=expected_download_signature,
+        )
+        if match["status"] in {"exact_match", "compatible_superset", "unknown"}:
+            candidates.append(
+                {
+                    "dump_id": dump.get("dump_id"),
+                    "slice_id": dump.get("slice_id"),
+                    "records_downloaded": dump.get("records_downloaded"),
+                    "records_expected": dump.get("records_expected"),
+                    "created_at_utc": dump.get("created_at_utc"),
+                    "allowed_for_final_analysis": dump.get("allowed_for_final_analysis"),
+                    "scientific_completeness": dump.get("scientific_completeness"),
+                    "storage": dump.get("storage") or {},
+                    "health": dump.get("health") or {},
+                    "match": match,
+                }
+            )
+        if len(candidates) >= max(1, min(limit, 50)):
+            break
+    return {
+        "slice_id": slice_id,
+        "expected_filter": expected_filter,
+        "expected_estimate_signature": expected_estimate_signature,
+        "expected_download_signature": expected_download_signature,
+        "candidates": candidates,
+    }
 
 
 def run_materialization(materialization_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -387,6 +443,13 @@ def repair_dump(dump_id: str) -> dict[str, Any]:
     run = jobs.create_run("repair_dump", run_payload, autostart=False)
     jobs.start_run(run["run_id"])
     return {"status": "queued", "dump": dump, "health": health, "run": jobs.get_run(run["run_id"])}
+
+
+def dump_health(dump_id: str) -> dict[str, Any]:
+    resolved_dump_id, dump = _resolve_dump_record(dump_id)
+    if not dump:
+        raise KeyError(dump_id)
+    return {"dump_id": resolved_dump_id, "health": _dump_health(resolved_dump_id, dump), "storage": _dump_storage_summary(resolved_dump_id, dump, _dump_health(resolved_dump_id, dump))}
 
 
 def mark_materialization_run_completed(run_id: str, result: dict[str, Any], *, materialization_id: str = "") -> None:
@@ -781,7 +844,73 @@ def _merged_dump_records(limit: int = 250) -> list[dict[str, Any]]:
 
 def _with_dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
     health = _dump_health(dump_id, dump)
-    return {**dump, "health": health, "storage": _dump_storage_summary(dump_id, dump, health)}
+    match = _dump_match_status(
+        dump,
+        expected_filter=str(dump.get("openalex_filter") or ""),
+        expected_estimate_signature=str(dump.get("estimate_signature") or ""),
+        expected_download_signature=str(dump.get("download_signature") or ""),
+    )
+    return {**dump, "health": health, "storage": _dump_storage_summary(dump_id, dump, health), "self_match": match}
+
+
+def _dump_match_status(
+    dump: dict[str, Any],
+    *,
+    expected_filter: str,
+    expected_estimate_signature: str,
+    expected_download_signature: str,
+) -> dict[str, Any]:
+    dump_filter = str(dump.get("openalex_filter") or "")
+    dump_estimate_signature = str(dump.get("estimate_signature") or "")
+    dump_download_signature = str(dump.get("download_signature") or "")
+    if expected_download_signature and dump_download_signature and dump_download_signature == expected_download_signature:
+        return {
+            "status": "exact_match",
+            "label": "точное совпадение",
+            "reason": "download_signature совпадает с текущим срезом.",
+            "final_usable": bool(dump.get("allowed_for_final_analysis")),
+        }
+    if expected_estimate_signature and dump_estimate_signature and dump_estimate_signature == expected_estimate_signature:
+        return {
+            "status": "exact_match",
+            "label": "точное совпадение",
+            "reason": "estimate_signature совпадает с текущим срезом.",
+            "final_usable": bool(dump.get("allowed_for_final_analysis")),
+        }
+    if expected_filter and dump_filter and dump_filter == expected_filter:
+        return {
+            "status": "exact_match",
+            "label": "точное совпадение",
+            "reason": "OpenAlex filter совпадает с текущим срезом.",
+            "final_usable": bool(dump.get("allowed_for_final_analysis")),
+        }
+    if not dump_filter or not expected_filter:
+        return {
+            "status": "unknown",
+            "label": "совместимость неизвестна",
+            "reason": "В паспорте среза нет полного filter/signature для строгой проверки.",
+            "final_usable": False,
+        }
+    if expected_filter in dump_filter:
+        return {
+            "status": "compatible_subset",
+            "label": "срез уже текущего",
+            "reason": "Dump содержит дополнительные ограничения и не покрывает весь текущий срез.",
+            "final_usable": False,
+        }
+    if dump_filter in expected_filter:
+        return {
+            "status": "compatible_superset",
+            "label": "dump шире текущего среза",
+            "reason": "Dump потенциально можно использовать с локальными фильтрами, но для финального анализа требуется проверка mart-фильтров.",
+            "final_usable": bool(dump.get("allowed_for_final_analysis")),
+        }
+    return {
+        "status": "incompatible",
+        "label": "несовместим",
+        "reason": "Фильтр/signature dump не совпадает с текущим срезом.",
+        "final_usable": False,
+    }
 
 
 def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
