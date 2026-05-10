@@ -12,17 +12,21 @@ from app.core.paths import DATA
 DB_PATH = DATA / "warehouse" / "openalex_metadata.sqlite"
 
 
+def _fetch_limited(cursor: sqlite3.Cursor, limit: int) -> list[sqlite3.Row]:
+    return list(cursor.fetchmany(max(1, int(limit or 1))))
+
+
 def catalog_status() -> dict[str, Any]:
     _ensure_schema()
     with _connect() as conn:
-        rows = conn.execute(
+        rows = _fetch_limited(conn.execute(
             """
             SELECT entity_type, count(*) AS n
             FROM catalog_entities
             GROUP BY entity_type
             ORDER BY entity_type
             """
-        ).fetchall()
+        ), 32)
         dumps = conn.execute("SELECT count(*) FROM slice_dumps").fetchone()[0]
     return {
         "db_path": str(DB_PATH),
@@ -77,7 +81,8 @@ def search_entities(entity_type: str, query: str, *, limit: int = 8) -> list[dic
         return list_entities(entity_type, limit=limit)
     like = f"%{text}%"
     with _connect() as conn:
-        rows = conn.execute(
+        row_limit = max(1, min(limit, 50))
+        rows = _fetch_limited(conn.execute(
             """
             SELECT *
             FROM catalog_entities
@@ -92,15 +97,16 @@ def search_entities(entity_type: str, query: str, *, limit: int = 8) -> list[dic
             ORDER BY works_count DESC, display_name ASC
             LIMIT ?
             """,
-            [entity_type, like, like, like, like, like, max(1, min(limit, 50))],
-        ).fetchall()
+            [entity_type, like, like, like, like, like, row_limit],
+        ), row_limit)
     return [_row_to_entity(row) for row in rows]
 
 
 def list_entities(entity_type: str, *, limit: int = 8) -> list[dict[str, Any]]:
     _ensure_schema()
     with _connect() as conn:
-        rows = conn.execute(
+        row_limit = max(1, min(limit, 50))
+        rows = _fetch_limited(conn.execute(
             """
             SELECT *
             FROM catalog_entities
@@ -108,8 +114,8 @@ def list_entities(entity_type: str, *, limit: int = 8) -> list[dict[str, Any]]:
             ORDER BY works_count DESC, display_name ASC
             LIMIT ?
             """,
-            [entity_type, max(1, min(limit, 50))],
-        ).fetchall()
+            [entity_type, row_limit],
+        ), row_limit)
     return [_row_to_entity(row) for row in rows]
 
 
@@ -170,15 +176,16 @@ def record_slice_dump(passport: dict[str, Any]) -> None:
 def list_slice_dumps(limit: int = 50) -> list[dict[str, Any]]:
     _ensure_schema()
     with _connect() as conn:
-        rows = conn.execute(
+        row_limit = max(1, min(limit, 250))
+        rows = _fetch_limited(conn.execute(
             """
             SELECT *
             FROM slice_dumps
             ORDER BY created_at_utc DESC
             LIMIT ?
             """,
-            [max(1, min(limit, 250))],
-        ).fetchall()
+            [row_limit],
+        ), row_limit)
     result: list[dict[str, Any]] = []
     for row in rows:
         result.append(_row_to_slice_dump(row))
@@ -204,14 +211,14 @@ def get_slice_dump_by_dump_id(dump_id: str) -> dict[str, Any] | None:
 def delete_slice_dump_by_dump_id(dump_id: str) -> dict[str, Any]:
     _ensure_schema()
     with _connect() as conn:
-        rows = conn.execute(
+        rows = _fetch_limited(conn.execute(
             """
             SELECT *
             FROM slice_dumps
             WHERE dump_id = ?
             """,
             [dump_id],
-        ).fetchall()
+        ), 1000)
         conn.execute("DELETE FROM slice_dumps WHERE dump_id = ?", [dump_id])
     return {"deleted": len(rows), "dumps": [_row_to_slice_dump(row) for row in rows]}
 
@@ -342,7 +349,7 @@ def _ensure_schema() -> None:
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
-    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    existing = {row["name"] for row in _fetch_limited(conn.execute(f"PRAGMA table_info({table})"), 128)}
     if column not in existing:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 

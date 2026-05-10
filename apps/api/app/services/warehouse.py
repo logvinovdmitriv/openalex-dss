@@ -303,7 +303,7 @@ def table_schema(table: str, *, run_id: str = "", dump_id: str = "") -> list[str
     if not table_exists(table, run_id=run_id, dump_id=dump_id):
         return []
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
-        return [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
+        return [row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchmany(512)]
 
 
 def table_column_schema(table: str, *, run_id: str = "", dump_id: str = "") -> list[dict[str, Any]]:
@@ -311,7 +311,7 @@ def table_column_schema(table: str, *, run_id: str = "", dump_id: str = "") -> l
         return []
     metric_by_id = {str(item.get("id")): item for item in metric_registry.catalog_metrics()}
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
-        rows = conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+        rows = conn.execute(f"PRAGMA table_info('{table}')").fetchmany(512)
     schema: list[dict[str, Any]] = []
     for row in rows:
         field = str(row[1])
@@ -486,7 +486,8 @@ def _query_registered_table(
             [*args, offset],
         )
         effective_limit = 0
-    rows = _records(rel)
+    max_in_memory_rows = (max(fetch_limit, raw_limit) + 1) if raw_limit > 0 else 500_000
+    rows = _records(rel, max_rows=max_in_memory_rows)
     has_more = False
     if not include_total and raw_limit > 0 and len(rows) > raw_limit:
         has_more = True
@@ -1217,7 +1218,7 @@ def _write_filtered_indices_cache(
 def _read_cached_index_rows(path: Path) -> list[dict[str, Any]]:
     escaped = str(path).replace("'", "''")
     with duckdb.connect(":memory:") as conn:
-        return _records(conn.execute(f"SELECT * FROM read_parquet('{escaped}')"))
+        return _records(conn.execute(f"SELECT * FROM read_parquet('{escaped}')"), max_rows=500_000)
 
 
 def _filtered_indices_cache_key(
@@ -1511,7 +1512,8 @@ def _filtered_work_indices(
                 WHERE {" AND ".join(where)}
                 """,
                 args,
-            )
+            ),
+            max_rows=2_000_000,
         )
 
     out = _indices_from_filtered_author_work_rows(rows, fraction_mode=fraction_mode, run_id=run_id, dump_id=dump_id, metric_params=metric_params)
@@ -2069,12 +2071,12 @@ def author_detail(
         indices = []
         if indices_fields:
             select_sql = _select_existing_sql(indices_fields, AUTHOR_INDEX_DETAIL_FIELDS)
-            indices = _records(conn.execute(f"SELECT {select_sql} FROM indices WHERE author_id = ?", [author_id]))
+            indices = _records(conn.execute(f"SELECT {select_sql} FROM indices WHERE author_id = ?", [author_id]), max_rows=10)
         ratings = []
         if ratings_fields:
             select_sql = _select_existing_sql(ratings_fields, RATING_DETAIL_FIELDS)
             order_sql = _order_sql(ratings_fields, ("metric_name", "rank_competition"))
-            ratings = _records(conn.execute(f"SELECT {select_sql} FROM ratings WHERE author_id = ? {order_sql}", [author_id]))
+            ratings = _records(conn.execute(f"SELECT {select_sql} FROM ratings WHERE author_id = ? {order_sql}", [author_id]), max_rows=1_000)
         works = []
         works_has_more = False
         if author_work_fields and works_fields:
@@ -2090,7 +2092,7 @@ def author_detail(
                 LIMIT ? OFFSET ?
                 """,
                 [author_id, works_limit + 1, works_offset],
-            ))
+            ), max_rows=works_limit + 1)
             if len(works) > works_limit:
                 works_has_more = True
                 works = works[:works_limit]
@@ -2125,7 +2127,7 @@ def work_detail(
         works = []
         if works_fields:
             select_sql = _select_existing_sql(works_fields, WORK_DETAIL_FIELDS)
-            works = _records(conn.execute(f"SELECT {select_sql} FROM works WHERE work_id = ?", [work_id]))
+            works = _records(conn.execute(f"SELECT {select_sql} FROM works WHERE work_id = ?", [work_id]), max_rows=1)
         authorships = []
         authorships_has_more = False
         if authorships_fields:
@@ -2135,7 +2137,8 @@ def work_detail(
                 conn.execute(
                     f"SELECT {select_sql} FROM authorships WHERE work_id = ? {order_sql} LIMIT ? OFFSET ?",
                     [work_id, authors_limit + 1, authors_offset],
-                )
+                ),
+                max_rows=authors_limit + 1,
             )
             if len(authorships) > authors_limit:
                 authorships_has_more = True
@@ -2149,7 +2152,8 @@ def work_detail(
                 conn.execute(
                     f"SELECT {select_sql} FROM author_work WHERE work_id = ? {order_sql} LIMIT ? OFFSET ?",
                     [work_id, authors_limit + 1, authors_offset],
-                )
+                ),
+                max_rows=authors_limit + 1,
             )
             if len(author_work) > authors_limit:
                 author_work_has_more = True

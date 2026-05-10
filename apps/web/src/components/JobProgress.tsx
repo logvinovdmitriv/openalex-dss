@@ -1,8 +1,27 @@
 import type { ActiveFilters } from "../domain";
 import { fmt } from "../domain";
-import { bytesToMb, humanSliceTitle, progressForRun, type WorkbenchRun } from "../workbench";
+import {
+  bytesToMb,
+  humanSliceTitle,
+  progressForRun,
+  type EstimatePayload,
+  type MaterializationPlanPayload,
+  type WorkbenchRun,
+} from "../workbench";
 
-export function ProgressPanel({ filters, estimate, materialization, run }: { filters: ActiveFilters; estimate: any; materialization: any; run: any }) {
+type ProgressDetails = Record<string, unknown>;
+
+export function ProgressPanel({
+  filters,
+  estimate,
+  materialization,
+  run,
+}: {
+  filters: ActiveFilters;
+  estimate?: EstimatePayload | null;
+  materialization?: MaterializationPlanPayload | null;
+  run?: WorkbenchRun | null;
+}) {
   const steps = [
     { id: "draft", label: "Срез", ready: true },
     { id: "estimated", label: "Оценка", ready: Boolean(estimate) },
@@ -27,7 +46,7 @@ export function ProgressPanel({ filters, estimate, materialization, run }: { fil
 export function RunCard({ run }: { run: WorkbenchRun }) {
   if (!run) return null;
   const progress = progressForRun(run);
-  const details = (run as any).progress ?? {};
+  const details = recordValue(run.progress);
   const fetchedWorks = Number(details.fetched ?? 0);
   const targetWorks = Number(details.target_records ?? details.total_available ?? 0);
   const downloadingExternalFiles = details.progress_scope === "download" && details.external_progress === true && fetchedWorks <= 0;
@@ -35,8 +54,9 @@ export function RunCard({ run }: { run: WorkbenchRun }) {
   const hasFilesCounter = details.files_seen || details.bytes_written;
   const plannedBytes = Number(details.estimated_raw_bytes ?? 0);
   const currentBytes = Number(details.bytes_written ?? 0);
-  const result = (run.result ?? {}) as Record<string, any>;
-  const resultDump = ((result.fetch ?? {}) as Record<string, any>).dump ?? result.dump ?? {};
+  const result = recordValue(run.result);
+  const resultFetch = recordValue(result.fetch);
+  const resultDump = recordValue(resultFetch.dump ?? result.dump);
   const finalRawBytes = Number(resultDump.bytes_written ?? 0);
   const forecastExceeded = plannedBytes > 0 && currentBytes > plannedBytes;
   const forecastNoticeClass = run.status === "completed" ? "run-note" : "run-warning";
@@ -68,7 +88,7 @@ export function RunCard({ run }: { run: WorkbenchRun }) {
           {downloadingExternalFiles && targetWorks > 0 && <span>Ожидается до упаковки: {fmt(targetWorks)} работ</span>}
           {details.page_count ? <span>{fmt(details.page_count)} страниц</span> : null}
           {details.files_seen ? <span>{filesSeenLabel}</span> : null}
-          {hasFilesCounter ? <span>{fmt(bytesToMb(details.bytes_written ?? 0))} МБ временных файлов</span> : null}
+          {hasFilesCounter ? <span>{fmt(bytesToMb(Number(details.bytes_written ?? 0)))} МБ временных файлов</span> : null}
           {finalRawBytes > 0 ? <span>Файл среза: {fmt(bytesToMb(finalRawBytes))} МБ</span> : null}
           {plannedBytes > 0 ? <span>Ориентир загрузки: {fmt(bytesToMb(plannedBytes))} МБ</span> : null}
           {details.elapsed_seconds ? <span>{formatElapsed(details.elapsed_seconds)}</span> : null}
@@ -142,7 +162,7 @@ type RunPhase = {
   state: "pending" | "active" | "done" | "error";
 };
 
-function runProgressPhases(run: WorkbenchRun, details: Record<string, any>): RunPhase[] {
+function runProgressPhases(run: WorkbenchRun, details: ProgressDetails): RunPhase[] {
   if (Array.isArray(run.progress_phases) && run.progress_phases.length > 0) {
     return run.progress_phases.map((phase, index) => {
       const state = String(phase.state ?? "pending");
@@ -262,4 +282,8 @@ function formatElapsed(seconds: unknown) {
   const rest = rounded % 60;
   if (minutes <= 0) return `${rest} сек`;
   return `${minutes} мин ${rest} сек`;
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

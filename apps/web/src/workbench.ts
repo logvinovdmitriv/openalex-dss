@@ -246,6 +246,7 @@ export type WorkbenchRun = {
   status?: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed" | string;
   progress_percent?: number | null;
   progress_stage?: string;
+  progress?: Record<string, unknown> | null;
   progress_phases?: Array<{ id?: string; label?: string; state?: string; percent?: number | null; determinate?: boolean }>;
   error?: string | null;
   payload?: Record<string, unknown> | null;

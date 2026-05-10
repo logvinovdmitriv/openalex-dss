@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from .duckdb_io import sql_literal
+from .duckdb_io import csv_table_expression, sql_literal
 from .io_utils import csv_value, ensure_parent, iter_jsonl, write_json, write_parquet_dicts
 
 NULL_AUTHOR_ID = "https://openalex.org/A9999999999"
@@ -297,10 +297,9 @@ def _write_parquet_from_csv(csv_path: str | Path, fieldnames: list[str], row_cou
         return write_parquet_dicts(parquet_path, _read_csv_rows_for_parquet(csv_path), fieldnames)
 
     ensure_parent(parquet_path)
-    csv_literal = sql_literal(Path(csv_path))
     parquet_literal = sql_literal(parquet_path)
     columns = ", ".join(f'"{field}"' for field in fieldnames)
-    query = f"SELECT {columns} FROM read_csv_auto({csv_literal}, header=true)"
+    query = f"SELECT {columns} FROM {csv_table_expression(csv_path)}"
     con = duckdb.connect(database=":memory:")
     try:
         con.execute(f"COPY ({query}) TO {parquet_literal} (FORMAT PARQUET)")

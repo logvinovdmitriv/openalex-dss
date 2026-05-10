@@ -38,9 +38,19 @@ def test_data_sorting_does_not_eagerly_refresh_heavy_analytics() -> None:
 
 
 def test_formula_and_tooltip_ui_stay_in_dedicated_components() -> None:
-    main = (ROOT / "apps/web/src/WorkbenchApp.tsx").read_text(encoding="utf-8")
+    indices_view = (ROOT / "apps/web/src/features/indices/IndicesView.tsx").read_text(encoding="utf-8")
     formula_component = (ROOT / "apps/web/src/features/formulas/FormulaBuilder.tsx").read_text(encoding="utf-8")
-    assert "FormulaBuilderDialog" in main
+    assert "FormulaBuilderDialog" in indices_view
     assert "formula-builder" in formula_component
     assert "MetricInfoPopover" in formula_component
     assert "modal-backdrop" in formula_component
+
+
+def test_analytics_and_indices_are_feature_views() -> None:
+    main = (ROOT / "apps/web/src/WorkbenchApp.tsx").read_text(encoding="utf-8")
+    analytics = (ROOT / "apps/web/src/features/analytics/AnalyticsView.tsx").read_text(encoding="utf-8")
+    indices = (ROOT / "apps/web/src/features/indices/IndicesView.tsx").read_text(encoding="utf-8")
+    assert "function StatisticsPage" not in main
+    assert "function RankingsPage" not in main
+    assert "export function AnalyticsView" in analytics
+    assert "export function IndicesView" in indices
