@@ -1525,11 +1525,13 @@ def _boxplot_values(rows: list[dict[str, Any]], raw_values: list[float | None]) 
     values = sorted(value for _, value in pairs)
     if not values:
         return {
+            "min": None,
             "min_whisker": None,
             "q1": None,
             "median": None,
             "q3": None,
             "max_whisker": None,
+            "max": None,
             "iqr": None,
             "outliers": [],
         }
@@ -1538,17 +1540,31 @@ def _boxplot_values(rows: list[dict[str, Any]], raw_values: list[float | None]) 
     q3 = _quantile_sorted(values, 0.75)
     iqr = q3 - q1
     if iqr == 0.0:
+        display_outliers = [
+            {
+                "author_id": str(row.get("author_id") or ""),
+                "author_display_name": row.get("author_display_name") or row.get("display_name") or "",
+                "value": value,
+            }
+            for row, value in pairs
+            if value != median
+        ]
+        display_outliers.sort(key=lambda item: (-float(item["value"]), str(item["author_id"])))
         return {
-            "min_whisker": values[0],
+            "min": values[0],
+            "min_whisker": q1,
             "q1": q1,
             "median": median,
             "q3": q3,
-            "max_whisker": values[-1],
+            "max_whisker": q3,
+            "max": values[-1],
             "iqr": iqr,
-            "lower_fence": None,
-            "upper_fence": None,
+            "lower_fence": q1,
+            "upper_fence": q3,
             "outliers": [],
             "outlier_count": 0,
+            "display_outliers": display_outliers[:10],
+            "display_outlier_count": len(display_outliers),
             "outlier_rule": "iqr_zero_no_outlier_fence",
             "outlier_rule_unstable": True,
             "warning": "Межквартильный размах равен нулю; правило выделяющихся значений по ящику с усами для этого показателя неинформативно.",
@@ -1567,11 +1583,13 @@ def _boxplot_values(rows: list[dict[str, Any]], raw_values: list[float | None]) 
     ]
     outliers.sort(key=lambda item: (-float(item["value"]), str(item["author_id"])))
     return {
+        "min": values[0],
         "min_whisker": min(inner) if inner else values[0],
         "q1": q1,
         "median": median,
         "q3": q3,
         "max_whisker": max(inner) if inner else values[-1],
+        "max": values[-1],
         "iqr": iqr,
         "lower_fence": low,
         "upper_fence": high,

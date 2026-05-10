@@ -570,10 +570,10 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
       const q3 = numberOrNull(boxplot.q3);
       const max = numberOrNull(boxplot.max_whisker ?? boxplot.max);
       if (![min, q1, median, q3, max].every((value) => value !== null)) return null;
-      const outlierRows = ((payload.outliers ?? {})[metricName] ?? []) as Array<Record<string, unknown>>;
+      const outlierRows = ((boxplot.display_outliers ?? (payload.outliers ?? {})[metricName]) ?? []) as Array<Record<string, unknown>>;
       const outlierValues = outlierRows.map((item) => Number(item.value)).filter(Number.isFinite).slice(0, 24);
-      const left = Math.min(min as number, q1 as number, median as number, q3 as number, max as number, ...outlierValues);
-      const right = Math.max(min as number, q1 as number, median as number, q3 as number, max as number, ...outlierValues);
+      const left = Math.min(min as number, q1 as number, median as number, q3 as number, max as number);
+      const right = Math.max(min as number, q1 as number, median as number, q3 as number, max as number);
       return {
         metricName,
         min: min as number,
@@ -581,10 +581,13 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
         median: median as number,
         q3: q3 as number,
         max: max as number,
-        outliers: Number(boxplot.outlier_count ?? 0),
+        outliers: Number(boxplot.display_outlier_count ?? boxplot.outlier_count ?? 0),
         outlierValues,
         domainMin: left,
         domainMax: right,
+        observedMin: numberOrNull(boxplot.min),
+        observedMax: numberOrNull(boxplot.max),
+        compactOutliers: Boolean(boxplot.display_outliers),
       };
     })
     .filter(Boolean) as Array<{
@@ -598,6 +601,9 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
       outlierValues: number[];
       domainMin: number;
       domainMax: number;
+      observedMin: number | null;
+      observedMax: number | null;
+      compactOutliers: boolean;
     }>;
   if (!rows.length) {
     return <EmptyState title="Нет диапазонов" detail="Для выбранных индексов нет достаточного числа числовых значений." />;
@@ -609,8 +615,12 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
           const leftPad = 64;
           const rightPad = 38;
           const width = 1000 - leftPad - rightPad;
-          if (row.domainMax <= row.domainMin) return leftPad + width / 2;
-          return leftPad + ((value - row.domainMin) / (row.domainMax - row.domainMin)) * width;
+          const domain = expandedBoxplotDomain(row.domainMin, row.domainMax, row.observedMin, row.observedMax);
+          return leftPad + ((value - domain.min) / (domain.max - domain.min)) * width;
+        };
+        const xClamped = (value: number) => {
+          const raw = x(value);
+          return Math.max(70, Math.min(956, raw));
         };
         const minX = x(row.min);
         const q1X = x(row.q1);
@@ -623,7 +633,7 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
           <div key={row.metricName} className="boxplot-svg-row">
             <div className="boxplot-svg-title">
               <b>{metricLabelFor(row.metricName, metricLabels)}</b>
-              <span>Q1 {formatAnalysisValue(row.q1)} · медиана {formatAnalysisValue(row.median)} · Q3 {formatAnalysisValue(row.q3)}{row.outliers ? ` · выделяющихся ${fmt(row.outliers)}` : ""}</span>
+              <span>Q1 {formatAnalysisValue(row.q1)} · медиана {formatAnalysisValue(row.median)} · Q3 {formatAnalysisValue(row.q3)}{row.outliers ? ` · выделяющихся ${fmt(row.outliers)}` : ""}{row.observedMax !== null && row.observedMax > row.max ? ` · максимум ${formatAnalysisValue(row.observedMax)}` : ""}</span>
             </div>
             <svg viewBox="0 0 1000 88" role="img" aria-label={`Ящик с усами для ${metricLabelFor(row.metricName, metricLabels)}`} className="boxplot-svg">
               <line x1="64" y1="62" x2="962" y2="62" className="boxplot-axis" />
@@ -639,8 +649,8 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
               <rect x={boxX} y="18" width={boxWidth} height="32" rx="2" className="boxplot-box" />
               <line x1={medianX} y1="14" x2={medianX} y2="54" className="boxplot-median" />
               {row.outlierValues.map((value, index) => (
-                <circle key={`${row.metricName}-outlier-${index}`} cx={x(value)} cy="34" r="4" className="boxplot-outlier">
-                  <title>{`Выделяющееся значение: ${formatAnalysisValue(value)}`}</title>
+                <circle key={`${row.metricName}-outlier-${index}`} cx={xClamped(value)} cy="34" r="4" className="boxplot-outlier">
+                  <title>{`${row.compactOutliers ? "Значение вне основной шкалы" : "Выделяющееся значение"}: ${formatAnalysisValue(value)}`}</title>
                 </circle>
               ))}
             </svg>
@@ -649,6 +659,17 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
       })}
     </div>
   );
+}
+
+function expandedBoxplotDomain(domainMin: number, domainMax: number, observedMin: number | null, observedMax: number | null) {
+  if (domainMax > domainMin) {
+    const pad = Math.max((domainMax - domainMin) * 0.08, 0.5);
+    return { min: domainMin - pad, max: domainMax + pad };
+  }
+  const center = domainMin;
+  const observedSpread = Math.max(Math.abs((observedMax ?? center) - center), Math.abs(center - (observedMin ?? center)));
+  const pad = Math.max(observedSpread > 0 ? Math.min(observedSpread, Math.max(1, Math.abs(center))) : 1, 1);
+  return { min: center - pad, max: center + pad };
 }
 
 function numberOrNull(value: unknown) {

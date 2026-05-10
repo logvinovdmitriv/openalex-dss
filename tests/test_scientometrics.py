@@ -91,6 +91,10 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(summary["iqr"], 0.0)
         self.assertEqual(summary["outlier_count_iqr"], 0)
         self.assertEqual(boxplot["outliers"], [])
+        self.assertEqual(boxplot["min_whisker"], 1.0)
+        self.assertEqual(boxplot["max_whisker"], 1.0)
+        self.assertEqual(boxplot["display_outlier_count"], 1)
+        self.assertEqual(boxplot["display_outliers"][0]["author_id"], "A5")
         self.assertEqual(boxplot["outlier_rule"], "iqr_zero_no_outlier_fence")
 
     def test_top_overlap_exact_n_does_not_expand_tied_rank_cut(self) -> None:
