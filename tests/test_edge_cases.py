@@ -102,17 +102,37 @@ class EdgeCaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             included = _work("WOK", "A1", 5)
+            included["publication_date"] = "2026-01-15"
             retracted = _work("WRET", "A1", 50)
             retracted["is_retracted"] = True
+            retracted["publication_date"] = "2026-01-15"
             paratext = _work("WPARA", "A1", 50)
             paratext["is_paratext"] = True
+            paratext["publication_date"] = "2026-01-15"
             xpac = _work("WXPAC", "A1", 50)
             xpac["is_xpac"] = True
+            xpac["publication_date"] = "2026-01-15"
+            wrong_type = _work("WTYPE", "A1", 50)
+            wrong_type["type"] = "book"
+            wrong_type["publication_date"] = "2026-01-15"
+            out_of_range = _work("WDATE", "A1", 50)
+            out_of_range["publication_date"] = "2025-12-31"
             raw = root / "raw.jsonl"
-            raw.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in [included, retracted, paratext, xpac]) + "\n", encoding="utf-8")
+            raw.write_text(
+                "\n".join(json.dumps(item, ensure_ascii=False) for item in [included, retracted, paratext, xpac, wrong_type, out_of_range]) + "\n",
+                encoding="utf-8",
+            )
             normalize_raw(raw, root / "works.csv", root / "auth.csv", root / "quality.json")
 
-            mart = build_author_work_metrics(root / "works.csv", root / "auth.csv", root / "awm.csv", ("integer",))
+            mart = build_author_work_metrics(
+                root / "works.csv",
+                root / "auth.csv",
+                root / "awm.csv",
+                ("integer",),
+                work_types=("article",),
+                from_publication_date="2026-01-01",
+                to_publication_date="2026-12-31",
+            )
 
         self.assertEqual({row["work_id"] for row in mart}, {"https://openalex.org/WOK"})
 
@@ -192,8 +212,8 @@ class EdgeCaseTests(unittest.TestCase):
             author_work.write_text(
                 "\n".join(
                     [
-                        "run_id,fraction_mode,work_id,author_id,author_display_name,publication_year,cited_by_count,authors_count_used,credit_weight,cited_credit,single_authored_flag,qf_any,qf_authorship_truncated,qf_null_omission,omitted_author_fraction",
-                        'run_a,integer,W1,A1,"M.Ed., B.Ed., Independent Researcher",2026,1.0,1.0,1.0,1.0,true,false,false,false,',
+                        "run_id,fraction_mode,work_id,author_id,author_display_name,publication_year,cited_by_count,authors_count_used,actual_authors_count,authors_count_reported,credit_weight,cited_credit,single_authored_flag,qf_any,qf_authorship_truncated,qf_author_omission,omitted_author_fraction",
+                        'run_a,integer,W1,A1,"M.Ed., B.Ed., Independent Researcher",2026,1.0,1.0,1.0,1.0,1.0,1.0,true,false,false,false,',
                     ]
                 )
                 + "\n",

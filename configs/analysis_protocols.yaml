@@ -1,0 +1,69 @@
+version: "1.0"
+protocols:
+  - protocol_id: "baseline_core_protocol"
+    label: "Базовый протокол сравнения популярных показателей"
+    description: "Воспроизводимое сравнение популярных наукометрических показателей на фиксированном локальном срезе."
+    metrics:
+      core:
+        - p
+        - c
+        - c_frac
+        - h
+        - i10
+        - g
+      diagnostic:
+        - cpp
+        - top1_share
+        - mean_authors_per_work
+        - share_single_authored
+        - n_flagged_works
+        - n_truncated_works
+      experimental:
+        - f5
+        - fm5
+        - iupv
+        - islv
+        - lrdi
+    baseline_metric: "h"
+    fraction_mode: "strict_authors_count"
+    eligibility:
+      primary_mode: "all_authors"
+      optional_min_publications: 2
+    comparisons:
+      correlations:
+        - spearman
+        - kendall_tau_b
+        - pearson_log1p
+      overlap_n:
+        - 10
+        - 20
+        - 50
+        - 100
+      rank_delta_pairs:
+        - [c, c_frac]
+        - [h, g]
+        - [h, i10]
+        - [p, h]
+    sensitivity:
+      planned:
+        - top1_per_author_removed
+        - global_top_k_removed
+        - integer_vs_fractional
+        - strict_vs_renorm
+        - exclude_flagged_works
+    outputs:
+      tables:
+        - slice_quality_summary
+        - metric_rank_summary
+        - pairwise_metric_comparison
+      figures:
+        - quality_funnel
+        - works_by_year
+        - citations_log_hist
+        - authors_per_work_hist
+        - metric_boxplots
+        - metric_ecdf
+        - spearman_heatmap
+        - kendall_heatmap
+        - top_overlap_heatmaps
+        - rank_delta

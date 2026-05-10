@@ -21,6 +21,7 @@ RATING_FIELDS = [
     "author_display_name",
     "score",
     "position",
+    "rank_ordinal",
     "rank_competition",
     "rank_dense",
     "tie_break_c",
@@ -77,6 +78,7 @@ def _build_ratings_python(
                         "author_display_name": row.get("author_display_name"),
                         "score": score,
                         "position": pos,
+                        "rank_ordinal": pos,
                         "rank_competition": competition_rank,
                         "rank_dense": dense_rank,
                         "tie_break_c": as_float(row.get("c")),
@@ -135,7 +137,11 @@ ranked AS (
         ROW_NUMBER() OVER (
             PARTITION BY run_id, fraction_mode, metric_name
             ORDER BY score DESC, tie_break_c DESC, tie_break_p DESC, author_id ASC
-        ) AS position
+        ) AS position,
+        ROW_NUMBER() OVER (
+            PARTITION BY run_id, fraction_mode, metric_name
+            ORDER BY score DESC, tie_break_c DESC, tie_break_p DESC, author_id ASC
+        ) AS rank_ordinal
     FROM metric_rows
 )
 SELECT {", ".join(RATING_FIELDS)}

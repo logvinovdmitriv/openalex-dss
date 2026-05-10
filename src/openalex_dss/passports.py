@@ -203,6 +203,9 @@ def _with_reproducibility_artifacts(primary_artifacts: dict[str, Any], root_path
     out = dict(primary_artifacts)
     for label, rel in {
         "repo/config/slice.yaml": Path("config/slice.yaml"),
+        "repo/configs/analysis_protocols.yaml": Path("configs/analysis_protocols.yaml"),
+        "repo/configs/metric_registry.yaml": Path("configs/metric_registry.yaml"),
+        "repo/configs/ranking_profiles.yaml": Path("configs/ranking_profiles.yaml"),
         "repo/docs/methodology.md": Path("docs/methodology.md"),
         "repo/requirements.lock": Path("requirements.lock"),
         "repo/pyproject.toml": Path("pyproject.toml"),

@@ -414,6 +414,9 @@ def _run_compute(
         exclude_retracted=bool(getattr(cfg, "exclude_retracted", True)),
         exclude_paratext=bool(getattr(cfg, "exclude_paratext", True)),
         include_xpac=bool(getattr(cfg, "include_xpac", False)),
+        work_types=tuple(part.strip() for part in str(getattr(cfg, "work_type", "") or "").split("|") if part.strip()),
+        from_publication_date=str(getattr(cfg, "from_publication_date", "") or ""),
+        to_publication_date=str(getattr(cfg, "to_publication_date", "") or ""),
     )
     step(0.48, "Расчет наукометрических показателей")
     compute_indices(

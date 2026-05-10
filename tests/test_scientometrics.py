@@ -75,6 +75,7 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertIn("c_frac", rank_payload["comparisons"])
         self.assertGreater(rank_payload["comparisons"]["c_frac"]["max_abs_delta"], 0)
         self.assertEqual(rank_payload["top_overlap"]["matrix"]["h"]["g"]["2"]["overlap"], 2)
+        self.assertEqual(rank_payload["top_overlap"]["matrix"]["h"]["g"]["2"]["overlap_rate"], 1.0)
 
     def test_iqr_zero_boxplot_does_not_create_false_outliers(self) -> None:
         rows = [
@@ -129,7 +130,27 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(payload["top_overlap"]["mode"], "exact_n_by_competition_rank_then_author_id")
         self.assertEqual(overlap["left_n"], 2)
         self.assertEqual(overlap["right_n"], 2)
+        self.assertEqual(overlap["overlap_denominator"], 2)
         self.assertLessEqual(overlap["overlap"], 2)
+
+    def test_metric_rank_summary_and_pairwise_table_are_exposed(self) -> None:
+        rows = [
+            {"author_id": "A1", "author_display_name": "A One", "h": 5, "g": 10, "c": 30},
+            {"author_id": "A2", "author_display_name": "A Two", "h": 4, "g": 8, "c": 20},
+            {"author_id": "A3", "author_display_name": "A Three", "h": 1, "g": 2, "c": 100},
+        ]
+        with patch.object(scientometrics.warehouse, "selected_index_rows", return_value=rows):
+            payload = scientometrics.build_scientometric_analysis(
+                fraction_mode="integer",
+                metrics=["h", "g", "c"],
+                baseline_metric="h",
+                run_id="run_pairwise",
+            )
+
+        self.assertEqual(payload["analysis_protocol"]["protocol_id"], "baseline_core_protocol")
+        self.assertEqual(payload["metric_groups"]["core"], ["h", "g", "c"])
+        self.assertTrue(any(row["metric"] == "h" and row["metric_group"] == "core" for row in payload["metric_rank_summary"]))
+        self.assertTrue(any(row["metric_a"] == "h" and row["metric_b"] == "g" for row in payload["pairwise_metric_comparison"]))
 
     def test_rank_comparisons_keep_largest_rank_changes_bounded(self) -> None:
         rows = [

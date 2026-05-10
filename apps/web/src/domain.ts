@@ -276,6 +276,7 @@ const columnLabels: Record<string, string> = {
   rank_competition: "Место",
   rank_dense: "Место без пропусков",
   position: "Позиция",
+  rank_ordinal: "Позиция",
   p: "Публикации",
   c: "Цитирования",
   c_frac: "Долевые цитирования",

@@ -177,6 +177,9 @@ def build_author_work_metrics(
     exclude_retracted: bool = True,
     exclude_paratext: bool = True,
     include_xpac: bool = False,
+    work_types: tuple[str, ...] = (),
+    from_publication_date: str = "",
+    to_publication_date: str = "",
 ) -> list[dict[str, Any]]:
     if not return_rows:
         try:
@@ -189,6 +192,9 @@ def build_author_work_metrics(
                 exclude_retracted=exclude_retracted,
                 exclude_paratext=exclude_paratext,
                 include_xpac=include_xpac,
+                work_types=work_types,
+                from_publication_date=from_publication_date,
+                to_publication_date=to_publication_date,
             )
             return []
         except ImportError:
@@ -201,6 +207,9 @@ def build_author_work_metrics(
                 exclude_retracted=exclude_retracted,
                 exclude_paratext=exclude_paratext,
                 include_xpac=include_xpac,
+                work_types=work_types,
+                from_publication_date=from_publication_date,
+                to_publication_date=to_publication_date,
             )
             return []
     return _build_author_work_metrics_python(
@@ -212,6 +221,9 @@ def build_author_work_metrics(
         exclude_retracted=exclude_retracted,
         exclude_paratext=exclude_paratext,
         include_xpac=include_xpac,
+        work_types=work_types,
+        from_publication_date=from_publication_date,
+        to_publication_date=to_publication_date,
     )
 
 
@@ -225,6 +237,9 @@ def _build_author_work_metrics_python(
     exclude_retracted: bool,
     exclude_paratext: bool,
     include_xpac: bool,
+    work_types: tuple[str, ...],
+    from_publication_date: str,
+    to_publication_date: str,
 ) -> list[dict[str, Any]]:
     works = {row["work_id"]: row for row in read_table_dicts(works_path)}
     authorships = read_table_dicts(authorships_path)
@@ -236,7 +251,15 @@ def _build_author_work_metrics_python(
         work = works.get(work_id)
         if not work:
             continue
-        if _excluded_work(work, exclude_retracted=exclude_retracted, exclude_paratext=exclude_paratext, include_xpac=include_xpac):
+        if _excluded_work(
+            work,
+            exclude_retracted=exclude_retracted,
+            exclude_paratext=exclude_paratext,
+            include_xpac=include_xpac,
+            work_types=work_types,
+            from_publication_date=from_publication_date,
+            to_publication_date=to_publication_date,
+        ):
             continue
         author_id = auth.get("author_id")
         if not author_id or author_id in {NULL_AUTHOR_ID, DELETED_AUTHOR_ID}:
@@ -311,6 +334,9 @@ def _build_author_work_metrics_duckdb(
     exclude_retracted: bool,
     exclude_paratext: bool,
     include_xpac: bool,
+    work_types: tuple[str, ...],
+    from_publication_date: str,
+    to_publication_date: str,
 ) -> None:
     if not fraction_modes:
         write_csv_dicts(out_path, [], AUTHOR_WORK_FIELDS)
@@ -324,6 +350,9 @@ def _build_author_work_metrics_duckdb(
         exclude_retracted=exclude_retracted,
         exclude_paratext=exclude_paratext,
         include_xpac=include_xpac,
+        work_types=work_types,
+        from_publication_date=from_publication_date,
+        to_publication_date=to_publication_date,
     )
     copy_query(query, out_path, Path(out_path).with_suffix(".parquet"))
 
@@ -337,6 +366,9 @@ def _author_work_query(
     exclude_retracted: bool,
     exclude_paratext: bool,
     include_xpac: bool,
+    work_types: tuple[str, ...],
+    from_publication_date: str,
+    to_publication_date: str,
 ) -> str:
     works = table_expression(works_path)
     authorships = table_expression(authorships_path)
@@ -384,7 +416,15 @@ WITH joined AS (
     INNER JOIN {works} AS w ON CAST(a.work_id AS VARCHAR) = CAST(w.work_id AS VARCHAR)
     WHERE NULLIF(CAST(a.author_id AS VARCHAR), '') IS NOT NULL
       AND CAST(a.author_id AS VARCHAR) NOT IN ({sql_literal(NULL_AUTHOR_ID)}, {sql_literal(DELETED_AUTHOR_ID)})
-      {_work_exclusion_sql(works_fields, exclude_retracted=exclude_retracted, exclude_paratext=exclude_paratext, include_xpac=include_xpac)}
+      {_work_exclusion_sql(
+          works_fields,
+          exclude_retracted=exclude_retracted,
+          exclude_paratext=exclude_paratext,
+          include_xpac=include_xpac,
+          work_types=work_types,
+          from_publication_date=from_publication_date,
+          to_publication_date=to_publication_date,
+      )}
 ),
 dedup AS (
     SELECT
@@ -652,15 +692,39 @@ def _first_nonempty(values: Any) -> str | None:
     return None
 
 
-def _excluded_work(work: dict[str, Any], *, exclude_retracted: bool, exclude_paratext: bool, include_xpac: bool) -> bool:
+def _excluded_work(
+    work: dict[str, Any],
+    *,
+    exclude_retracted: bool,
+    exclude_paratext: bool,
+    include_xpac: bool,
+    work_types: tuple[str, ...] = (),
+    from_publication_date: str = "",
+    to_publication_date: str = "",
+) -> bool:
+    work_type = str(work.get("type") or "").strip()
+    allowed_types = {str(item).strip() for item in work_types if str(item).strip()}
+    publication_date = str(work.get("publication_date") or "").strip()
     return (
         (exclude_retracted and truthy(work.get("is_retracted")))
         or (exclude_paratext and truthy(work.get("is_paratext")))
         or (not include_xpac and truthy(work.get("is_xpac")))
+        or (allowed_types and work_type not in allowed_types)
+        or (from_publication_date and (not publication_date or publication_date < from_publication_date))
+        or (to_publication_date and (not publication_date or publication_date > to_publication_date))
     )
 
 
-def _work_exclusion_sql(fields: set[str], *, exclude_retracted: bool, exclude_paratext: bool, include_xpac: bool) -> str:
+def _work_exclusion_sql(
+    fields: set[str],
+    *,
+    exclude_retracted: bool,
+    exclude_paratext: bool,
+    include_xpac: bool,
+    work_types: tuple[str, ...] = (),
+    from_publication_date: str = "",
+    to_publication_date: str = "",
+) -> str:
     clauses: list[str] = []
     if exclude_retracted and "is_retracted" in fields:
         clauses.append(f"NOT {_truthy_sql('w.is_retracted')}")
@@ -668,6 +732,13 @@ def _work_exclusion_sql(fields: set[str], *, exclude_retracted: bool, exclude_pa
         clauses.append(f"NOT {_truthy_sql('w.is_paratext')}")
     if not include_xpac and "is_xpac" in fields:
         clauses.append(f"NOT {_truthy_sql('w.is_xpac')}")
+    allowed_types = tuple(str(item).strip() for item in work_types if str(item).strip())
+    if allowed_types and "type" in fields:
+        clauses.append("CAST(w.type AS VARCHAR) IN (" + ", ".join(sql_literal(item) for item in allowed_types) + ")")
+    if from_publication_date and "publication_date" in fields:
+        clauses.append(f"CAST(w.publication_date AS VARCHAR) >= {sql_literal(from_publication_date)}")
+    if to_publication_date and "publication_date" in fields:
+        clauses.append(f"CAST(w.publication_date AS VARCHAR) <= {sql_literal(to_publication_date)}")
     return "" if not clauses else " AND " + " AND ".join(clauses)
 
 

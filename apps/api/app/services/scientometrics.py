@@ -22,6 +22,18 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
     "i10",
     "g",
 )
+CORE_METRIC_IDS = ("p", "c", "c_frac", "h", "i10", "g")
+DIAGNOSTIC_METRIC_IDS = ("cpp", "m_local", "top1_share", "mean_authors_per_work", "share_single_authored", "n_flagged_works", "n_truncated_works")
+EXPERIMENTAL_METRIC_IDS = ("f5", "fm5", "iupv", "islv", "lrdi")
+BASELINE_ANALYSIS_PROTOCOL = {
+    "protocol_id": "baseline_core_protocol",
+    "baseline_metric": "h",
+    "core_metrics": list(CORE_METRIC_IDS),
+    "diagnostic_metrics": list(DIAGNOSTIC_METRIC_IDS),
+    "experimental_metrics": list(EXPERIMENTAL_METRIC_IDS),
+    "rank_delta_pairs": [["c", "c_frac"], ["h", "g"], ["h", "i10"], ["p", "h"]],
+    "overlap_n": [10, 20, 50, 100],
+}
 SCIENTOMETRIC_ANALYSIS_SCHEMA = "scientometric_analysis"
 SCIENTOMETRIC_FINDINGS_SCHEMA = "scientometric_findings"
 SCIENTOMETRIC_CONCLUSION_SCHEMA = "scientometric_conclusion"
@@ -133,6 +145,7 @@ def build_scientometric_analysis(
     value_vectors = _metric_value_vectors(rows, vector_metrics)
     rank_vectors = _rank_vectors({metric: value_vectors.get(metric, []) for metric in vector_metrics})
     descriptive = _describe_metrics_from_vectors(len(rows), selected_metrics, value_vectors)
+    metric_rank_summary = _metric_rank_summary(selected_metrics, value_vectors, descriptive)
     boxplots = _boxplot_metrics_from_vectors(rows, selected_metrics, value_vectors)
     histograms = _histogram_metrics_from_vectors(selected_metrics, value_vectors)
     normality = _normality_metrics_from_vectors(selected_metrics, value_vectors)
@@ -143,6 +156,11 @@ def build_scientometric_analysis(
         baseline_metric=baseline_metric,
         rank_top_n=min(rank_top_n, len(rows) or rank_top_n),
         value_vectors=value_vectors,
+    )
+    pairwise_metric_comparison = _pairwise_metric_comparison(
+        selected_metrics,
+        correlations=correlations,
+        rank_comparisons=rank_comparison_payload,
     )
     scorecard = metric_scorecard(rows, selected_metrics, descriptive=descriptive, value_vectors=value_vectors, rank_vectors=rank_vectors)
     warnings = _analysis_warnings(
@@ -182,6 +200,7 @@ def build_scientometric_analysis(
         "cohort_id": cohort_id,
         "cohort_filter_policy": cohort_filter_policy,
         "baseline_metric": baseline_metric,
+        "analysis_protocol_id": BASELINE_ANALYSIS_PROTOCOL["protocol_id"],
         "analysis_author_scope": "data_page_selection",
         "rank_top_n": rank_top_n,
         "n_authors": len(rows),
@@ -203,15 +222,19 @@ def build_scientometric_analysis(
         "scope": analysis_scope,
         "cohort_context": cohort_context,
         "metrics": selected_metrics,
+        "metric_groups": _metric_groups(selected_metrics),
+        "analysis_protocol": BASELINE_ANALYSIS_PROTOCOL,
         "custom_metrics": context["custom_metrics"],
         "n_authors": len(rows),
         "descriptive": descriptive,
+        "metric_rank_summary": metric_rank_summary,
         "boxplots": boxplots,
         "histograms": histograms,
         "normality": normality,
         "correlations": correlations,
         "rank_top_n": rank_top_n,
         "rank_comparisons": rank_comparison_payload["comparisons"],
+        "pairwise_metric_comparison": pairwise_metric_comparison,
         "top_overlap": rank_comparison_payload["top_overlap"],
         "outliers": _outlier_table(boxplots),
         "metric_scorecard": scorecard,
@@ -349,6 +372,60 @@ def _describe_metrics_from_vectors(
         metric: _describe_values([value for value in value_vectors.get(metric, []) if value is not None], n_total)
         for metric in metrics
     }
+
+
+def _metric_rank_summary(
+    metrics: list[str] | tuple[str, ...],
+    value_vectors: dict[str, list[float | None]],
+    descriptive: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for metric in metrics:
+        values = [value for value in value_vectors.get(metric, []) if value is not None and math.isfinite(value)]
+        summary = descriptive.get(metric) or {}
+        positive_sum = sum(max(0.0, value) for value in values)
+        ordered_positive = sorted((max(0.0, value) for value in values), reverse=True)
+        rows.append(
+            {
+                "metric": metric,
+                "metric_group": _metric_group(metric),
+                "n_authors": int(summary.get("n") or len(values)),
+                "mean": summary.get("mean"),
+                "median": summary.get("median"),
+                "stddev": summary.get("stddev"),
+                "min": summary.get("min"),
+                "p25": summary.get("q1"),
+                "p75": summary.get("q3"),
+                "p90": summary.get("p90"),
+                "p95": summary.get("p95"),
+                "p99": summary.get("p99"),
+                "max": summary.get("max"),
+                "zero_rate": summary.get("zero_rate"),
+                "tie_rate": summary.get("tie_rate"),
+                "unique_count": summary.get("unique_count"),
+                "outlier_share_iqr": summary.get("outlier_share_iqr"),
+                "top10_share": (sum(ordered_positive[:10]) / positive_sum) if positive_sum > 0 else None,
+                "top20_share": (sum(ordered_positive[:20]) / positive_sum) if positive_sum > 0 else None,
+            }
+        )
+    return rows
+
+
+def _metric_group(metric: str) -> str:
+    if metric in CORE_METRIC_IDS:
+        return "core"
+    if metric in DIAGNOSTIC_METRIC_IDS:
+        return "diagnostic"
+    if metric in EXPERIMENTAL_METRIC_IDS:
+        return "experimental"
+    return "custom"
+
+
+def _metric_groups(metrics: list[str] | tuple[str, ...]) -> dict[str, list[str]]:
+    groups = {"core": [], "diagnostic": [], "experimental": [], "custom": []}
+    for metric in metrics:
+        groups[_metric_group(metric)].append(metric)
+    return groups
 
 
 def boxplot_metrics(rows: list[dict[str, Any]], metrics: list[str] | tuple[str, ...]) -> dict[str, Any]:
@@ -502,7 +579,46 @@ def rank_comparisons(
             "jaccard_top_n": jaccard_exact,
             "largest_shifts": sorted((item[3] for item in largest_shifts_heap), key=lambda item: (-int(item["abs_rank_delta"]), str(item["author_id"]))),
         }
-    return {"comparisons": comparisons, "top_overlap": top_overlap}
+    return {"baseline_metric": baseline_metric, "comparisons": comparisons, "top_overlap": top_overlap}
+
+
+def _pairwise_metric_comparison(
+    metrics: list[str] | tuple[str, ...],
+    *,
+    correlations: dict[str, Any],
+    rank_comparisons: dict[str, Any],
+) -> list[dict[str, Any]]:
+    selected = list(metrics)
+    spearman = correlations.get("spearman") or {}
+    pearson = correlations.get("pearson_log1p") or {}
+    kendall = (correlations.get("kendall_tau_b") or {}).get("matrix") or {}
+    overlap_matrix = ((rank_comparisons.get("top_overlap") or {}).get("matrix") or {})
+    comparisons = rank_comparisons.get("comparisons") or {}
+    rows: list[dict[str, Any]] = []
+    baseline_metric = str(rank_comparisons.get("baseline_metric") or "")
+    for left_index, left in enumerate(selected):
+        for right in selected[left_index + 1 :]:
+            overlap_by_cut = overlap_matrix.get(left, {}).get(right, {})
+            delta = comparisons.get(right) if baseline_metric == left else (comparisons.get(left) if baseline_metric == right else None)
+            rows.append(
+                {
+                    "metric_a": left,
+                    "metric_b": right,
+                    "metric_a_group": _metric_group(left),
+                    "metric_b_group": _metric_group(right),
+                    "spearman": (spearman.get(left) or {}).get(right),
+                    "kendall_tau_b": (kendall.get(left) or {}).get(right),
+                    "pearson_log1p": (pearson.get(left) or {}).get(right),
+                    "top10_overlap_rate": (overlap_by_cut.get("10") or {}).get("overlap_rate"),
+                    "top20_overlap_rate": (overlap_by_cut.get("20") or {}).get("overlap_rate"),
+                    "top50_overlap_rate": (overlap_by_cut.get("50") or {}).get("overlap_rate"),
+                    "median_abs_rank_delta_vs_baseline": delta.get("median_abs_delta") if isinstance(delta, dict) else None,
+                    "p90_abs_rank_delta_vs_baseline": delta.get("p90_abs_delta") if isinstance(delta, dict) else None,
+                    "max_abs_rank_delta_vs_baseline": delta.get("max_abs_delta") if isinstance(delta, dict) else None,
+                    "share_abs_delta_le_5_vs_baseline": delta.get("share_abs_delta_le_5") if isinstance(delta, dict) else None,
+                }
+            )
+    return rows
 
 
 def _ordered_top_authors(metric_ranks: dict[str, int], limit: int) -> list[str]:
@@ -1894,8 +2010,12 @@ def _top_overlap_matrix_from_ordered(ordered_authors: dict[str, list[str]], cuts
             for cut in cuts:
                 left_top = top_sets[left].get(cut, set())
                 right_top = top_sets[right].get(cut, set())
+                denominator = min(cut, len(ordered_authors.get(left, [])), len(ordered_authors.get(right, [])))
+                overlap = len(left_top & right_top)
                 by_cut[str(cut)] = {
-                    "overlap": len(left_top & right_top),
+                    "overlap": overlap,
+                    "overlap_rate": (overlap / denominator) if denominator > 0 else None,
+                    "overlap_denominator": denominator,
                     "jaccard": _jaccard(left_top, right_top),
                     "left_n": len(left_top),
                     "right_n": len(right_top),
