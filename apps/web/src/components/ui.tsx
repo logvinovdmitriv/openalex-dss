@@ -6,6 +6,9 @@ import { CheckCircle2, Download, ListFilter } from "lucide-react";
 import type { TableColumnFilter, TableColumnFilters, TableColumnSchema, TableResponse } from "../api";
 import { columnLabel, countryLabel, fmt, languageLabel, modeLabel, metricLabel, sourceTypeLabel, workTypeLabel } from "../domain";
 
+type DataGridSortDirection = "asc" | "desc";
+type DataGridSortChange = (field: string, direction: DataGridSortDirection | "") => void;
+
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return <div className="field"><span>{label}</span>{children}</div>;
 }
@@ -62,8 +65,8 @@ export function DataGrid({
   selectionField?: string;
   onSelectedIdsChange?: (ids: string[]) => void;
   sortField?: string;
-  sortDirection?: "asc" | "desc";
-  onSortChange?: (field: string, direction: "asc" | "desc") => void;
+  sortDirection?: DataGridSortDirection;
+  onSortChange?: DataGridSortChange;
   enableColumnFilters?: boolean;
   columnFilters?: TableColumnFilters;
   onColumnFiltersChange?: (value: TableColumnFilters) => void;
@@ -85,7 +88,13 @@ export function DataGrid({
     () => serverControlled ? rows : rows.filter((row) => rowMatchesColumnFilters(row as Record<string, unknown>, effectiveColumnFilters)),
     [rows, effectiveColumnFilters, serverControlled],
   );
-  const controlledSorting = sortField ? [{ id: sortField, desc: sortDirection !== "asc" }] : sorting;
+  const activeSortField = onSortChange ? sortField : String(sorting[0]?.id ?? "");
+  const activeSortDirection: DataGridSortDirection | "" = onSortChange
+    ? (sortField ? sortDirection : "")
+    : (sorting[0] ? (sorting[0].desc ? "desc" : "asc") : "");
+  const controlledSorting = onSortChange
+    ? (sortField ? [{ id: sortField, desc: sortDirection !== "asc" }] : [])
+    : sorting;
   const setColumnFilters = onColumnFiltersChange ?? setLocalColumnFilters;
   const setColumnFilter = (field: string, patch: TableColumnFilter) => {
     const current = effectiveColumnFilters[field] ?? {};
@@ -112,14 +121,21 @@ export function DataGrid({
     setOpenColumn(field);
     setColumnMenuPosition(columnMenuPositionFromRect(rect));
   };
-  const applySort = (field: string, direction: "asc" | "desc") => {
+  const applySort = (field: string, direction: DataGridSortDirection | "") => {
     if (onSortChange) onSortChange(field, direction);
-    else setSorting([{ id: field, desc: direction === "desc" }]);
+    else setSorting(direction ? [{ id: field, desc: direction === "desc" }] : []);
     closeColumnMenu();
   };
   const toggleSort = (field: string) => {
-    const nextDirection = sortField === field && sortDirection === "desc" ? "asc" : "desc";
-    applySort(field, nextDirection);
+    if (activeSortField !== field) {
+      applySort(field, "desc");
+      return;
+    }
+    if (activeSortDirection === "desc") {
+      applySort(field, "asc");
+      return;
+    }
+    applySort("", "");
   };
   useEffect(() => {
     if (!openColumn) return undefined;
@@ -199,13 +215,13 @@ export function DataGrid({
             {hg.headers.map((h) => {
               const field = String(h.column.id);
               const schema = columnSchemaByField.get(field);
-              const active = hasColumnFilter(effectiveColumnFilters[field]) || sortField === field;
+              const active = hasColumnFilter(effectiveColumnFilters[field]) || activeSortField === field;
               return (
               <th key={h.id} className={active ? "column-active" : undefined}>
                 <div className="table-header-controls">
                   <button type="button" className="table-sort-button" disabled={schema?.sortable === false} onClick={() => toggleSort(field)} aria-label={`Сортировать столбец ${String(h.column.columnDef.header)}`}>
                     <span>{flexRender(h.column.columnDef.header, h.getContext())}</span>
-                    <SortMark value={sortField === field ? sortDirection : h.column.getIsSorted()} />
+                    <SortMark value={activeSortField === field && activeSortDirection ? activeSortDirection : false} />
                   </button>
                   {enableColumnFilters && schema?.filterable !== false && (
                     <button type="button" className="column-filter-button" onClick={(event) => toggleColumnMenu(field, event.currentTarget.getBoundingClientRect())} aria-label={`Фильтр столбца ${String(h.column.columnDef.header)}`}>
@@ -319,7 +335,7 @@ function ColumnMenu({
   type: string;
   enableFilters: boolean;
   position: ColumnMenuPosition | null;
-  onSort: (field: string, direction: "asc" | "desc") => void;
+  onSort: DataGridSortChange;
   onFilter: (field: string, patch: TableColumnFilter) => void;
   onReset: (field: string) => void;
   onClose: () => void;
@@ -338,6 +354,7 @@ function ColumnMenu({
       </div>
       <button type="button" onClick={() => onSort(field, "asc")}>По возрастанию</button>
       <button type="button" onClick={() => onSort(field, "desc")}>По убыванию</button>
+      <button type="button" onClick={() => onSort("", "")}>Без сортировки</button>
       {enableFilters && (
         <div className="column-filter-form">
           {type === "number" ? (

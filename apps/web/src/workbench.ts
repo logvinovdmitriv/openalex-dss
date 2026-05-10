@@ -587,8 +587,10 @@ export function localDataPreviewUrl(kind: LocalDataKind, params: { q?: string; r
   if (params.dumpId) query.set("dump_id", params.dumpId);
   if (params.limit !== undefined) query.set("limit", String(Math.max(0, Number(params.limit) || 0)));
   if (params.offset !== undefined) query.set("offset", String(Math.max(0, Number(params.offset) || 0)));
-  if (params.sort) query.set("sort", params.sort);
-  if (params.direction) query.set("direction", params.direction);
+  if (params.sort) {
+    query.set("sort", params.sort);
+    if (params.direction) query.set("direction", params.direction);
+  }
   if (params.fractionMode) query.set("fraction_mode", params.fractionMode);
   const encodedFilters = encodeColumnFilters(params.dataFilters);
   if (encodedFilters) query.set("data_filters", encodedFilters);
@@ -602,8 +604,10 @@ export function localDataPreviewCsvUrl(kind: LocalDataKind, params: { q?: string
   if (params.dumpId) query.set("dump_id", params.dumpId);
   if (params.limit !== undefined) query.set("limit", String(Math.max(0, Number(params.limit) || 0)));
   if (params.offset !== undefined) query.set("offset", String(Math.max(0, Number(params.offset) || 0)));
-  if (params.sort) query.set("sort", params.sort);
-  if (params.direction) query.set("direction", params.direction);
+  if (params.sort) {
+    query.set("sort", params.sort);
+    if (params.direction) query.set("direction", params.direction);
+  }
   if (params.fractionMode) query.set("fraction_mode", params.fractionMode);
   const encodedFilters = encodeColumnFilters(params.dataFilters);
   if (encodedFilters) query.set("data_filters", encodedFilters);

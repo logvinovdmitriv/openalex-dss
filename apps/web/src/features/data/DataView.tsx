@@ -242,10 +242,6 @@ export function DataView({
               hiddenFields={["slice_id"]}
               sortField={dataSort}
               sortDirection={dataDirection}
-              onSortChange={(field, direction) => {
-                setDataSort(field);
-                setDataDirection(direction);
-              }}
               enableColumnFilters
               columnFilters={dataColumnFilters}
               onColumnFiltersChange={setDataColumnFilters}
@@ -255,6 +251,10 @@ export function DataView({
               selectedIds={selectedAuthorIds}
               selectionField="author_id"
               onSelectedIdsChange={setSelectedAuthorIds}
+              onSortChange={(field, direction) => {
+                setDataSort(field);
+                setDataDirection(direction || "desc");
+              }}
             />
             <div className="table-pagination">
               <span>

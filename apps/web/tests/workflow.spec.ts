@@ -49,6 +49,30 @@ test("data sorting stays server-side and does not refresh heavy analytics", asyn
   expect(calls.some((url) => url.includes("/analytics/ranking"))).toBeFalsy();
 });
 
+test("data sorting cycles through descending ascending and disabled", async ({ page }) => {
+  const calls: string[] = [];
+  page.on("request", (request) => {
+    const url = request.url();
+    if (url.includes("/api/v1/local-data/preview")) calls.push(url);
+  });
+  await page.goto("/#data");
+  await expect(page.getByText(/Данные текущей выборки/i)).toBeVisible();
+  calls.length = 0;
+
+  const publicationsHeader = page.getByRole("button", { name: /Сортировать столбец Публикации/i });
+  await publicationsHeader.click();
+  await expect.poll(() => calls.some((url) => url.includes("sort=p") && url.includes("direction=desc"))).toBeTruthy();
+
+  calls.length = 0;
+  await publicationsHeader.click();
+  await expect.poll(() => calls.some((url) => url.includes("sort=p") && url.includes("direction=asc"))).toBeTruthy();
+
+  calls.length = 0;
+  await publicationsHeader.click();
+  await expect(page.getByText(/Сортировка: Публикации/i)).not.toBeVisible();
+  expect(calls.every((url) => !url.includes("sort=p") && !url.includes("direction="))).toBeTruthy();
+});
+
 async function mockApi(page: Page, calls: string[] = []) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
