@@ -26,7 +26,7 @@ from openalex_dss.ranking import build_ratings  # noqa: E402
 
 StageProgressCallback = Callable[[int | None, str, dict[str, Any] | None], None]
 
-PRECOMPUTE_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "g", "iupv", "islv", "custom_added_rating")
+PRECOMPUTE_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "custom_added_rating")
 PRECOMPUTE_CUSTOM_METRICS = (
     {
         "id": "custom_added_rating",
@@ -411,6 +411,9 @@ def _run_compute(
         cfg.fraction_modes,
         run_id=run_id,
         return_rows=False,
+        exclude_retracted=bool(getattr(cfg, "exclude_retracted", True)),
+        exclude_paratext=bool(getattr(cfg, "exclude_paratext", True)),
+        include_xpac=bool(getattr(cfg, "include_xpac", False)),
     )
     step(0.48, "Расчет наукометрических показателей")
     compute_indices(

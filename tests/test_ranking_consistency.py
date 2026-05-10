@@ -40,6 +40,7 @@ class RankingConsistencyTests(unittest.TestCase):
 
         self.assertEqual([row["author_id"] for row in rows], ["A1", "A2"])
         self.assertEqual([row["rank_competition"] for row in rows], ["1", "1"])
+        self.assertEqual([row["position"] for row in rows], ["1", "2"])
 
     def test_optimized_rating_csv_uses_same_tie_break_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -61,6 +62,7 @@ class RankingConsistencyTests(unittest.TestCase):
 
         self.assertEqual([row["author_id"] for row in rows], ["A1", "A2"])
         self.assertEqual([row["rank_competition"] for row in rows], ["1", "1"])
+        self.assertEqual([row["position"] for row in rows], ["1", "2"])
 
 
 if __name__ == "__main__":

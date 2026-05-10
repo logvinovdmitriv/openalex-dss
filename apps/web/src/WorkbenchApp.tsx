@@ -143,7 +143,7 @@ function Workbench() {
   const [fractionMode, setFractionMode] = useState("strict_authors_count");
   const [dataOffset, setDataOffset] = useState(0);
   const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
-  const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "g", "iupv", "islv", "custom_added_rating"]);
+  const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "i10", "g", "custom_added_rating"]);
   const [baselineMetric, setBaselineMetric] = useState("h");
   const [storageProfileId, setStorageProfileId] = useState("");
   const [downloadDir, setDownloadDir] = useState("");

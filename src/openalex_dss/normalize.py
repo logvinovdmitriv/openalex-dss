@@ -28,6 +28,7 @@ WORK_FIELDS = [
     "is_paratext",
     "is_xpac",
     "is_authors_truncated",
+    "authors_count_reported",
     "authorships_count_raw",
     "valid_author_ids_count",
     "primary_topic_id",
@@ -55,6 +56,7 @@ AUTHORSHIP_FIELDS = [
     "institution_ids_csv",
     "country_codes_csv",
     "authorships_count_raw",
+    "authors_count_reported",
     "valid_author_ids_count",
     "frac_weight_strict",
     "frac_weight_renorm",
@@ -62,7 +64,8 @@ AUTHORSHIP_FIELDS = [
     "qf_deleted_author_id",
     "qf_duplicate_authorship",
     "qf_authorship_truncated",
-    "qf_missing_required_fields",
+    "qf_author_count_mismatch",
+    "qf_missing_primary_topic",
 ]
 
 WORK_TOPIC_FIELDS = [
@@ -129,9 +132,13 @@ def normalize_raw(
             ]
             valid_count = len(set(valid_ids))
             raw_count = len(authorships)
+            authors_count_reported = _reported_authors_count(work, raw_count)
             is_truncated = bool(work.get("is_authors_truncated", False))
+            author_count_mismatch = bool(authors_count_reported and authors_count_reported != raw_count)
             if is_truncated:
                 quality["works_with_truncated_authorships"] += 1
+            if author_count_mismatch:
+                quality["works_with_author_count_mismatch"] += 1
 
             primary_topic = work.get("primary_topic") or {}
             primary_subfield = primary_topic.get("subfield") or {}
@@ -158,6 +165,7 @@ def normalize_raw(
                         "is_paratext": bool(work.get("is_paratext", False)),
                         "is_xpac": bool(work.get("is_xpac", False)),
                         "is_authors_truncated": is_truncated,
+                        "authors_count_reported": authors_count_reported,
                         "authorships_count_raw": raw_count,
                         "valid_author_ids_count": valid_count,
                         "primary_topic_id": primary_topic.get("id"),
@@ -237,6 +245,7 @@ def normalize_raw(
                             "institution_ids_csv": "|".join(institution_ids),
                             "country_codes_csv": "|".join(sorted(set(filter(None, country_codes)))),
                             "authorships_count_raw": raw_count,
+                            "authors_count_reported": authors_count_reported,
                             "valid_author_ids_count": valid_count,
                             "frac_weight_strict": strict_weight,
                             "frac_weight_renorm": renorm_weight,
@@ -244,7 +253,8 @@ def normalize_raw(
                             "qf_deleted_author_id": qf_deleted,
                             "qf_duplicate_authorship": qf_duplicate,
                             "qf_authorship_truncated": is_truncated,
-                            "qf_missing_required_fields": qf_missing_topic,
+                            "qf_author_count_mismatch": author_count_mismatch,
+                            "qf_missing_primary_topic": qf_missing_topic,
                         },
                         AUTHORSHIP_FIELDS,
                     )
@@ -262,7 +272,7 @@ def normalize_raw(
         "work_topic_rows": work_topic_count,
         "quality_counts": dict(sorted(quality.items())),
         "notes": [
-            "authors_count is not returned by the current OpenAlex list select API; strict mode uses observed authorships_count_raw.",
+            "strict_authors_count uses authors_count_reported when OpenAlex provides it; otherwise it falls back to observed authorships_count_raw.",
             "For truncated work authorships, singleton work backfill is recommended before final analysis.",
         ],
     }
@@ -273,6 +283,19 @@ def normalize_raw(
 def _author_id(authorship: dict[str, Any]) -> str | None:
     author = authorship.get("author") or {}
     return author.get("id")
+
+
+def _reported_authors_count(work: dict[str, Any], fallback: int) -> int:
+    for key in ("authors_count", "authorships_count", "author_count"):
+        value = work.get(key)
+        if value not in (None, ""):
+            try:
+                parsed = int(float(str(value)))
+            except ValueError:
+                continue
+            if parsed > 0:
+                return parsed
+    return fallback
 
 
 def _parquet_peer(path: str | Path) -> Path:

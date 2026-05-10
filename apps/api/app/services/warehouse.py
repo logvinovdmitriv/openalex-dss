@@ -143,8 +143,8 @@ AUTHOR_WORK_DETAIL_FIELDS = (
 )
 
 NATIVE_LINE_CHART_METRICS = ("p", "c", "h", "i10")
-CORE_LINE_CHART_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local")
-EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "iupv", "islv", "lrdi")
+CORE_LINE_CHART_METRICS = ("p", "c", "c_frac", "h", "i10", "g")
+EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "cpp", "m_local", "top1_share", "iupv", "islv", "lrdi")
 LINE_CHART_METRICS = EXTENDED_LINE_CHART_METRICS
 
 FilterSet = dict[str, Any]

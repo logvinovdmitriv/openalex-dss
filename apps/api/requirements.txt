@@ -1,10 +1,10 @@
-fastapi>=0.116
-uvicorn[standard]>=0.35
-pydantic>=2.10
-duckdb>=1.2
-polars>=1.20
-python-multipart>=0.0.20
-PyYAML>=6.0
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+pydantic==2.13.3
+duckdb==1.5.2
+polars==1.40.1
+python-multipart==0.0.27
+PyYAML==6.0.3
 # Optional: official OpenAlex downloader for downloading local Works slices.
 # Install locally when needed; package files are not committed to the repository.
 # openalex-official

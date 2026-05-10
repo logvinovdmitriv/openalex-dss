@@ -21,11 +21,6 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
     "h",
     "i10",
     "g",
-    "m_local",
-    "top1_share",
-    "iupv",
-    "islv",
-    "lrdi",
 )
 SCIENTOMETRIC_ANALYSIS_SCHEMA = "scientometric_analysis"
 SCIENTOMETRIC_FINDINGS_SCHEMA = "scientometric_findings"
@@ -1103,10 +1098,10 @@ def _metric_label(metric: str) -> str:
         "g": "Индекс g",
         "m_local": "Индекс m внутри среза",
         "top1_share": "Доля цитирований самой цитируемой работы",
-        "f5": "Индекс Полянина f5",
-        "fm5": "Долевой индекс Полянина fm5",
-        "iupv": "Рейтинговая формула: активность и цитируемость",
-        "islv": "Рейтинговая формула: сбалансированный вклад",
+        "f5": "Работы с 5+ цитированиями",
+        "fm5": "Долевой вклад в работы с 5+ цитированиями",
+        "iupv": "Процентильная формула: активность и цитируемость",
+        "islv": "Процентильная формула: сбалансированный вклад",
         "lrdi": "Индекс устойчивости результата",
     }
     return labels.get(metric, metric)

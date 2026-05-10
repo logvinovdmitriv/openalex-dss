@@ -1,6 +1,6 @@
 import { metricDescription, metricFormula, metricLabel, type SelectOption } from "../../domain";
 
-const COMMON_RANKING_METRICS = new Set(["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "f5", "fm5", "iupv", "islv", "lrdi"]);
+const COMMON_RANKING_METRICS = new Set(["p", "c", "c_frac", "h", "i10", "g"]);
 
 export function rankingMetricOptions(metricCatalogOptions: SelectOption[], fallback: SelectOption[]) {
   const configured = metricCatalogOptions
@@ -17,4 +17,3 @@ export function rankingMetricOptions(metricCatalogOptions: SelectOption[], fallb
 export function metricLabelMap(options: SelectOption[]) {
   return Object.fromEntries(options.map((item) => [item.value, item.label]));
 }
-

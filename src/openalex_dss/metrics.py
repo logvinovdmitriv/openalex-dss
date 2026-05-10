@@ -18,12 +18,14 @@ AUTHOR_WORK_FIELDS = [
     "publication_year",
     "cited_by_count",
     "authors_count_used",
+    "actual_authors_count",
+    "authors_count_reported",
     "credit_weight",
     "cited_credit",
     "single_authored_flag",
     "qf_any",
     "qf_authorship_truncated",
-    "qf_null_omission",
+    "qf_author_omission",
     "omitted_author_fraction",
 ]
 
@@ -125,11 +127,14 @@ def assign_iupv_percentiles(rows: list[dict[str, Any]], group_field: str = "frac
             for field in ("p", "h", "c_frac", "g", "i10")
         }
         for row in group:
-            row["iupv"] = iupv_from_percentiles(
-                percentile_maps["p"][id(row)],
-                percentile_maps["h"][id(row)],
-                percentile_maps["c_frac"][id(row)],
-            )
+            if as_float(row.get("p")) <= 0 or as_float(row.get("h")) <= 0 or as_float(row.get("c_frac")) <= 0:
+                row["iupv"] = 0.0
+            else:
+                row["iupv"] = iupv_from_percentiles(
+                    percentile_maps["p"][id(row)],
+                    percentile_maps["h"][id(row)],
+                    percentile_maps["c_frac"][id(row)],
+                )
             row["islv"] = islv_from_percentiles(
                 percentile_maps["h"][id(row)],
                 percentile_maps["c_frac"][id(row)],
@@ -169,15 +174,45 @@ def build_author_work_metrics(
     run_id: str = "base",
     *,
     return_rows: bool = True,
+    exclude_retracted: bool = True,
+    exclude_paratext: bool = True,
+    include_xpac: bool = False,
 ) -> list[dict[str, Any]]:
     if not return_rows:
         try:
-            _build_author_work_metrics_duckdb(works_path, authorships_path, out_path, fraction_modes, run_id)
+            _build_author_work_metrics_duckdb(
+                works_path,
+                authorships_path,
+                out_path,
+                fraction_modes,
+                run_id,
+                exclude_retracted=exclude_retracted,
+                exclude_paratext=exclude_paratext,
+                include_xpac=include_xpac,
+            )
             return []
         except ImportError:
-            rows = _build_author_work_metrics_python(works_path, authorships_path, out_path, fraction_modes, run_id)
+            _build_author_work_metrics_python(
+                works_path,
+                authorships_path,
+                out_path,
+                fraction_modes,
+                run_id,
+                exclude_retracted=exclude_retracted,
+                exclude_paratext=exclude_paratext,
+                include_xpac=include_xpac,
+            )
             return []
-    return _build_author_work_metrics_python(works_path, authorships_path, out_path, fraction_modes, run_id)
+    return _build_author_work_metrics_python(
+        works_path,
+        authorships_path,
+        out_path,
+        fraction_modes,
+        run_id,
+        exclude_retracted=exclude_retracted,
+        exclude_paratext=exclude_paratext,
+        include_xpac=include_xpac,
+    )
 
 
 def _build_author_work_metrics_python(
@@ -186,6 +221,10 @@ def _build_author_work_metrics_python(
     out_path: str | Path,
     fraction_modes: tuple[str, ...],
     run_id: str,
+    *,
+    exclude_retracted: bool,
+    exclude_paratext: bool,
+    include_xpac: bool,
 ) -> list[dict[str, Any]]:
     works = {row["work_id"]: row for row in read_table_dicts(works_path)}
     authorships = read_table_dicts(authorships_path)
@@ -197,6 +236,8 @@ def _build_author_work_metrics_python(
         work = works.get(work_id)
         if not work:
             continue
+        if _excluded_work(work, exclude_retracted=exclude_retracted, exclude_paratext=exclude_paratext, include_xpac=include_xpac):
+            continue
         author_id = auth.get("author_id")
         if not author_id or author_id in {NULL_AUTHOR_ID, DELETED_AUTHOR_ID}:
             continue
@@ -207,8 +248,11 @@ def _build_author_work_metrics_python(
 
         cited_by_count = as_int(work.get("cited_by_count"))
         raw_count = as_int(auth.get("authorships_count_raw"))
+        reported_count = as_int(auth.get("authors_count_reported") or work.get("authors_count_reported") or raw_count)
+        actual_count = reported_count or raw_count
         valid_count = as_int(auth.get("valid_author_ids_count"))
         is_truncated = truthy(auth.get("qf_authorship_truncated"))
+        author_count_mismatch = truthy(auth.get("qf_author_count_mismatch")) or bool(reported_count and raw_count and reported_count != raw_count)
         qf_any = any(
             truthy(auth.get(flag))
             for flag in [
@@ -216,18 +260,19 @@ def _build_author_work_metrics_python(
                 "qf_deleted_author_id",
                 "qf_duplicate_authorship",
                 "qf_authorship_truncated",
-                "qf_missing_required_fields",
+                "qf_author_count_mismatch",
+                "qf_missing_primary_topic",
             ]
         )
 
         for mode in fraction_modes:
-            denom = _denominator(mode, raw_count, valid_count)
+            denom = _denominator(mode, raw_count, valid_count, reported_count)
             if denom <= 0:
                 continue
             credit = 1.0 / denom
             omitted = None
             if mode == "strict_authors_count" and raw_count > 0:
-                omitted = max(0.0, 1.0 - (valid_count / raw_count))
+                omitted = max(0.0, 1.0 - (valid_count / max(1, actual_count)))
             rows.append(
                 {
                     "run_id": run_id,
@@ -238,12 +283,14 @@ def _build_author_work_metrics_python(
                     "publication_year": work.get("publication_year"),
                     "cited_by_count": cited_by_count,
                     "authors_count_used": denom,
+                    "actual_authors_count": actual_count,
+                    "authors_count_reported": reported_count,
                     "credit_weight": credit,
                     "cited_credit": cited_by_count * credit,
-                    "single_authored_flag": denom == 1,
+                    "single_authored_flag": actual_count == 1,
                     "qf_any": qf_any,
-                    "qf_authorship_truncated": is_truncated,
-                    "qf_null_omission": bool(omitted and omitted > 0),
+                    "qf_authorship_truncated": is_truncated or bool(reported_count and reported_count > raw_count),
+                    "qf_author_omission": bool(omitted and omitted > 0) or author_count_mismatch,
                     "omitted_author_fraction": omitted,
                 }
             )
@@ -260,12 +307,24 @@ def _build_author_work_metrics_duckdb(
     out_path: str | Path,
     fraction_modes: tuple[str, ...],
     run_id: str,
+    *,
+    exclude_retracted: bool,
+    exclude_paratext: bool,
+    include_xpac: bool,
 ) -> None:
     if not fraction_modes:
         write_csv_dicts(out_path, [], AUTHOR_WORK_FIELDS)
         write_parquet_dicts(Path(out_path).with_suffix(".parquet"), [], AUTHOR_WORK_FIELDS)
         return
-    query = _author_work_query(works_path, authorships_path, fraction_modes, run_id)
+    query = _author_work_query(
+        works_path,
+        authorships_path,
+        fraction_modes,
+        run_id,
+        exclude_retracted=exclude_retracted,
+        exclude_paratext=exclude_paratext,
+        include_xpac=include_xpac,
+    )
     copy_query(query, out_path, Path(out_path).with_suffix(".parquet"))
 
 
@@ -274,9 +333,29 @@ def _author_work_query(
     authorships_path: str | Path,
     fraction_modes: tuple[str, ...],
     run_id: str,
+    *,
+    exclude_retracted: bool,
+    exclude_paratext: bool,
+    include_xpac: bool,
 ) -> str:
     works = table_expression(works_path)
     authorships = table_expression(authorships_path)
+    works_fields = _table_fields(works_path)
+    authorship_fields = _table_fields(authorships_path)
+    reported_expr = _coalesce_sql(
+        [
+            _try_cast_sql("a.authors_count_reported", authorship_fields, "authors_count_reported"),
+            _try_cast_sql("w.authors_count_reported", works_fields, "authors_count_reported"),
+            _try_cast_sql("a.authorships_count_raw", authorship_fields, "authorships_count_raw"),
+        ],
+        "0.0",
+    )
+    qf_author_count_mismatch_expr = _truthy_sql("a.qf_author_count_mismatch") if "qf_author_count_mismatch" in authorship_fields else "false"
+    missing_topic_expr = (
+        _truthy_sql("a.qf_missing_primary_topic")
+        if "qf_missing_primary_topic" in authorship_fields
+        else (_truthy_sql("a.qf_missing_required_fields") if "qf_missing_required_fields" in authorship_fields else "false")
+    )
     union_parts = [_author_work_mode_query(mode, run_id) for mode in fraction_modes]
     return f"""
 WITH joined AS (
@@ -289,19 +368,23 @@ WITH joined AS (
         CAST(w.publication_year AS VARCHAR) AS publication_year,
         COALESCE(TRY_CAST(w.cited_by_count AS DOUBLE), 0.0) AS cited_by_count,
         COALESCE(TRY_CAST(a.authorships_count_raw AS DOUBLE), 0.0) AS raw_count,
+        {reported_expr} AS reported_count,
         COALESCE(TRY_CAST(a.valid_author_ids_count AS DOUBLE), 0.0) AS valid_count,
         {_truthy_sql("a.qf_authorship_truncated")} AS is_truncated,
+        {qf_author_count_mismatch_expr} AS qf_author_count_mismatch,
         (
             {_truthy_sql("a.qf_null_author_id")}
             OR {_truthy_sql("a.qf_deleted_author_id")}
             OR {_truthy_sql("a.qf_duplicate_authorship")}
             OR {_truthy_sql("a.qf_authorship_truncated")}
-            OR {_truthy_sql("a.qf_missing_required_fields")}
+            OR {qf_author_count_mismatch_expr}
+            OR {missing_topic_expr}
         ) AS qf_any
     FROM {authorships} AS a
     INNER JOIN {works} AS w ON CAST(a.work_id AS VARCHAR) = CAST(w.work_id AS VARCHAR)
     WHERE NULLIF(CAST(a.author_id AS VARCHAR), '') IS NOT NULL
       AND CAST(a.author_id AS VARCHAR) NOT IN ({sql_literal(NULL_AUTHOR_ID)}, {sql_literal(DELETED_AUTHOR_ID)})
+      {_work_exclusion_sql(works_fields, exclude_retracted=exclude_retracted, exclude_paratext=exclude_paratext, include_xpac=include_xpac)}
 ),
 dedup AS (
     SELECT
@@ -325,20 +408,20 @@ ORDER BY fraction_mode, author_id, work_id
 
 def _author_work_mode_query(mode: str, run_id: str) -> str:
     if mode == "strict_authors_count":
-        denominator = "raw_count"
-        where = "raw_count > 0"
-        omitted = "GREATEST(0.0, 1.0 - (valid_count / NULLIF(raw_count, 0)))"
-        qf_null_omission = f"({omitted}) > 0"
+        denominator = "reported_count"
+        where = "reported_count > 0"
+        omitted = "GREATEST(0.0, 1.0 - (valid_count / NULLIF(reported_count, 0)))"
+        qf_author_omission = f"({omitted}) > 0 OR qf_author_count_mismatch"
     elif mode == "renorm_valid_authors":
         denominator = "valid_count"
         where = "valid_count > 0"
         omitted = "NULL"
-        qf_null_omission = "false"
+        qf_author_omission = "false"
     elif mode == "integer":
         denominator = "1.0"
         where = "true"
         omitted = "NULL"
-        qf_null_omission = "false"
+        qf_author_omission = "false"
     else:
         raise ValueError(f"Unsupported fraction mode: {mode}")
     return f"""
@@ -351,12 +434,14 @@ SELECT
     publication_year,
     cited_by_count,
     {denominator} AS authors_count_used,
+    reported_count AS actual_authors_count,
+    reported_count AS authors_count_reported,
     1.0 / {denominator} AS credit_weight,
     cited_by_count * (1.0 / {denominator}) AS cited_credit,
-    ({denominator}) = 1.0 AS single_authored_flag,
+    reported_count = 1.0 AS single_authored_flag,
     qf_any,
-    is_truncated AS qf_authorship_truncated,
-    {qf_null_omission} AS qf_null_omission,
+    (is_truncated OR reported_count > raw_count) AS qf_authorship_truncated,
+    {qf_author_omission} AS qf_author_omission,
     {omitted} AS omitted_author_fraction
 FROM base
 WHERE {where}
@@ -510,16 +595,16 @@ def _index_row(
         "iupv": 0.0,
         "islv": 0.0,
         "lrdi": lrdi(group, analysis_year=analysis_year, p0=lrdi_p0, lam=lrdi_lambda),
-        "mean_authors_per_work": sum(as_float(row["authors_count_used"]) for row in group) / len(group),
+        "mean_authors_per_work": sum(_actual_authors_count(row) for row in group) / len(group),
         "share_single_authored": sum(1 for row in group if truthy(row["single_authored_flag"])) / len(group),
         "n_flagged_works": sum(1 for row in group if truthy(row["qf_any"])),
         "n_truncated_works": sum(1 for row in group if truthy(row["qf_authorship_truncated"])),
     }
 
 
-def _denominator(mode: str, raw_count: int, valid_count: int) -> int:
+def _denominator(mode: str, raw_count: int, valid_count: int, reported_count: int = 0) -> int:
     if mode == "strict_authors_count":
-        return raw_count
+        return reported_count or raw_count
     if mode == "renorm_valid_authors":
         return valid_count
     if mode == "integer":
@@ -533,6 +618,11 @@ def _f5(group: list[dict[str, str]]) -> float:
 
 def _fm5(group: list[dict[str, str]]) -> float:
     return float(sum(as_float(row["credit_weight"]) for row in group if as_int(row["cited_by_count"]) >= 5))
+
+
+def _actual_authors_count(row: dict[str, Any]) -> float:
+    value = as_float(row.get("actual_authors_count"))
+    return value if value > 0 else max(1.0, as_float(row.get("authors_count_used")))
 
 
 def _percentile_rank_map(rows: list[dict[str, Any]], field: str) -> dict[int, float]:
@@ -560,3 +650,47 @@ def _first_nonempty(values: Any) -> str | None:
         if value:
             return str(value)
     return None
+
+
+def _excluded_work(work: dict[str, Any], *, exclude_retracted: bool, exclude_paratext: bool, include_xpac: bool) -> bool:
+    return (
+        (exclude_retracted and truthy(work.get("is_retracted")))
+        or (exclude_paratext and truthy(work.get("is_paratext")))
+        or (not include_xpac and truthy(work.get("is_xpac")))
+    )
+
+
+def _work_exclusion_sql(fields: set[str], *, exclude_retracted: bool, exclude_paratext: bool, include_xpac: bool) -> str:
+    clauses: list[str] = []
+    if exclude_retracted and "is_retracted" in fields:
+        clauses.append(f"NOT {_truthy_sql('w.is_retracted')}")
+    if exclude_paratext and "is_paratext" in fields:
+        clauses.append(f"NOT {_truthy_sql('w.is_paratext')}")
+    if not include_xpac and "is_xpac" in fields:
+        clauses.append(f"NOT {_truthy_sql('w.is_xpac')}")
+    return "" if not clauses else " AND " + " AND ".join(clauses)
+
+
+def _table_fields(path: str | Path) -> set[str]:
+    p = Path(path)
+    try:
+        if p.suffix == ".parquet":
+            import polars as pl
+
+            return set(pl.read_parquet_schema(p).names())
+        import csv
+
+        with p.open("rt", encoding="utf-8", newline="") as handle:
+            reader = csv.reader(handle)
+            return set(next(reader, []))
+    except Exception:
+        return set()
+
+
+def _try_cast_sql(reference: str, fields: set[str], field: str) -> str | None:
+    return f"TRY_CAST({reference} AS DOUBLE)" if field in fields else None
+
+
+def _coalesce_sql(parts: list[str | None], fallback: str) -> str:
+    values = [part for part in parts if part]
+    return f"COALESCE({', '.join([*values, fallback])})" if values else fallback

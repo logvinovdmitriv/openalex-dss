@@ -1,10 +1,10 @@
 version: "1.0"
 profiles:
   - profile_id: "slice_local_default"
-    label: "Единый локальный рейтинг"
-    description: "Основная настройка для works-first расчета и UI. Равные значения индекса разрешаются одинаково в CSV, API и интерфейсе."
+    label: "Базовый локальный рейтинг"
+    description: "Основная настройка базового контура: популярные показатели P, C, C_frac, h, i10, g. Расширенные формулы остаются дополнительным слоем анализа."
     metric_scope: "computed_from_slice_works"
-    default_primary_metric: "islv"
+    default_primary_metric: "h"
     sort:
       - field: "__primary_metric__"
         direction: "desc"

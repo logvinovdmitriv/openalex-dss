@@ -27,7 +27,7 @@ metrics:
     formula: "C / P"
     source: "computed_from_slice_works"
     local_only: true
-    visible: true
+    visible: false
   - metric_id: "h"
     label: "Индекс Хирша"
     group: "Устойчивое цитируемое ядро"
@@ -57,53 +57,53 @@ metrics:
     formula: "h / local_publication_age"
     source: "computed_from_slice_works"
     local_only: true
-    visible: true
+    visible: false
   - metric_id: "top1_share"
     label: "Доля самой цитируемой работы"
     group: "Диагностика концентрации"
     formula: "max(cited_by_count) / sum(cited_by_count)"
     source: "computed_from_slice_works"
     local_only: true
-    visible: true
+    visible: false
   - metric_id: "f5"
-    label: "Индекс Полянина f5"
+    label: "Работы с 5+ цитированиями"
     group: "Дополнительные показатели"
     formula: "count(works where cited_by_count >= 5)"
     source: "computed_from_slice_works"
     local_only: true
-    visible: true
-    warning: "Пороговый показатель: число публикаций с 5 и более цитированиями."
+    visible: false
+    warning: "Дополнительный пороговый показатель. Это не подается как канонический индекс Полянина без подтверждения первоисточником."
   - metric_id: "fm5"
-    label: "Долевой индекс Полянина fm5"
+    label: "Долевой вклад в работы с 5+ цитированиями"
     group: "Дополнительные показатели"
     formula: "sum(credit_weight for works where cited_by_count >= 5)"
     source: "computed_from_slice_works"
     local_only: true
-    visible: true
-    warning: "Пороговый показатель с долевым учетом вклада автора."
+    visible: false
+    warning: "Дополнительный пороговый показатель с долевым учетом. Это не подается как канонический индекс Полянина без подтверждения первоисточником."
   - metric_id: "iupv"
-    label: "Рейтинговая формула: активность и цитируемость"
+    label: "Процентильная формула: активность и цитируемость"
     group: "Дополнительные показатели"
     formula: "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)"
     source: "computed_from_slice_works"
     local_only: true
-    visible: true
-    warning: "Формула рейтинга на процентильной шкале: объединяет число публикаций, индекс Хирша и долевые цитирования внутри выбранного среза."
+    visible: false
+    warning: "Экспериментальная формула рейтинга. Не является базовым популярным индексом."
   - metric_id: "islv"
-    label: "Рейтинговая формула: сбалансированный вклад"
+    label: "Процентильная формула: сбалансированный вклад"
     group: "Дополнительные показатели"
     formula: "100 * weighted_geometric_mean(pr(h), pr(C_frac), pr(g), pr(i10), pr(P)) * concentration_penalty"
     source: "computed_from_slice_works"
     local_only: true
-    visible: true
-    warning: "Формула рейтинга на процентильной шкале: объединяет индекс Хирша, долевые цитирования, индекс g, i10 и публикации с поправкой на концентрацию цитирований."
+    visible: false
+    warning: "Экспериментальная формула рейтинга. Не используется как основной рейтинг по умолчанию."
   - metric_id: "lrdi"
     label: "Индекс устойчивости результата"
     group: "Дополнительные показатели"
     formula: "local robust discounted fractional impact"
     source: "computed_from_slice_works"
     local_only: true
-    visible: true
+    visible: false
 native_metrics:
   - metric_id: "p"
     label: "Глобальное число работ OpenAlex"

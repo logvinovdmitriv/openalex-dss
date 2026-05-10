@@ -16,7 +16,7 @@ from app.services import warehouse
 
 
 COHORTS_DIR = DATA / "cohorts"
-COHORT_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "islv", "iupv", "lrdi")
+COHORT_METRICS = ("p", "c", "c_frac", "h", "i10", "g")
 COHORT_FILTER_POLICIES = {"membership", "current", "none"}
 
 

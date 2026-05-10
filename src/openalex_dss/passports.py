@@ -104,28 +104,31 @@ def build_passports(
             "download_usage": "корпус Works скачивается установленным загрузчиком OpenAlex, а не рабочими API-запросами приложения",
         },
     }
-    indices = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"]
+    indices = ["p", "c", "c_frac", "h", "i10", "g"]
+    support_indices = ["cpp", "m_local", "top1_share"]
     experimental_indices = ["f5", "fm5", "iupv", "islv", "lrdi"]
     extra_formula = {
-        "f5_fm5": {
-            "status": "operational_definition_requires_primary_source_confirmation",
+        "threshold_5_citation_indicators": {
+            "status": "extension_not_core_baseline",
             "threshold": 5,
             "f5": "count(works where cited_by_count >= 5)",
             "fm5": "sum(credit_weight for works where cited_by_count >= 5)",
         },
-        "iupv": {
+        "percentile_activity_citation_formula": {
+            "metric_id": "iupv",
             "formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
             "percentile_scope": "current slice within each fraction_mode",
-            "status": "experimental",
+            "status": "extension_not_core_baseline",
         },
-        "islv": {
-            "name_ru": "индекс сбалансированного локального вклада",
+        "balanced_percentile_formula": {
+            "metric_id": "islv",
+            "name_ru": "процентильная формула сбалансированного вклада",
             "formula": "100 * G * K_conc, where G is weighted geometric mean of percentile ranks h/C_frac/g/i10/P and K_conc penalizes top1_share above tau",
             "weights": {"h": 0.35, "c_frac": 0.30, "g": 0.20, "i10": 0.10, "p": 0.05},
             "epsilon": 0.01,
             "tau": 0.50,
             "lambda": 0.30,
-            "status": "own_formula",
+            "status": "extension_not_core_baseline",
         },
         "lrdi": {
             "p0": cfg.lrdi_p0,
@@ -144,11 +147,12 @@ def build_passports(
         "fraction_mode_default": cfg.fraction_mode_default,
         "ranking_rule": {
             "profile_id": "slice_local_default",
-            "primary_metric": "selected_per_report",
+            "primary_metric": "h",
             "tie_breakers": ["c desc", "p desc", "author_id asc"],
             "used_by": ["ratings.csv", "analytics/ranking", "report_bundle"],
         },
         "indices": indices,
+        "support_indices": support_indices,
         "experimental_indices": experimental_indices,
         **extra_formula,
         "software": {
@@ -161,7 +165,7 @@ def build_passports(
     write_json(out / "slice_passport.json", slice_passport)
     write_json(out / "calculation_passport.json", calculation_passport)
 
-    checksums = _primary_artifact_checksums(primary_artifacts)
+    checksums = _primary_artifact_checksums(_with_reproducibility_artifacts(primary_artifacts, root_path))
     checksum_notes = [
         "Figures are secondary artifacts and are intentionally excluded from primary checksums.",
         "Primary checksums were built from scoped dump/run artifacts.",
@@ -193,6 +197,20 @@ def _primary_artifact_checksums(primary_artifacts: dict[str, Any]) -> dict[str, 
         if path and path.is_file():
             checksums[str(label)] = sha256_file(path)
     return checksums
+
+
+def _with_reproducibility_artifacts(primary_artifacts: dict[str, Any], root_path: Path) -> dict[str, Any]:
+    out = dict(primary_artifacts)
+    for label, rel in {
+        "repo/config/slice.yaml": Path("config/slice.yaml"),
+        "repo/docs/methodology.md": Path("docs/methodology.md"),
+        "repo/requirements.lock": Path("requirements.lock"),
+        "repo/pyproject.toml": Path("pyproject.toml"),
+    }.items():
+        path = root_path / rel
+        if path.is_file():
+            out.setdefault(label, path)
+    return out
 
 
 def _primary_artifact_path(value: Any) -> Path | None:

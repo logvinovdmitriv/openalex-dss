@@ -7,9 +7,10 @@ from typing import Any
 from .duckdb_io import copy_query, sql_literal, table_expression
 from .io_utils import as_float, as_int, read_table_dicts, write_csv_dicts, write_parquet_dicts
 
-CORE_METRICS = ("p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local")
+CORE_METRICS = ("p", "c", "c_frac", "h", "i10", "g")
+SUPPORT_METRICS = ("cpp", "m_local", "top1_share")
 EXPERIMENTAL_METRICS = ("f5", "fm5", "iupv", "islv", "lrdi")
-METRICS = (*CORE_METRICS, *EXPERIMENTAL_METRICS)
+METRICS = (*CORE_METRICS, *SUPPORT_METRICS, *EXPERIMENTAL_METRICS)
 DEFAULT_TIE_BREAKERS = ("c", "p", "author_id")
 
 RATING_FIELDS = [
@@ -19,6 +20,7 @@ RATING_FIELDS = [
     "author_id",
     "author_display_name",
     "score",
+    "position",
     "rank_competition",
     "rank_dense",
     "tie_break_c",
@@ -74,6 +76,7 @@ def _build_ratings_python(
                         "author_id": row["author_id"],
                         "author_display_name": row.get("author_display_name"),
                         "score": score,
+                        "position": pos,
                         "rank_competition": competition_rank,
                         "rank_dense": dense_rank,
                         "tie_break_c": as_float(row.get("c")),
@@ -128,12 +131,16 @@ ranked AS (
         DENSE_RANK() OVER (
             PARTITION BY run_id, fraction_mode, metric_name
             ORDER BY score DESC
-        ) AS rank_dense
+        ) AS rank_dense,
+        ROW_NUMBER() OVER (
+            PARTITION BY run_id, fraction_mode, metric_name
+            ORDER BY score DESC, tie_break_c DESC, tie_break_p DESC, author_id ASC
+        ) AS position
     FROM metric_rows
 )
 SELECT {", ".join(RATING_FIELDS)}
 FROM ranked
-ORDER BY fraction_mode, metric_name, rank_competition, tie_break_c DESC, tie_break_p DESC, author_id
+ORDER BY fraction_mode, metric_name, position
 """
     copy_query(query, out_path, Path(out_path).with_suffix(".parquet"))
 

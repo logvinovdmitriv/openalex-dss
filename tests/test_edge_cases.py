@@ -44,6 +44,78 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertAlmostEqual(strict[0]["omitted_author_fraction"], 0.5)
             self.assertAlmostEqual(renorm[0]["credit_weight"], 1.0)
 
+    def test_strict_fraction_uses_reported_author_count_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = _work("WREPORTED", "A1", 10)
+            work["authors_count"] = 10
+            work["authorships"].append(
+                {
+                    "author_position": "middle",
+                    "author": {"id": "https://openalex.org/A2", "display_name": "A2", "orcid": None},
+                    "institutions": [],
+                    "countries": [],
+                    "is_corresponding": False,
+                    "raw_author_name": "A2",
+                }
+            )
+            raw = root / "raw.jsonl"
+            raw.write_text(json.dumps(work, ensure_ascii=False) + "\n", encoding="utf-8")
+            normalize_raw(raw, root / "works.csv", root / "auth.csv", root / "quality.json")
+
+            mart = build_author_work_metrics(root / "works.csv", root / "auth.csv", root / "awm.csv", ("strict_authors_count", "renorm_valid_authors"))
+
+        strict = [row for row in mart if row["fraction_mode"] == "strict_authors_count"]
+        renorm = [row for row in mart if row["fraction_mode"] == "renorm_valid_authors"]
+        self.assertEqual(len(strict), 2)
+        self.assertAlmostEqual(strict[0]["credit_weight"], 0.1)
+        self.assertEqual(strict[0]["actual_authors_count"], 10)
+        self.assertTrue(strict[0]["qf_authorship_truncated"])
+        self.assertTrue(strict[0]["qf_author_omission"])
+        self.assertAlmostEqual(renorm[0]["credit_weight"], 0.5)
+
+    def test_integer_mode_keeps_collaboration_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = _work("WMULTI", "A1", 10)
+            work["authorships"].append(
+                {
+                    "author_position": "last",
+                    "author": {"id": "https://openalex.org/A2", "display_name": "A2", "orcid": None},
+                    "institutions": [],
+                    "countries": [],
+                    "is_corresponding": False,
+                    "raw_author_name": "A2",
+                }
+            )
+            raw = root / "raw.jsonl"
+            raw.write_text(json.dumps(work, ensure_ascii=False) + "\n", encoding="utf-8")
+            normalize_raw(raw, root / "works.csv", root / "auth.csv", root / "quality.json")
+            build_author_work_metrics(root / "works.csv", root / "auth.csv", root / "awm.csv", ("integer",))
+            indices = compute_indices(root / "awm.csv", root / "indices.csv")
+
+        for row in indices:
+            self.assertEqual(row["mean_authors_per_work"], 2.0)
+            self.assertEqual(row["share_single_authored"], 0.0)
+
+    def test_author_work_filters_retracted_paratext_and_xpac_locally(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            included = _work("WOK", "A1", 5)
+            retracted = _work("WRET", "A1", 50)
+            retracted["is_retracted"] = True
+            paratext = _work("WPARA", "A1", 50)
+            paratext["is_paratext"] = True
+            xpac = _work("WXPAC", "A1", 50)
+            xpac["is_xpac"] = True
+            raw = root / "raw.jsonl"
+            raw.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in [included, retracted, paratext, xpac]) + "\n", encoding="utf-8")
+            normalize_raw(raw, root / "works.csv", root / "auth.csv", root / "quality.json")
+
+            mart = build_author_work_metrics(root / "works.csv", root / "auth.csv", root / "awm.csv", ("integer",))
+
+        self.assertEqual({row["work_id"] for row in mart}, {"https://openalex.org/WOK"})
+
     def test_pipeline_smoke_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
