@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import uuid
 import hashlib
 import shutil
@@ -20,6 +21,7 @@ from openalex_dss.openalex import cli_download_signature, corpus_request, corpus
 
 SLICES_DIR = DATA / "slices"
 MATERIALIZATIONS_DIR = DATA / "materialization_plans"
+_DATA_ROOT_SIZE_CACHE: tuple[float, int] = (0.0, 0)
 
 def list_slices(limit: int = 50) -> dict[str, Any]:
     _ensure_dirs()
@@ -1059,9 +1061,13 @@ def _path_size(path: str) -> int:
 def _dump_storage_summary(dump_id: str, dump: dict[str, Any], health: dict[str, Any]) -> dict[str, int | str]:
     safe_dump_id = _safe_id(str(dump_id or dump.get("dump_id") or ""))
     raw_jsonl = str(dump.get("raw_jsonl") or "")
-    raw_bytes = _path_size(raw_jsonl)
-    if raw_bytes <= 0:
-        raw_bytes = int(health.get("bytes_written") or dump.get("bytes_written") or 0)
+    storage_plan = dump.get("storage_plan") if isinstance(dump.get("storage_plan"), dict) else {}
+    download_base = _download_base_path(raw_jsonl, storage_plan)
+    download_base_bytes = _dir_size(download_base) if download_base else 0
+    raw_package_bytes = _path_size(raw_jsonl)
+    if raw_package_bytes <= 0:
+        raw_package_bytes = int(health.get("bytes_written") or dump.get("bytes_written") or 0)
+    raw_bytes = download_base_bytes or raw_package_bytes
     tables_bytes = _dir_size(DATA / "tables" / safe_dump_id)
     dump_meta_bytes = _dir_size(DATA / "dumps" / safe_dump_id)
     run_bytes = 0
@@ -1073,15 +1079,42 @@ def _dump_storage_summary(dump_id: str, dump: dict[str, Any], health: dict[str, 
     total = raw_bytes + tables_bytes + dump_meta_bytes + run_bytes
     return {
         "raw_bytes": raw_bytes,
+        "raw_package_bytes": raw_package_bytes,
+        "download_base_bytes": download_base_bytes,
         "tables_bytes": tables_bytes,
         "dump_metadata_bytes": dump_meta_bytes,
         "runs_bytes": run_bytes,
         "analytics_cache_bytes": analytics_cache_bytes,
         "total_known_bytes": total,
+        "data_root_bytes": _data_root_size_cached(),
         "raw_path": raw_jsonl,
+        "download_base_path": str(download_base) if download_base else "",
+        "data_root_path": str(DATA),
         "tables_path": str(DATA / "tables" / safe_dump_id),
         "dump_path": str(DATA / "dumps" / safe_dump_id),
     }
+
+
+def _download_base_path(raw_jsonl: str, storage_plan: dict[str, Any]) -> Path | None:
+    explicit = str(storage_plan.get("download_base_dir") or "").strip()
+    if explicit:
+        return Path(explicit)
+    if raw_jsonl:
+        raw_path = Path(raw_jsonl)
+        if raw_path.parent.exists():
+            return raw_path.parent
+    return None
+
+
+def _data_root_size_cached() -> int:
+    global _DATA_ROOT_SIZE_CACHE
+    now = time.monotonic()
+    cached_at, cached_size = _DATA_ROOT_SIZE_CACHE
+    if now - cached_at < 5:
+        return cached_size
+    size = _dir_size(DATA)
+    _DATA_ROOT_SIZE_CACHE = (now, size)
+    return size
 
 
 def _dir_size(path: Path) -> int:
