@@ -913,7 +913,7 @@ def _distribution_findings(metrics: list[str], descriptive: dict[str, Any], norm
                         },
                     },
                     text=f"Метрика {metric} имеет выраженное асимметричное или тяжелохвостое распределение; raw-сравнение и средние значения чувствительны к выбросам.",
-                    recommendation="Использовать ранговые сравнения, графики распределения и проверять таблицу выделяющихся значений.",
+                    recommendation="Использовать ранговые сравнения, графики распределения и проверять таблицу статистических выбросов.",
                 )
             )
 
@@ -1411,7 +1411,7 @@ def _analysis_warnings(
         if (payload or {}).get("outlier_rule") == "iqr_zero_no_outlier_fence"
     ]
     if iqr_zero_metrics:
-        warnings.append(f"Для показателей {_metric_list_text_for_catalog(iqr_zero_metrics, custom_metric_catalog)} межквартильный размах равен нулю; правило выделяющихся значений по ящику с усами здесь неинформативно.")
+        warnings.append(f"Для показателей {_metric_list_text_for_catalog(iqr_zero_metrics, custom_metric_catalog)} межквартильный размах равен нулю; границы выбросов по правилу 1,5 × IQR здесь неинформативны.")
     skipped_kendall = ((correlations.get("kendall_tau_b") or {}).get("skipped") or [])
     if skipped_kendall:
         warnings.append(f"Расчет коэффициента Кендалла пропущен для {len(skipped_kendall)} пар показателей: слишком много наблюдений для точного расчета.")
@@ -1567,7 +1567,7 @@ def _boxplot_values(rows: list[dict[str, Any]], raw_values: list[float | None]) 
             "display_outlier_count": len(display_outliers),
             "outlier_rule": "iqr_zero_no_outlier_fence",
             "outlier_rule_unstable": True,
-            "warning": "Межквартильный размах равен нулю; правило выделяющихся значений по ящику с усами для этого показателя неинформативно.",
+            "warning": "Межквартильный размах равен нулю; границы выбросов по правилу 1,5 × IQR для этого показателя неинформативны.",
         }
     low = q1 - 1.5 * iqr
     high = q3 + 1.5 * iqr

@@ -279,7 +279,7 @@ export function AnalyticsView({
               <div>
                 <span className="step-badge">Диапазоны</span>
                 <h2>Разброс значений</h2>
-                <p>Ящик с усами показывает середину распределения, типичный диапазон и резко выделяющиеся значения по каждому индексу.</p>
+                <p>Ящик с усами показывает медиану, квартильный диапазон Q1–Q3 и значения за пределами типичного диапазона по правилу 1,5 × IQR.</p>
               </div>
               <button type="button" className={showBoxplot ? "choice-pill active" : "choice-pill"} onClick={() => setShowBoxplot(!showBoxplot)}>
                 {showBoxplot ? "Скрыть ящик с усами" : "Показать ящик с усами"}
@@ -335,8 +335,8 @@ function DescriptiveStatsPanel({
       <div className="panel-head split">
         <div>
           <span className="step-badge">Сводная статистика</span>
-          <h2>Статистические ориентиры по показателям</h2>
-          <p>Эта таблица дает минимум, который нужен для чтения графиков: размер выборки, центр распределения, типичный диапазон, общий размах и число резко выделяющихся значений.</p>
+          <h2>Описательная статистика по показателям</h2>
+          <p>Таблица показывает базовые характеристики распределения: число наблюдений, среднее, медиану, квартильный диапазон Q1–Q3, размах, стандартное отклонение и выбросы по правилу 1,5 × IQR.</p>
         </div>
         <div className="download-inline">
           {hasExportScope && <DownloadLink href={downloads.descriptive} label="Сводная таблица" compact />}
@@ -350,13 +350,13 @@ function DescriptiveStatsPanel({
           <thead>
             <tr>
               <th>Показатель</th>
-              <th>Авторов</th>
+              <th>Наблюдений</th>
               <th>Среднее</th>
               <th>Медиана</th>
-              <th>Квартильный диапазон</th>
+              <th>Q1–Q3</th>
               <th>Мин–макс</th>
-              <th>Стандартное отклонение</th>
-              <th>Выделяющиеся</th>
+              <th>Ст. отклонение</th>
+              <th>Выбросы IQR</th>
             </tr>
           </thead>
           <tbody>
@@ -410,10 +410,10 @@ function analysisWarningLabel(warning: string, metricLabels?: Record<string, str
       .split(/,\s*/)
       .map((item) => metricLabelFor(item.trim(), metricLabels))
       .join(", ");
-    return `Для показателей ${metrics} межквартильный размах равен нулю; правило выделяющихся значений по ящику с усами здесь неинформативно.`;
+    return `Для показателей ${metrics} межквартильный размах равен нулю; границы выбросов по правилу 1,5 × IQR здесь неинформативны.`;
   }
   if (/IQR outlier fences are not informative/i.test(text)) {
-    return "Межквартильный размах равен нулю; границы выделяющихся значений по ящику с усами здесь неинформативны.";
+    return "Межквартильный размах равен нулю; границы выбросов по правилу 1,5 × IQR здесь неинформативны.";
   }
   return text;
 }
@@ -633,7 +633,7 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels }: { payload: Scien
           <div key={row.metricName} className="boxplot-svg-row">
             <div className="boxplot-svg-title">
               <b>{metricLabelFor(row.metricName, metricLabels)}</b>
-              <span>Q1 {formatAnalysisValue(row.q1)} · медиана {formatAnalysisValue(row.median)} · Q3 {formatAnalysisValue(row.q3)}{row.outliers ? ` · выделяющихся ${fmt(row.outliers)}` : ""}{row.observedMax !== null && row.observedMax > row.max ? ` · максимум ${formatAnalysisValue(row.observedMax)}` : ""}</span>
+              <span>Q1 {formatAnalysisValue(row.q1)} · медиана {formatAnalysisValue(row.median)} · Q3 {formatAnalysisValue(row.q3)}{row.outliers ? ` · выбросов IQR ${fmt(row.outliers)}` : ""}{row.observedMax !== null && row.observedMax > row.max ? ` · максимум ${formatAnalysisValue(row.observedMax)}` : ""}</span>
             </div>
             <svg viewBox="0 0 1000 88" role="img" aria-label={`Ящик с усами для ${metricLabelFor(row.metricName, metricLabels)}`} className="boxplot-svg">
               <line x1="64" y1="62" x2="962" y2="62" className="boxplot-axis" />
