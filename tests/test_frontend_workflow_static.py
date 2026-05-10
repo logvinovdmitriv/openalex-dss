@@ -30,7 +30,8 @@ def test_data_sorting_does_not_eagerly_refresh_heavy_analytics() -> None:
     assert 'const rankingsViewActive = view === "rankings"' in main
     assert 'const analyticsViewActive = view === "statistics"' in main
     assert "enabled: dataViewActive && scopeReady && localDataKindAvailable" in main
-    assert "enabled: rankingsViewActive && hasLocalAnalyticsData" in main
+    assert "enabled: (rankingsViewActive || analyticsViewActive) && hasLocalAnalyticsData" in main
+    assert 'sort: ""' in main
     assert "enabled: analyticsViewActive && hasLocalAnalyticsData && scientometricMetrics.length > 0" in main
     assert "{ signal }) => getJson<TableResponse>" in main
     assert "serverControlled ? rows : rows.filter" in grid

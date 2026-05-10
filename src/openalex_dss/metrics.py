@@ -79,7 +79,7 @@ def g_index(citations: list[int]) -> int:
 
 
 def iupv_from_percentiles(p_pr: float, h_pr: float, c_frac_pr: float) -> float:
-    """IUPV: geometric mean of percentile ranks for P, h and C_frac."""
+    """Rating formula: geometric mean of percentile ranks for P, h and C_frac."""
     if p_pr <= 0 or h_pr <= 0 or c_frac_pr <= 0:
         return 0.0
     return 100.0 * (max(1e-6, p_pr) * max(1e-6, h_pr) * max(1e-6, c_frac_pr)) ** (1.0 / 3.0)
@@ -97,7 +97,7 @@ def islv_from_percentiles(
     tau: float = 0.50,
     penalty_lambda: float = 0.30,
 ) -> float:
-    """ISLV: balanced local contribution index with top-1 concentration penalty."""
+    """Balanced contribution rating with top-1 concentration penalty."""
     def component(value: float) -> float:
         return min(1.0, max(0.0, value) + epsilon)
 

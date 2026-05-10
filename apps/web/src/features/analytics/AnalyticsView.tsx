@@ -34,8 +34,6 @@ export function AnalyticsView({
   setSelectedAuthorIds,
   selectedAuthorRows: savedSelectedAuthorRows,
   setSelectedAuthorRows,
-  dataSort,
-  dataDirection,
 }: {
   filters: ActiveFilters;
   scientometrics?: ScientometricAnalysisPayload;
@@ -61,8 +59,6 @@ export function AnalyticsView({
   setSelectedAuthorIds: (value: string[]) => void;
   selectedAuthorRows: Record<string, unknown>[];
   setSelectedAuthorRows: (value: Record<string, unknown>[]) => void;
-  dataSort: string;
-  dataDirection: "asc" | "desc";
 }) {
   const metrics = (scientometrics?.metrics ?? scientometricMetrics).filter(Boolean);
   const analyticsMetrics = metrics.length ? metrics : [metric].filter(Boolean);
@@ -88,7 +84,7 @@ export function AnalyticsView({
     staleTime: 60_000,
   });
   const scientometricMetricParam = scientometricMetrics.join(",");
-  const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: dataSort, direction: dataDirection, limit: 0 });
+  const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: "", direction: "desc", limit: 0 });
   const scientometricParams = filterParams(filters, {
     fraction_mode: fractionMode,
     metrics: scientometricMetricParam,
@@ -111,7 +107,7 @@ export function AnalyticsView({
     <div className="stack">
       <section className="notice">
         <b>Аналитика построена по выборке из “Данных”</b>
-        <span>Поиск, фильтры и сортировка задаются во вкладке “Данные”. Расчеты используют всех авторов после этих ограничений. На графиках точками показываются только авторы, которых вы явно выбрали ниже.</span>
+        <span>Расчеты и графики используют всех авторов выбранного среза. Поиск и фильтры из вкладки “Данные” могут сузить выборку; сортировка и текущая страница таблицы на расчеты не влияют.</span>
       </section>
       {!hasAuthorIndices && (
         <section className="notice warn action-notice">
@@ -135,7 +131,7 @@ export function AnalyticsView({
           <div>
             <span className="step-badge">Аналитика</span>
             <h2>Аналитика выбранной выборки</h2>
-            <p>На этой странице нет отдельных фильтров. Все графики ниже автоматически используют поиск, ограничения и сортировку из вкладки “Данные”. Чтобы увидеть конкретных авторов на распределениях, найдите их в поле ниже и добавьте как точки.</p>
+            <p>На этой странице нет отдельных фильтров. Все графики ниже строятся по полному авторскому набору выбранного среза с учетом поиска и фильтров из “Данных”. Чтобы увидеть конкретных авторов на распределениях, найдите их в поле ниже и добавьте как точки.</p>
           </div>
           {loadingScientometrics && <span className="status-chip"><Loader2 size={14} className="spin" /> Обновление</span>}
         </div>
@@ -236,7 +232,7 @@ export function AnalyticsView({
       {dataSearch.trim() && selectedAuthorIds.length === 0 && (
         <section className="notice">
           <b>Учитывается поиск из таблицы “Данные”</b>
-          <span>Текущий поиск: “{dataSearch.trim()}”. Он применяется вместе с фильтрами столбцов, сортировкой и числом строк.</span>
+          <span>Текущий поиск: “{dataSearch.trim()}”. Он применяется вместе с фильтрами столбцов; сортировка и текущая страница таблицы на графики не влияют.</span>
         </section>
       )}
       {!scientometrics && (

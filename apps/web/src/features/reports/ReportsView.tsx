@@ -54,7 +54,7 @@ export function ReportsPage({
   materialization: any;
 }) {
   const [section, setSection] = useState<"exports" | "passports">("exports");
-  const selectionQuery = dataSelectionQuery({ filters: dataFilters, sort: dataSort, direction: dataDirection, limit: 0 });
+  const selectionQuery = dataSelectionQuery({ filters: dataFilters, sort: "", direction: "desc", limit: 0 });
   const activeRestrictionCount = Object.keys(dataFilters).length;
   const reportParams = filterParams(filters, {
     fraction_mode: fractionMode,

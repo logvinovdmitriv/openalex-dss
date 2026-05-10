@@ -347,7 +347,7 @@ class ScientometricServiceTests(unittest.TestCase):
                     },
                     {
                         "role": "candidate_metric",
-                        "text": "ISLV рассматривается как кандидатная формула.",
+                        "text": "Сбалансированная рейтинговая формула рассматривается как кандидатная.",
                         "evidence_finding_ids": ["balanced_candidate:islv"],
                         "evidence_metrics": ["islv"],
                     },
@@ -363,7 +363,7 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertIn("## Кандидатная формула", markdown)
         self.assertIn("Основания: heavy_tail:c", markdown)
         self.assertIn("Метрики: Цитирования", markdown)
-        self.assertIn("Метрики: ISLV: сбалансированный показатель вклада", markdown)
+        self.assertIn("Метрики: Рейтинговая формула: сбалансированный вклад", markdown)
         self.assertIn("## Ограничения вывода", markdown)
         self.assertIn("- Метрики не заменяют экспертную оценку.", markdown)
 

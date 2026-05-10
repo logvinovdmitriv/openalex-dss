@@ -50,7 +50,7 @@ export function DataRestrictionChips({
           {columnLabel(field)}: {columnFilterSummary(filter)} ×
         </button>
       ))}
-      <span>Для расчетов берутся все строки после поиска, фильтров и сортировки</span>
+      <span>Для расчетов берутся все строки после поиска и фильтров; сортировка влияет только на просмотр таблицы</span>
     </div>
   );
 }
@@ -62,4 +62,3 @@ function columnFilterSummary(filter: { contains?: string; min?: string; max?: st
   if (filter.max) parts.push(`до ${filter.max}`);
   return parts.join(", ") || "ограничение";
 }
-
