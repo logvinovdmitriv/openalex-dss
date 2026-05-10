@@ -144,6 +144,8 @@ AUTHOR_WORK_DETAIL_FIELDS = (
     "publication_year",
     "cited_by_count",
     "authors_count_used",
+    "actual_authors_count",
+    "authors_count_reported",
     "credit_weight",
     "cited_credit",
     "single_authored_flag",
@@ -1637,6 +1639,9 @@ def _filtered_work_indices(
         args.extend([f"%{q}%"] * 4)
 
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
+        author_work_fields = set(_registered_fields(conn, "author_work"))
+        actual_authors_sql = "aw.actual_authors_count" if "actual_authors_count" in author_work_fields else "NULL"
+        reported_authors_sql = "aw.authors_count_reported" if "authors_count_reported" in author_work_fields else "NULL"
         rows = _records(
             conn.execute(
                 f"""
@@ -1648,6 +1653,8 @@ def _filtered_work_indices(
                   aw.publication_year,
                   aw.cited_by_count,
                   aw.authors_count_used,
+                  {actual_authors_sql} AS actual_authors_count,
+                  {reported_authors_sql} AS authors_count_reported,
                   aw.credit_weight,
                   aw.cited_credit,
                   aw.single_authored_flag,
@@ -1696,6 +1703,9 @@ def _indices_for_data_table_selection(
         return []
     metric_params = _run_metric_params(run_id)
     with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
+        author_work_fields = set(_registered_fields(conn, "author_work"))
+        actual_authors_sql = "aw.actual_authors_count" if "actual_authors_count" in author_work_fields else "NULL"
+        reported_authors_sql = "aw.authors_count_reported" if "authors_count_reported" in author_work_fields else "NULL"
         target_alias = "w"
         joins = "JOIN works w USING(work_id)"
         target_fields = set(table_schema("works", run_id=run_id, dump_id=dump_id))
@@ -1728,6 +1738,8 @@ def _indices_for_data_table_selection(
                   aw.publication_year,
                   aw.cited_by_count,
                   aw.authors_count_used,
+                  {actual_authors_sql} AS actual_authors_count,
+                  {reported_authors_sql} AS authors_count_reported,
                   aw.credit_weight,
                   aw.cited_credit,
                   aw.single_authored_flag,
@@ -1811,7 +1823,7 @@ def _indices_from_filtered_author_work_rows(
                     p0=metric_params["lrdi_p0"],
                     lam=metric_params["lrdi_lambda"],
                 ),
-                "mean_authors_per_work": _mean([_as_float(row.get("authors_count_used")) for row in group]),
+                "mean_authors_per_work": _mean([_actual_authors_count(row) for row in group]),
                 "share_single_authored": _mean([1.0 if _truthy(row.get("single_authored_flag")) else 0.0 for row in group]),
                 "n_flagged_works": sum(1 for row in group if _truthy(row.get("qf_any"))),
                 "n_truncated_works": sum(1 for row in group if _truthy(row.get("qf_authorship_truncated"))),
@@ -2694,6 +2706,24 @@ def _validate_local_analysis_filters(filters: FilterSet) -> None:
 def analysis_filter_warnings(filters: FilterSet | None = None, *, run_id: str = "", dump_id: str = "") -> list[dict[str, str]]:
     clean = _clean_filters(filters or {})
     warnings: list[dict[str, str]] = []
+    authorship_filter_labels = []
+    if clean.get("country_code"):
+        authorship_filter_labels.append("страна организации автора")
+    if clean.get("institution_id"):
+        authorship_filter_labels.append("организация автора")
+    if clean.get("author_id"):
+        authorship_filter_labels.append("автор")
+    if authorship_filter_labels:
+        warnings.append(
+            {
+                "code": "authorship_filter_local_final_policy",
+                "message": (
+                    "Фильтры по authorships для финального анализа применяются локально после материализации полного среза: "
+                    + ", ".join(authorship_filter_labels)
+                    + ". Это защищает расчет от обрезанных authorships в list-ответах OpenAlex."
+                ),
+            }
+        )
     if clean.get("affiliation_mode") == "current":
         warnings.append(
             {
@@ -2786,6 +2816,17 @@ def _visible_metrics(rows: list[dict[str, Any]], custom_metric_defs: list[dict[s
 
 def _mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
+
+
+def _actual_authors_count(row: dict[str, Any]) -> float:
+    value = _as_float(row.get("actual_authors_count"))
+    if value > 0:
+        return value
+    reported = _as_float(row.get("authors_count_reported"))
+    if reported > 0:
+        return reported
+    used = _as_float(row.get("authors_count_used"))
+    return used if used > 0 else 1.0
 
 
 def _f5(group: list[dict[str, Any]]) -> float:

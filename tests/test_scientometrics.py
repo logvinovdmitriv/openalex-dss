@@ -510,7 +510,10 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"], {"run_id": "run_a", "dump_id": "dump_a"})
         self.assertEqual(payload["n_authors"], 1)
         self.assertEqual(payload["scope"]["cohort_filter_policy"], "current")
-        self.assertEqual(payload["scope"]["analysis_author_scope"], "data_page_selection")
+        self.assertEqual(payload["scope"]["analysis_author_scope"], "cohort_resolved_author_set")
+        self.assertEqual(payload["scope"]["data_scope"], "full_filtered_slice")
+        self.assertIn("filters_hash", payload["scope"])
+        self.assertEqual(payload["scope"]["final_analysis"]["allowed"], False)
         self.assertEqual(payload["scope"]["rank_top_n"], 10)
         self.assertEqual(payload["cohort_context"]["analysis_filters"], {"country_code": "DE"})
 

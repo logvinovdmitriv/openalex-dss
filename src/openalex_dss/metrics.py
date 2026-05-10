@@ -662,7 +662,12 @@ def _fm5(group: list[dict[str, str]]) -> float:
 
 def _actual_authors_count(row: dict[str, Any]) -> float:
     value = as_float(row.get("actual_authors_count"))
-    return value if value > 0 else max(1.0, as_float(row.get("authors_count_used")))
+    if value > 0:
+        return value
+    reported = as_float(row.get("authors_count_reported"))
+    if reported > 0:
+        return reported
+    return max(1.0, as_float(row.get("authors_count_used")))
 
 
 def _percentile_rank_map(rows: list[dict[str, Any]], field: str) -> dict[int, float]:

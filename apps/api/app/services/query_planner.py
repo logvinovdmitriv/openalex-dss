@@ -220,12 +220,13 @@ def choose_strategy(
 
 def classify_filters(cfg: Any) -> dict[str, list[str]]:
     pushdown = ["subject", "publication_date", "work_type", "quality_flags"]
+    risky_authorship_pushdown: list[str] = []
     if cfg.country_code:
-        pushdown.append("country")
+        risky_authorship_pushdown.append("country")
     if cfg.institution_id:
-        pushdown.append("institution")
+        risky_authorship_pushdown.append("institution")
     if cfg.author_id:
-        pushdown.append("author")
+        risky_authorship_pushdown.append("author")
     if cfg.source_id:
         pushdown.append("source")
     if cfg.language:
@@ -236,7 +237,8 @@ def classify_filters(cfg: Any) -> dict[str, list[str]]:
         pushdown.append("min_work_citations")
     return {
         "openalex_pushdown": pushdown,
-        "local_pushdown": ["source_type", "country_code", "work_type", "publication_date"],
+        "fetch_pushdown_risky_authorship": risky_authorship_pushdown,
+        "local_materialized_filter": [*risky_authorship_pushdown, "source_type", "country_code", "work_type", "publication_date"],
         "derived_after_metrics": ["min_author_publications", "min_local_h", "rank_by_metric"],
         "ui_only_presets": ["domain_presets", "organization_presets"],
         "unsupported_not_exposed": ["city", "gender", "age"],

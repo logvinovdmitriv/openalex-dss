@@ -286,7 +286,7 @@ def _works_params(cfg: SliceConfig, per_page: int) -> dict[str, str]:
 
 
 def _works_select_fields(cfg: SliceConfig) -> tuple[str, ...]:
-    required = ("language", "open_access")
+    required = ("authors_count", "language", "open_access")
     return tuple(dict.fromkeys([*cfg.select_fields, *required]))
 
 

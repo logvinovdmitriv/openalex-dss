@@ -186,7 +186,30 @@ def build_scientometric_analysis(
         metric_scorecard=scorecard,
     )
     summary = finding_summary(findings, metrics=selected_metrics, baseline_metric=baseline_metric)
+    analysis_hash = _analysis_scope_hash(
+        run_id=run_id,
+        dump_id=dump_id,
+        fraction_mode=fraction_mode,
+        filters=resolved_filters,
+        data_filters=context["data_filters"],
+        data_kind=context["data_kind"],
+        data_search=context["data_search"],
+        selected_author_ids=sorted(context["explicit_author_ids"]) if context.get("explicit_author_ids") else [],
+        cohort_id=cohort_id,
+        cohort_filter_policy=cohort_filter_policy,
+        metrics=selected_metrics,
+        baseline_metric=baseline_metric,
+        custom_metrics=context["custom_metrics"],
+    )
+    final_analysis = _final_analysis_status(
+        run_id=run_id,
+        dump_id=dump_id,
+        filters=resolved_filters,
+        warnings=warnings,
+    )
     analysis_scope = {
+        "analysis_id": f"analysis_{analysis_hash[:16]}",
+        "filters_hash": analysis_hash,
         "run_id": run_id,
         "dump_id": dump_id,
         "fraction_mode": fraction_mode,
@@ -202,12 +225,15 @@ def build_scientometric_analysis(
         "cohort_filter_policy": cohort_filter_policy,
         "baseline_metric": baseline_metric,
         "analysis_protocol_id": BASELINE_ANALYSIS_PROTOCOL["protocol_id"],
-        "analysis_author_scope": "data_page_selection",
+        "analysis_author_scope": _analysis_author_scope(context, cohort_id=cohort_id),
+        "data_scope": "full_filtered_slice",
         "rank_top_n": rank_top_n,
         "n_authors": len(rows),
         "metric_scope": "filtered_recomputed",
         "percentile_scope": "current filtered author set",
         "custom_metrics": context["custom_metrics"],
+        "analysis_status": final_analysis["status"],
+        "final_analysis": final_analysis,
     }
     conclusion = conclusion_draft(
         findings=findings,
@@ -225,6 +251,8 @@ def build_scientometric_analysis(
         "metrics": selected_metrics,
         "metric_groups": _metric_groups(selected_metrics),
         "analysis_protocol": BASELINE_ANALYSIS_PROTOCOL,
+        "analysis_status": final_analysis["status"],
+        "final_analysis": final_analysis,
         "custom_metrics": context["custom_metrics"],
         "n_authors": len(rows),
         "descriptive": descriptive,
@@ -323,6 +351,64 @@ def _analysis_cache_path(
 def _safe_segment(value: str) -> str:
     cleaned = "".join(ch for ch in str(value or "") if ch.isalnum() or ch in {"_", "-"})
     return cleaned or "run"
+
+
+def _analysis_scope_hash(**payload: Any) -> str:
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:32]
+
+
+def _analysis_author_scope(context: dict[str, Any], *, cohort_id: str) -> str:
+    if context.get("explicit_author_ids"):
+        return "explicit_author_selection"
+    if str(cohort_id or "").strip():
+        return "cohort_resolved_author_set"
+    return "full_filtered_slice"
+
+
+def _final_analysis_status(
+    *,
+    run_id: str,
+    dump_id: str,
+    filters: dict[str, Any],
+    warnings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    actions: list[str] = []
+    status = "final_reproducible"
+    eligibility = _run_analysis_eligibility(run_id)
+    allowed_raw = eligibility.get("allowed_for_final_analysis")
+    if allowed_raw is False:
+        status = "exploratory"
+        reasons.append("Паспорт расчета не разрешает финальный анализ для выбранного run_id.")
+        actions.append("Выберите срез со статусом финального анализа или восстановите/пересчитайте текущий срез.")
+    elif allowed_raw is None:
+        status = "exploratory"
+        reasons.append("Не найден явный паспорт допуска финального анализа для выбранного run_id.")
+        actions.append("Пересчитайте индексы, чтобы сформировать расчетный паспорт и checksums.")
+    if any(str(item.get("code") or "") == "current_affiliation_requires_enrichment" for item in warnings if isinstance(item, dict)):
+        status = "exploratory"
+        reasons.append("Фильтр по текущей аффилиации требует отдельного Authors API enrichment и не является финальным works-based расчетом.")
+        actions.append("Для финального анализа используйте исторические authorships локального среза или выполните отдельное обогащение авторских профилей.")
+    if any(key in filters for key in ("country_code", "institution_id", "author_id")):
+        actions.append("Проверьте, что authorship-фильтры применены локально после материализации среза; pushdown-оценки OpenAlex являются предварительными.")
+    return {
+        "status": status,
+        "allowed": status == "final_reproducible",
+        "allowed_for_final_analysis": status == "final_reproducible",
+        "run_id": run_id,
+        "dump_id": dump_id,
+        "eligibility_status": str(eligibility.get("status") or "unknown"),
+        "reasons": reasons,
+        "actions": actions,
+    }
+
+
+def _run_analysis_eligibility(run_id: str) -> dict[str, Any]:
+    passport = warehouse.read_json_doc("calculation_passport", run_id=run_id) or {}
+    eligibility = passport.get("analysis_eligibility") if isinstance(passport, dict) else {}
+    if isinstance(eligibility, dict):
+        return eligibility
+    return {}
 
 
 def _read_analysis_cache(path: Path) -> dict[str, Any] | None:

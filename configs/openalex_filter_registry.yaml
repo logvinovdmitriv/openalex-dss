@@ -19,18 +19,27 @@ filters:
       field: "keywords.id"
   country:
     label: "Страна организации автора"
-    class: "openalex_pushdown"
+    class: "fetch_pushdown_risky_authorship"
+    local_class: "local_materialized_filter"
+    final_analysis_policy: "local_after_materialization"
+    risk_reason: "Фильтр относится к authorships. В list-ответах OpenAlex список authorships может быть обрезан для работ с большим числом авторов, поэтому для финального анализа фильтр должен применяться локально после материализации среза."
     works_filter:
       field: "authorships.institutions.country_code"
   institution:
     label: "Организация автора"
-    class: "openalex_pushdown"
+    class: "fetch_pushdown_risky_authorship"
+    local_class: "local_materialized_filter"
+    final_analysis_policy: "local_after_materialization"
+    risk_reason: "Фильтр относится к authorships. В list-ответах OpenAlex список authorships может быть обрезан для работ с большим числом авторов, поэтому для финального анализа фильтр должен применяться локально после материализации среза."
     works_filter:
       field: "authorships.institutions.id"
       max_or_values: 100
   author:
     label: "Автор"
-    class: "openalex_pushdown"
+    class: "fetch_pushdown_risky_authorship"
+    local_class: "local_materialized_filter"
+    final_analysis_policy: "local_after_materialization"
+    risk_reason: "Фильтр относится к authorships. В list-ответах OpenAlex список authorships может быть обрезан для работ с большим числом авторов, поэтому для финального анализа фильтр должен применяться локально после материализации среза."
     works_filter:
       field: "authorships.author.id"
       max_or_values: 100

@@ -56,6 +56,15 @@ def _openalex_filter_options(filter_registry: dict[str, Any]) -> list[dict[str, 
             continue
         works_filter = item.get("works_filter") or {}
         field = str(works_filter.get("field") or "").strip()
-        if field and item.get("class") == "openalex_pushdown":
-            out.append({"id": str(filter_id), "label": str(item.get("label") or filter_id), "source": f"works.{field}"})
+        filter_class = str(item.get("class") or "")
+        if field and filter_class in {"openalex_pushdown", "fetch_pushdown_risky_authorship"}:
+            out.append(
+                {
+                    "id": str(filter_id),
+                    "label": str(item.get("label") or filter_id),
+                    "source": f"works.{field}",
+                    "class": filter_class,
+                    "final_analysis_policy": str(item.get("final_analysis_policy") or "fetch_pushdown_safe"),
+                }
+            )
     return out

@@ -23,7 +23,7 @@ per_page: 100
 api_key_env: OPENALEX_API_KEY
 fraction_modes: strict_authors_count,renorm_valid_authors,integer
 fraction_mode_default: strict_authors_count
-select_fields: id,doi,display_name,publication_year,publication_date,type,cited_by_count,is_retracted,is_paratext,is_xpac,is_authors_truncated,authorships,primary_topic,topics,primary_location,ids,created_date,updated_date
+select_fields: id,doi,display_name,publication_year,publication_date,type,cited_by_count,authors_count,is_retracted,is_paratext,is_xpac,is_authors_truncated,authorships,primary_topic,topics,primary_location,ids,created_date,updated_date
 lrdi_p0: 5.0
 lrdi_lambda: 0.15
 analysis_year: 2026
