@@ -252,6 +252,32 @@ class WarehouseTests(unittest.TestCase):
         query_table.assert_not_called()
         filtered_indices.assert_called_once()
 
+    def test_selected_index_rows_applies_data_page_work_filters_to_author_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_dump_tables(root, "dump_a", "W1", "A1", "Author One", 1)
+            _append_dump_work(root, "dump_a", "W2", "A1", "Author One", 10)
+            _write_run_author_work(root, "run_a", "dump_a", "W1", "A1", "Author One", 1)
+            _append_run_author_work(root, "run_a", "W2", "A1", "Author One", 10)
+
+            with (
+                patch.object(warehouse, "DATA", root),
+                patch.object(warehouse, "WAREHOUSE", root / "warehouse.duckdb"),
+            ):
+                rows = warehouse.selected_index_rows(
+                    "integer",
+                    {},
+                    run_id="run_a",
+                    data_kind="works",
+                    data_filters={"cited_by_count": {"min": "5"}},
+                )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["author_display_name"], "Author One")
+        self.assertEqual(rows[0]["p"], 1)
+        self.assertEqual(rows[0]["c"], 10)
+        self.assertEqual(rows[0]["h"], 1)
+
     def test_metric_ranking_with_empty_author_id_filter_returns_no_rows(self) -> None:
         rows = [
             {"author_id": "https://openalex.org/A1", "author_display_name": "Author One", "h": 3, "p": 4, "c": 10},
@@ -588,6 +614,52 @@ def _write_run_author_work(root: Path, run_id: str, dump_id: str, work_id: str, 
     run_dir.mkdir(parents=True)
     (run_dir / "metric_run.json").write_text(json.dumps({"run_id": run_id, "dump_id": dump_id, "input_dump_id": dump_id}), encoding="utf-8")
     write_parquet_dicts(run_dir / "tables" / "author_work.parquet", [_author_work_row(work_id, author_id, author_name, citations)], _author_work_fields())
+
+
+def _append_dump_work(root: Path, dump_id: str, work_id: str, author_id: str, author_name: str, citations: int) -> None:
+    base = root / "tables" / dump_id
+    works_path = base / "works.parquet"
+    authorships_path = base / "authorships.parquet"
+    with warehouse.duckdb.connect(":memory:") as conn:
+        works = [dict(zip([column[0] for column in conn.execute(f"DESCRIBE SELECT * FROM read_parquet('{works_path}')").fetchall()], row)) for row in conn.execute(f"SELECT * FROM read_parquet('{works_path}')").fetchall()]
+        authorships = [dict(zip([column[0] for column in conn.execute(f"DESCRIBE SELECT * FROM read_parquet('{authorships_path}')").fetchall()], row)) for row in conn.execute(f"SELECT * FROM read_parquet('{authorships_path}')").fetchall()]
+    works.append(
+        {
+            "work_id": f"https://openalex.org/{work_id}",
+            "doi": f"https://doi.org/10.123/{work_id.lower()}",
+            "publication_date": "2024-01-01",
+            "publication_year": 2024,
+            "type": "article",
+            "cited_by_count": citations,
+            "display_name": f"Work {work_id}",
+            "source_display_name": "",
+            "primary_topic_display_name": "Software Engineering",
+            "primary_topic_id": "https://openalex.org/T1",
+            "primary_subfield_short_id": "1706",
+            "primary_subfield_id": "https://openalex.org/subfields/1706",
+            "primary_field_id": "https://openalex.org/fields/17",
+        }
+    )
+    authorships.append(
+        {
+            "work_id": f"https://openalex.org/{work_id}",
+            "author_id": f"https://openalex.org/{author_id}",
+            "author_display_name": author_name,
+            "country_codes_csv": "RU",
+            "institution_ids_csv": "https://openalex.org/I1",
+        }
+    )
+    write_parquet_dicts(works_path, works, list(works[0].keys()))
+    write_parquet_dicts(authorships_path, authorships, list(authorships[0].keys()))
+
+
+def _append_run_author_work(root: Path, run_id: str, work_id: str, author_id: str, author_name: str, citations: int) -> None:
+    path = root / "runs" / run_id / "tables" / "author_work.parquet"
+    fields = _author_work_fields()
+    with warehouse.duckdb.connect(":memory:") as conn:
+        rows = [dict(zip(fields, row)) for row in conn.execute(f"SELECT * FROM read_parquet('{path}')").fetchall()]
+    rows.append(_author_work_row(work_id, author_id, author_name, citations))
+    write_parquet_dicts(path, rows, fields)
 
 
 def _write_many_author_scope(root: Path, run_id: str, dump_id: str, n: int) -> None:

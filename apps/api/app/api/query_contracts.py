@@ -76,6 +76,7 @@ class AnalysisFilterQuery:
 @dataclass(frozen=True)
 class DataSelectionQuery:
     data_filters: dict[str, Any]
+    data_kind: str = "indices"
     data_search: str = ""
     data_sort: str = ""
     data_direction: str = "desc"
@@ -84,6 +85,9 @@ class DataSelectionQuery:
 
     def to_kwargs(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
+        kind = str(self.data_kind or "indices").strip() or "indices"
+        if kind:
+            out["data_kind"] = kind
         if self.data_filters:
             out["data_filters"] = self.data_filters
         if self.data_search.strip():
@@ -110,4 +114,3 @@ def _int_value(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-

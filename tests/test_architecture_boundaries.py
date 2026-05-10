@@ -55,14 +55,14 @@ def test_ranking_and_distribution_engines_keep_service_contracts() -> None:
 
 def test_query_contracts_normalize_common_api_values() -> None:
     filters = AnalysisFilterQuery(country_code="ru", keyword_display_name="graph databases", min_cited_by_count=3).to_filters()
-    selection = DataSelectionQuery(data_filters={"h": {"min": 1}}, data_search=" Ivanov ", data_sort="h", data_direction="asc", data_limit=50).to_kwargs()
+    selection = DataSelectionQuery(data_filters={"h": {"min": 1}}, data_kind="works", data_search=" Ivanov ", data_sort="h", data_direction="asc", data_limit=50).to_kwargs()
     scope = ScopeQuery(run_id="run_1")
 
     assert scope.has_direct_scope
     assert filters["country_code"] == "RU"
     assert filters["keyword_display_name"] == "graph databases"
     assert filters["min_cited_by_count"] == "3"
-    assert selection == {"data_filters": {"h": {"min": 1}}, "data_search": "Ivanov", "data_sort": "h", "data_direction": "asc", "data_limit": 50}
+    assert selection == {"data_kind": "works", "data_filters": {"h": {"min": 1}}, "data_search": "Ivanov", "data_sort": "h", "data_direction": "asc", "data_limit": 50}
 
 
 def test_application_layer_exposes_scientometric_use_cases() -> None:

@@ -1,8 +1,10 @@
 import { useMemo } from "react";
 
 import type { TableColumnFilters } from "../api";
+import type { LocalDataKind } from "../workbench";
 
 export function useDataSelection(params: {
+  kind?: LocalDataKind;
   filters: TableColumnFilters;
   search: string;
   sort: string;
@@ -12,6 +14,7 @@ export function useDataSelection(params: {
 }) {
   return useMemo(
     () => ({
+      kind: params.kind,
       filters: params.filters,
       search: params.search,
       sort: params.sort,
@@ -19,6 +22,6 @@ export function useDataSelection(params: {
       limit: params.limit,
       authorIds: params.authorIds ?? [],
     }),
-    [params.filters, params.search, params.sort, params.direction, params.limit, params.authorIds],
+    [params.kind, params.filters, params.search, params.sort, params.direction, params.limit, params.authorIds],
   );
 }

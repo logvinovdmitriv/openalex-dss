@@ -638,6 +638,37 @@ def _append_column_filter_clauses(where: list[str], args: list[Any], fields: lis
             args.append(max_value)
 
 
+def _append_qualified_column_filter_clauses(where: list[str], args: list[Any], *, alias: str, fields: set[str], data_filters: dict[str, Any] | None) -> None:
+    for field, filter_payload in parse_column_filters(data_filters).items():
+        if field not in fields:
+            continue
+        column = f"{alias}.{_quote_sql_identifier(field)}"
+        contains = str(filter_payload.get("contains") or "").strip()
+        if contains:
+            where.append(f"CAST({column} AS VARCHAR) ILIKE ?")
+            args.append(f"%{contains}%")
+        min_text = str(filter_payload.get("min") or "").strip().replace(",", ".")
+        if min_text:
+            where.append(f"TRY_CAST({column} AS DOUBLE) >= ?")
+            args.append(_parse_filter_number(min_text, field))
+        max_text = str(filter_payload.get("max") or "").strip().replace(",", ".")
+        if max_text:
+            where.append(f"TRY_CAST({column} AS DOUBLE) <= ?")
+            args.append(_parse_filter_number(max_text, field))
+
+
+def _append_qualified_search_clause(where: list[str], args: list[Any], *, alias: str, fields: set[str], data_search: str) -> None:
+    search = str(data_search or "").strip()
+    if not search:
+        return
+    searchable = [field for field in fields if _column_filterable(field)]
+    if not searchable:
+        return
+    expr = " OR ".join([f"CAST({alias}.{_quote_sql_identifier(field)} AS VARCHAR) ILIKE ?" for field in searchable])
+    where.append(f"({expr})")
+    args.extend([f"%{search}%"] * len(searchable))
+
+
 def _row_matches_column_filters(row: dict[str, Any], filters: dict[str, dict[str, str]], *, ignore_unknown_fields: bool = False) -> bool:
     for field, filter_payload in filters.items():
         if field not in row:
@@ -822,6 +853,7 @@ def selected_index_rows(
     dump_id: str = "",
     author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
     data_filters: dict[str, Any] | None = None,
+    data_kind: str = "indices",
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
@@ -842,6 +874,7 @@ def selected_index_rows(
     run_id = scope["run_id"]
     dump_id = scope["dump_id"]
     parsed_filters = parse_column_filters(data_filters)
+    data_kind = _normalize_data_kind(data_kind)
     data_search = str(data_search or "").strip()
     data_sort = str(data_sort or "").strip()
     data_direction = "asc" if str(data_direction or "").strip().lower() == "asc" else "desc"
@@ -849,6 +882,18 @@ def selected_index_rows(
         normalized_limit = max(0, min(int(data_limit or 0), 500_000))
     except (TypeError, ValueError):
         normalized_limit = 0
+
+    if data_kind != "indices" and (parsed_filters or data_search):
+        rows = _indices_for_data_table_selection(
+            fraction_mode,
+            data_kind,
+            run_id=run_id,
+            dump_id=dump_id,
+            data_filters=parsed_filters,
+            data_search=data_search,
+        )
+        rows = filter_rows_by_author_ids(rows, author_ids)
+        return custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
 
     if _can_use_precomputed_indices(filters, run_id=run_id, dump_id=dump_id):
         _set_analytics_cache_info({"status": "not_used", "key": "", "rows": count_rows("indices", run_id=run_id, dump_id=dump_id)})
@@ -898,6 +943,11 @@ def selected_index_rows(
 
 def _can_use_precomputed_indices(filters: FilterSet | None, *, run_id: str = "", dump_id: str = "") -> bool:
     return not _clean_filters(filters or {}) and table_exists("indices", run_id=run_id, dump_id=dump_id)
+
+
+def _normalize_data_kind(data_kind: str) -> str:
+    kind = str(data_kind or "indices").strip()
+    return kind if kind in TABLE_KINDS else "indices"
 
 
 def _selected_precomputed_index_rows(
@@ -1586,6 +1636,84 @@ def _filtered_work_indices(
     return (out, rows) if return_author_work else out
 
 
+def _indices_for_data_table_selection(
+    fraction_mode: str,
+    data_kind: str,
+    *,
+    run_id: str,
+    dump_id: str,
+    data_filters: dict[str, Any],
+    data_search: str,
+) -> list[dict[str, Any]]:
+    if not (
+        table_exists("author_work", run_id=run_id, dump_id=dump_id)
+        and table_exists("works", run_id=run_id, dump_id=dump_id)
+        and table_exists(data_kind, run_id=run_id, dump_id=dump_id)
+    ):
+        return []
+    metric_params = _run_metric_params(run_id)
+    with connect_scope(run_id=run_id, dump_id=dump_id) as conn:
+        target_alias = "w"
+        joins = "JOIN works w USING(work_id)"
+        target_fields = set(table_schema("works", run_id=run_id, dump_id=dump_id))
+        if data_kind == "author_work":
+            target_alias = "aw"
+            target_fields = set(table_schema("author_work", run_id=run_id, dump_id=dump_id))
+        elif data_kind == "authorships":
+            target_alias = "au_filter"
+            target_fields = set(table_schema("authorships", run_id=run_id, dump_id=dump_id))
+            joins += " JOIN authorships au_filter ON au_filter.work_id = aw.work_id AND au_filter.author_id = aw.author_id"
+        elif data_kind == "work_topics":
+            target_alias = "wt_filter"
+            target_fields = set(table_schema("work_topics", run_id=run_id, dump_id=dump_id))
+            joins += " JOIN work_topics wt_filter ON wt_filter.work_id = aw.work_id"
+        elif data_kind != "works":
+            return []
+
+        where = ["aw.fraction_mode = ?"]
+        args: list[Any] = [fraction_mode]
+        _append_qualified_column_filter_clauses(where, args, alias=target_alias, fields=target_fields, data_filters=data_filters)
+        _append_qualified_search_clause(where, args, alias=target_alias, fields=target_fields, data_search=data_search)
+        rows = _records(
+            conn.execute(
+                f"""
+                SELECT DISTINCT
+                  aw.fraction_mode,
+                  aw.author_id,
+                  aw.author_display_name,
+                  aw.work_id,
+                  aw.publication_year,
+                  aw.cited_by_count,
+                  aw.authors_count_used,
+                  aw.credit_weight,
+                  aw.cited_credit,
+                  aw.single_authored_flag,
+                  aw.qf_any,
+                  aw.qf_authorship_truncated,
+                  au.country_codes_csv AS author_country_code,
+                  au.institution_ids_csv,
+                  w.primary_topic_display_name AS author_subject_name
+                FROM author_work aw
+                {joins}
+                LEFT JOIN (
+                  SELECT
+                    work_id,
+                    author_id,
+                    string_agg(DISTINCT coalesce(country_codes_csv, ''), '|') AS country_codes_csv,
+                    string_agg(DISTINCT coalesce(institution_ids_csv, ''), '|') AS institution_ids_csv
+                  FROM authorships
+                  WHERE author_id IS NOT NULL AND author_id != ''
+                  GROUP BY work_id, author_id
+                ) au ON au.work_id = aw.work_id AND au.author_id = aw.author_id
+                WHERE {" AND ".join(where)}
+                """,
+                args,
+            ),
+            max_rows=2_000_000,
+        )
+    return _indices_from_filtered_author_work_rows(rows, fraction_mode=fraction_mode, run_id=run_id, dump_id=dump_id, metric_params=metric_params)
+
+
 def _indices_from_filtered_author_work_rows(
     rows: list[dict[str, Any]],
     *,
@@ -1665,6 +1793,7 @@ def metric_ranking(
     dump_id: str = "",
     author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
     data_filters: dict[str, Any] | None = None,
+    data_kind: str = "indices",
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
@@ -1681,6 +1810,7 @@ def metric_ranking(
         dump_id=dump_id,
         author_ids=author_ids,
         data_filters=data_filters,
+        data_kind=data_kind,
         data_search=data_search,
         data_sort=data_sort,
         data_direction=data_direction,
@@ -1714,6 +1844,7 @@ def iter_metric_ranking_csv(
     dump_id: str = "",
     author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
     data_filters: dict[str, Any] | None = None,
+    data_kind: str = "indices",
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
@@ -1729,6 +1860,20 @@ def iter_metric_ranking_csv(
     dump_id = scope["dump_id"]
     source_path: Path | None = None
     source_is_cached = False
+    parsed_filters = parse_column_filters(data_filters)
+    data_kind = _normalize_data_kind(data_kind)
+    if data_kind != "indices" and (parsed_filters or str(data_search or "").strip()):
+        rows = _indices_for_data_table_selection(
+            fraction_mode,
+            data_kind,
+            run_id=run_id,
+            dump_id=dump_id,
+            data_filters=parsed_filters,
+            data_search=data_search,
+        )
+        rows = filter_rows_by_author_ids(rows, author_ids)
+        rows = custom_metrics.apply_custom_metrics(rows, custom_metric_defs)
+        return _iter_metric_ranking_csv_from_rows(rows, fraction_mode, metric, limit=limit, max_limit=max_limit, rank_direction="desc")
     if _can_use_precomputed_indices(filters, run_id=run_id, dump_id=dump_id):
         _set_analytics_cache_info({"status": "not_used", "key": "", "rows": count_rows("indices", run_id=run_id, dump_id=dump_id)})
     else:
@@ -1869,6 +2014,37 @@ def _visible_metric_fields(fields: list[str], custom_metric_defs: list[dict[str,
     return [metric for metric in (*EXTENDED_LINE_CHART_METRICS, *custom_ids) if metric in field_set]
 
 
+def _iter_metric_ranking_csv_from_rows(
+    rows: list[dict[str, Any]],
+    fraction_mode: str,
+    metric: str,
+    *,
+    limit: int,
+    max_limit: int,
+    rank_direction: str = "desc",
+) -> Iterator[str]:
+    payload = metric_ranking_from_rows(
+        rows,
+        fraction_mode,
+        metric,
+        limit=limit,
+        max_limit=max_limit,
+        rank_direction=rank_direction,
+    )
+    fields = list(payload.get("fields") or [])
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    yield output.getvalue()
+    output.seek(0)
+    output.truncate(0)
+    for row in payload.get("rows") or []:
+        writer.writerow(row)
+        yield output.getvalue()
+        output.seek(0)
+        output.truncate(0)
+
+
 def _author_id_values(author_ids: set[str] | list[str] | tuple[str, ...] | None) -> list[str]:
     if author_ids is None:
         return []
@@ -1929,6 +2105,7 @@ def metric_distribution(
     dump_id: str = "",
     author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
     data_filters: dict[str, Any] | None = None,
+    data_kind: str = "indices",
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
@@ -1944,6 +2121,7 @@ def metric_distribution(
         dump_id=dump_id,
         author_ids=author_ids,
         data_filters=data_filters,
+        data_kind=data_kind,
         data_search=data_search,
         data_sort=data_sort,
         data_direction=data_direction,
@@ -2072,6 +2250,7 @@ def metric_bundle(
     dump_id: str = "",
     author_ids: set[str] | list[str] | tuple[str, ...] | None = None,
     data_filters: dict[str, Any] | None = None,
+    data_kind: str = "indices",
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
@@ -2088,6 +2267,7 @@ def metric_bundle(
         dump_id=scope["dump_id"],
         author_ids=author_ids,
         data_filters=data_filters,
+        data_kind=data_kind,
         data_search=data_search,
         data_sort=data_sort,
         data_direction=data_direction,

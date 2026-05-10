@@ -53,6 +53,7 @@ class MetricModel:
 class DataSelectionPolicy:
     """Table-selection policy shared by data, ranking, analytics and reports."""
 
+    kind: str = "indices"
     search: str = ""
     sort: str = ""
     direction: str = "desc"
@@ -66,6 +67,7 @@ class DataSelectionPolicy:
         if isinstance(author_ids, str):
             author_ids = tuple(item.strip() for item in author_ids.split(",") if item.strip())
         return cls(
+            kind=str(kwargs.get("data_kind") or kwargs.get("kind") or "indices").strip() or "indices",
             search=str(kwargs.get("data_search") or kwargs.get("search") or "").strip(),
             sort=str(kwargs.get("data_sort") or kwargs.get("sort") or "").strip(),
             direction="asc" if str(kwargs.get("data_direction") or kwargs.get("direction") or "desc").lower() == "asc" else "desc",
@@ -77,6 +79,7 @@ class DataSelectionPolicy:
     def to_query_kwargs(self) -> dict[str, Any]:
         return {
             "data_search": self.search,
+            "data_kind": self.kind,
             "data_sort": self.sort,
             "data_direction": self.direction,
             "data_limit": self.limit,

@@ -72,6 +72,7 @@ def build_scientometric_analysis(
     cohort_filter_policy: str = "membership",
     top_n: int = 100,
     data_filters: dict[str, Any] | None = None,
+    data_kind: str = "indices",
     data_search: str = "",
     author_ids: list[str] | set[str] | tuple[str, ...] | None = None,
     data_sort: str = "",
@@ -90,6 +91,7 @@ def build_scientometric_analysis(
         cohort_filter_policy=cohort_filter_policy,
         top_n=top_n,
         data_filters=data_filters,
+        data_kind=data_kind,
         data_search=data_search,
         author_ids=author_ids,
         data_sort=data_sort,
@@ -113,6 +115,7 @@ def build_scientometric_analysis(
         cohort_filter_policy=cohort_filter_policy,
         top_n=top_n,
         data_filters=data_filters,
+        data_kind=data_kind,
         data_search=data_search,
         author_ids=author_ids,
         data_sort=data_sort,
@@ -175,6 +178,7 @@ def build_scientometric_analysis(
         "fraction_mode": fraction_mode,
         "filters": resolved_filters,
         "data_filters": context["data_filters"],
+        "data_kind": context["data_kind"],
         "data_search": context["data_search"],
         "selected_author_ids": sorted(context["explicit_author_ids"]) if context.get("explicit_author_ids") else [],
         "data_sort": context["data_sort"],
@@ -240,6 +244,7 @@ def _analysis_cache_path(
     cohort_filter_policy: str,
     top_n: int,
     data_filters: dict[str, Any] | None,
+    data_kind: str,
     data_search: str,
     author_ids: list[str] | set[str] | tuple[str, ...] | None,
     data_sort: str,
@@ -275,6 +280,7 @@ def _analysis_cache_path(
             "filters": clean_analysis_filters(filters or {}),
             "top_n": max(0, min(_int_value(top_n, 100), 500_000)),
             "data_filters": warehouse.parse_column_filters(data_filters),
+            "data_kind": str(data_kind or "indices").strip() or "indices",
             "data_search": str(data_search or "").strip(),
             "author_ids": sorted(_clean_author_ids(author_ids) or []),
             "data_sort": data_sort_value,
@@ -525,6 +531,7 @@ def build_outlier_export_rows(
     cohort_filter_policy: str = "membership",
     top_n: int = 100,
     data_filters: dict[str, Any] | None = None,
+    data_kind: str = "indices",
     data_search: str = "",
     author_ids: list[str] | set[str] | tuple[str, ...] | None = None,
     data_sort: str = "",
@@ -1261,6 +1268,7 @@ def _analysis_context(
     cohort_filter_policy: str = "membership",
     top_n: int = 100,
     data_filters: dict[str, Any] | None = None,
+    data_kind: str = "indices",
     data_search: str = "",
     author_ids: list[str] | set[str] | tuple[str, ...] | None = None,
     data_sort: str = "",
@@ -1310,6 +1318,7 @@ def _analysis_context(
         scoped_author_ids = explicit_author_ids if scoped_author_ids is None else set(scoped_author_ids).intersection(explicit_author_ids)
 
     parsed_data_filters = warehouse.parse_column_filters(data_filters)
+    data_kind = str(data_kind or "indices").strip() or "indices"
     data_search = str(data_search or "").strip()
     data_limit = max(0, min(_int_value(data_limit, 0), 500_000))
     data_sort = str(data_sort or "").strip() if data_limit > 0 else ""
@@ -1329,6 +1338,7 @@ def _analysis_context(
         dump_id=dump_id,
         author_ids=scoped_author_ids,
         data_filters=parsed_data_filters,
+        data_kind=data_kind,
         data_search=data_search,
         data_sort=data_sort,
         data_direction=data_direction,
@@ -1347,6 +1357,7 @@ def _analysis_context(
         "fraction_mode": fraction_mode,
         "filters": resolved_filters,
         "data_filters": parsed_data_filters,
+        "data_kind": data_kind,
         "data_search": data_search,
         "explicit_author_ids": explicit_author_ids or set(),
         "data_sort": data_sort,

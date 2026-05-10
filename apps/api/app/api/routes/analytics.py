@@ -55,6 +55,7 @@ def analytics(
     work_type: str = "",
     q: str = "",
     author_ids: str = "",
+    data_kind: str = "indices",
     data_filters: str = "",
     data_search: str = "",
     data_sort: str = "",
@@ -108,7 +109,7 @@ def analytics(
             dump_id=dump_id,
             author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
             custom_metric_defs=_custom_metric_defs(custom_metric_defs),
-            **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
+            **_data_selection_kwargs(parsed_data_filters, data_kind=data_kind, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
         )
         distribution = bundle["distribution"]
         top = bundle["ranking"]
@@ -127,6 +128,7 @@ def analytics(
         "metric_params": distribution.get("metric_params") or top.get("metric_params"),
         "filters": filters,
         "data_filters": parsed_data_filters,
+        "data_kind": data_kind,
         "data_search": data_search,
         "selected_author_ids": _author_ids_query(author_ids),
         "cohort": cohort_ctx["cohort"],
@@ -214,6 +216,7 @@ def distribution(
     work_type: str = "",
     q: str = "",
     author_ids: str = "",
+    data_kind: str = "indices",
     data_filters: str = "",
     data_search: str = "",
     data_sort: str = "",
@@ -264,10 +267,11 @@ def distribution(
             dump_id=dump_id,
             author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
             custom_metric_defs=_custom_metric_defs(custom_metric_defs),
-            **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
+            **_data_selection_kwargs(parsed_data_filters, data_kind=data_kind, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
         )
         payload["cohort"] = cohort_ctx["cohort"]
         payload["data_filters"] = parsed_data_filters
+        payload["data_kind"] = data_kind
         payload["data_search"] = data_search
         payload["selected_author_ids"] = _author_ids_query(author_ids)
         payload["filter_warnings"] = warehouse.analysis_filter_warnings(filters, run_id=run_id, dump_id=dump_id)
@@ -322,6 +326,7 @@ def ranking_json(
     work_type: str = "",
     q: str = "",
     author_ids: str = "",
+    data_kind: str = "indices",
     data_filters: str = "",
     data_search: str = "",
     data_sort: str = "",
@@ -377,7 +382,7 @@ def ranking_json(
             author_ids=_combined_author_ids(cohort_ctx["author_ids"], author_ids),
             rank_direction=rank_direction,
             custom_metric_defs=_custom_metric_defs(custom_metric_defs),
-            **_data_selection_kwargs(parsed_data_filters, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
+            **_data_selection_kwargs(parsed_data_filters, data_kind=data_kind, data_search=data_search, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit),
         )
         payload["cohort"] = cohort_ctx["cohort"]
         payload["data_filters"] = parsed_data_filters
@@ -435,6 +440,7 @@ def ranking_csv(
     work_type: str = "",
     q: str = "",
     author_ids: str = "",
+    data_kind: str = "indices",
     data_filters: str = "",
     data_search: str = "",
     data_sort: str = "",
@@ -553,6 +559,7 @@ def scientometric_analysis(
     work_type: str = "",
     q: str = "",
     author_ids: str = "",
+    data_kind: str = "indices",
     data_filters: str = "",
     data_search: str = "",
     data_sort: str = "",
@@ -598,6 +605,7 @@ def scientometric_analysis(
             cohort_filter_policy=cohort_filter_policy,
             top_n=top_n,
             data_filters=warehouse.parse_column_filters(data_filters),
+            data_kind=data_kind,
             data_search=data_search,
             author_ids=_author_ids_query(author_ids),
             data_sort=data_sort,
@@ -877,6 +885,7 @@ def _scientometric_kwargs_from_request(request: Request) -> dict[str, Any]:
         "cohort_filter_policy": query.get("cohort_filter_policy", "membership"),
         "top_n": max(0, min(_int_query(query.get("top_n"), 100), 1000)),
         "data_filters": warehouse.parse_column_filters(query.get("data_filters", "")),
+        "data_kind": query.get("data_kind", "indices"),
         "data_search": query.get("data_search", ""),
         "author_ids": _author_ids_query(query.get("author_ids", "")),
         "data_sort": query.get("data_sort", ""),
@@ -893,6 +902,7 @@ def _custom_metric_defs(raw: str) -> list[dict[str, str]]:
 def _data_selection_kwargs(
     data_filters: dict[str, Any],
     *,
+    data_kind: str = "indices",
     data_search: str = "",
     data_sort: str = "",
     data_direction: str = "desc",
@@ -900,6 +910,7 @@ def _data_selection_kwargs(
 ) -> dict[str, Any]:
     return DataSelectionQuery(
         data_filters=data_filters,
+        data_kind=str(data_kind or "indices"),
         data_search=str(data_search or ""),
         data_sort=str(data_sort or ""),
         data_direction=str(data_direction or "desc"),

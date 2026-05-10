@@ -6,6 +6,7 @@ export type ResolverTab = "subject" | "organization" | "author" | "source";
 export type LocalDataKind = "works" | "authorships" | "work_topics" | "author_work" | "indices" | "ratings";
 export type ScientometricFindingSeverity = "high" | "medium" | "low" | "informational";
 export type DataSelectionParams = {
+  kind?: LocalDataKind;
   sort?: string;
   direction?: "asc" | "desc";
   limit?: number;
@@ -662,11 +663,13 @@ export function customMetricModelsUrl(runId = "") {
 
 export function dataSelectionQuery(selection?: DataSelectionParams) {
   const encodedFilters = encodeColumnFilters(selection?.filters);
+  const kind = String(selection?.kind ?? "").trim();
   const sort = String(selection?.sort ?? "").trim();
   const limit = Number(selection?.limit ?? 0);
   const search = String(selection?.search ?? "").trim();
   const authorIds = (selection?.authorIds ?? []).map((item) => String(item).trim()).filter(Boolean);
   return {
+    data_kind: kind,
     data_filters: encodedFilters,
     data_search: search,
     data_sort: sort,

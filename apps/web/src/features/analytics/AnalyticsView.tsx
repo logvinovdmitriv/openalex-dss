@@ -5,7 +5,7 @@ import { Area, Brush, CartesianGrid, ComposedChart, Line, ResponsiveContainer, S
 import { API_BASE, getJson, type CustomMetricDefinition, type TableColumnFilters, type TableResponse } from "../../api";
 import { filterParams, fmt, metricLabel, type ActiveFilters } from "../../domain";
 import { DownloadLink, EmptyState, MetricCard } from "../../components/ui";
-import { customMetricDefsQuery, dataSelectionQuery, localDataPreviewUrl, mutationError, type ScientometricAnalysisPayload, type ScientometricFinding } from "../../workbench";
+import { customMetricDefsQuery, dataSelectionQuery, localDataPreviewUrl, mutationError, type LocalDataKind, type ScientometricAnalysisPayload, type ScientometricFinding } from "../../workbench";
 import { metricLabelFor } from "../formulas/FormulaBuilder";
 import { selectedAuthorIndexTable } from "../indices/IndicesView";
 
@@ -29,6 +29,7 @@ export function AnalyticsView({
   baselineMetric,
   rankTopN,
   dataFilters,
+  dataKind,
   dataSearch,
   selectedAuthorIds,
   setSelectedAuthorIds,
@@ -54,6 +55,7 @@ export function AnalyticsView({
   baselineMetric: string;
   rankTopN: number;
   dataFilters: TableColumnFilters;
+  dataKind?: LocalDataKind;
   dataSearch: string;
   selectedAuthorIds: string[];
   setSelectedAuthorIds: (value: string[]) => void;
@@ -86,7 +88,7 @@ export function AnalyticsView({
     staleTime: 60_000,
   });
   const scientometricMetricParam = scientometricMetrics.join(",");
-  const selectionQuery = dataSelectionQuery({ filters: dataFilters, search: dataSearch, sort: "", direction: "desc", limit: 0 });
+  const selectionQuery = dataSelectionQuery({ kind: dataKind, filters: dataFilters, search: dataSearch, sort: "", direction: "desc", limit: 0 });
   const scientometricParams = filterParams(filters, {
     fraction_mode: fractionMode,
     metrics: scientometricMetricParam,

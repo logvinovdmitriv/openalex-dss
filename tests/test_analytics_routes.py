@@ -105,6 +105,7 @@ class AnalyticsRouteTests(unittest.TestCase):
                 "author_ids": None,
                 "rank_direction": "desc",
                 "custom_metric_defs": [],
+                "data_kind": "indices",
                 "data_search": "",
                 "data_sort": "",
                 "data_direction": "desc",

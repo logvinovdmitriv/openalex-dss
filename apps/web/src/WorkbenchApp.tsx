@@ -276,6 +276,7 @@ function Workbench() {
   const customMetricKey = useMemo(() => JSON.stringify(customMetrics), [customMetrics]);
   const analysisFilters = useMemo(() => DATA_ONLY_ANALYSIS_FILTERS, []);
   const analysisDataSelection = useDataSelection({
+    kind: localDataKind,
     filters: debouncedDataColumnFilters,
     search: debouncedDataSearch,
     sort: "",
@@ -360,7 +361,7 @@ function Workbench() {
     staleTime: 5 * 60_000,
   });
   const ranking = useQuery({
-    queryKey: ["analytics-ranking", metric, rankingDirection, fractionMode, effectiveRunId, effectiveDumpId, debouncedDataSearch, debouncedDataFilterKey, customMetricKey],
+    queryKey: ["analytics-ranking", metric, rankingDirection, fractionMode, effectiveRunId, effectiveDumpId, localDataKind, debouncedDataSearch, debouncedDataFilterKey, customMetricKey],
     queryFn: ({ signal }) => getJson<TableResponse>(analyticsRankingUrl(
       analysisFilters,
       fractionMode,
@@ -379,7 +380,7 @@ function Workbench() {
   });
   const authorIndexTable = ranking;
   const scientometrics = useQuery({
-    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, fractionMode, effectiveRunId, effectiveDumpId, debouncedDataSearch, debouncedDataFilterKey, customMetricKey],
+    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, fractionMode, effectiveRunId, effectiveDumpId, localDataKind, debouncedDataSearch, debouncedDataFilterKey, customMetricKey],
     queryFn: ({ signal }) => getJson<ScientometricAnalysisPayload>(scientometricsUrl({
       filters: analysisFilters,
       fractionMode,
@@ -917,6 +918,7 @@ function Workbench() {
             baselineMetric={baselineMetric}
             rankTopN={analysisRankTopN}
             dataFilters={dataColumnFilters}
+            dataKind={localDataKind}
             dataSearch={dataSearch}
             selectedAuthorIds={selectedAuthorIds}
             setSelectedAuthorIds={setSelectedAuthorIds}
