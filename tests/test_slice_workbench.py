@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import tempfile
 import unittest
@@ -201,6 +202,57 @@ class SliceWorkbenchTests(unittest.TestCase):
         self.assertEqual(result["dumps"][0]["records_downloaded"], 42)
         self.assertEqual(result["dumps"][0]["source"], "filesystem")
         self.assertEqual(result["dumps"][0]["health"]["status"], "needs_repair")
+
+    def test_filesystem_dump_manifest_wins_over_stale_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            raw_jsonl = data / "raw/openalex_cli/slice_stale/works.jsonl.gz"
+            raw_jsonl.parent.mkdir(parents=True)
+            raw_jsonl.write_text("payload", encoding="utf-8")
+            dump_dir = data / "dumps/dump_stale"
+            dump_dir.mkdir(parents=True)
+            (dump_dir / "dump_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "dump_id": "dump_stale",
+                        "slice_id": "slice_stale",
+                        "raw_jsonl": str(raw_jsonl),
+                        "records_downloaded": 2,
+                        "records_expected": 2,
+                        "records_delta": 0,
+                        "scientific_completeness": "complete",
+                        "allowed_for_final_analysis": True,
+                        "created_at_utc": "2026-05-08T08:39:23Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stale_metadata = {
+                "dump_id": "dump_stale",
+                "slice_id": "slice_stale",
+                "raw_jsonl": str(raw_jsonl),
+                "records_downloaded": 1,
+                "records_expected": 2,
+                "records_delta": -1,
+                "scientific_completeness": "partial_count_mismatch",
+                "allowed_for_final_analysis": False,
+            }
+
+            with (
+                patch.object(slice_workbench, "DATA", data),
+                patch.object(slice_workbench.metadata_store, "list_slice_dumps", return_value=[stale_metadata]),
+                patch.object(slice_workbench.metadata_store, "get_slice_dump_by_dump_id", return_value=stale_metadata),
+            ):
+                listed = slice_workbench.list_dumps()["dumps"][0]
+                _, selected = slice_workbench._resolve_dump_record("dump_stale")
+
+        self.assertEqual(listed["records_downloaded"], 2)
+        self.assertEqual(listed["scientific_completeness"], "complete")
+        self.assertTrue(listed["allowed_for_final_analysis"])
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected["records_downloaded"], 2)
+        self.assertEqual(selected["scientific_completeness"], "complete")
+        self.assertTrue(selected["allowed_for_final_analysis"])
 
     def test_repair_dump_starts_worker_from_existing_raw_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

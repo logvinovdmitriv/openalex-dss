@@ -224,6 +224,12 @@ def _dump_after_backfill(dump: dict[str, Any], output_path: str, backfill: dict[
     manifest_path = Path(str(updated.get("dump_manifest") or updated.get("manifest_path") or target.with_name("dump_manifest.json")))
     updated["dump_manifest"] = str(manifest_path)
     updated["manifest_path"] = str(manifest_path)
+    updated = dump_integrity.manifest_with_integrity(
+        updated,
+        require_expected_count=str(updated.get("scientific_completeness") or "") in {"complete", "full"},
+    )
+    if isinstance(updated.get("integrity_validation"), dict) and not updated["integrity_validation"].get("ok"):
+        updated["allowed_for_final_analysis"] = False
     openalex_cli_provider.write_json(manifest_path, updated)
     return updated
 
@@ -237,9 +243,21 @@ def _backfill_allows_final(dump: dict[str, Any], backfill_status: str) -> bool:
     quality_gate = dump.get("quality_gate") if isinstance(dump.get("quality_gate"), dict) else eligibility.get("quality_gate") if isinstance(eligibility.get("quality_gate"), dict) else {}
     if str(quality_gate.get("reason") or "") == "truncated_authorships_require_backfill":
         completeness = str(dump.get("scientific_completeness") or "").strip()
-        signatures = dump.get("signatures") if isinstance(dump.get("signatures"), dict) else {}
-        return completeness in {"complete", "full"} and bool(signatures.get("compatible") or signatures.get("download_signature_verified"))
+        return completeness in {"complete", "full"} and _final_signatures_verified(dump)
     return False
+
+
+def _final_signatures_verified(dump: dict[str, Any]) -> bool:
+    signatures = dump.get("signatures") if isinstance(dump.get("signatures"), dict) else {}
+    if not signatures and isinstance(dump.get("analysis_eligibility"), dict):
+        checks = dump["analysis_eligibility"].get("signature_checks")
+        signatures = checks if isinstance(checks, dict) else {}
+    return (
+        bool(signatures.get("compatible"))
+        and bool(signatures.get("estimate_signature_verified"))
+        and bool(signatures.get("accepted_estimate_signature_verified"))
+        and bool(signatures.get("download_signature_verified"))
+    )
 
 
 def _ensure_repair_raw_file(
@@ -255,8 +273,11 @@ def _ensure_repair_raw_file(
     files_dir = Path(files_dir_raw).expanduser() if files_dir_raw else None
     if raw_jsonl and raw_path.is_file():
         validated = dump_integrity.manifest_with_integrity({**dump, "raw_jsonl": str(raw_path)}, require_expected_count=False)
-        if validated.get("integrity_validation", {}).get("ok"):
-            records = int((validated.get("integrity_validation") or {}).get("records_actual") or validated.get("records_downloaded") or 0)
+        integrity = validated.get("integrity_validation") if isinstance(validated.get("integrity_validation"), dict) else {}
+        hard_errors = {"raw_jsonl_missing", "raw_jsonl_unreadable", "raw_jsonl_parse_errors", "raw_jsonl_empty"}
+        raw_is_usable = int(integrity.get("records_actual") or 0) > 0 and not (set(integrity.get("errors") or []) & hard_errors)
+        if integrity.get("ok") or raw_is_usable:
+            records = int(integrity.get("records_actual") or validated.get("records_downloaded") or 0)
             checksum = str((validated.get("integrity_validation") or {}).get("raw_jsonl_sha256_actual") or validated.get("raw_jsonl_sha256") or "")
             files_manifest_path = Path(str(validated.get("files_manifest") or raw_path.with_name("files_manifest.json")))
             restored = _repaired_dump_manifest(
@@ -268,6 +289,7 @@ def _ensure_repair_raw_file(
                 checksum=checksum,
             )
             restored = dump_integrity.manifest_with_integrity(restored, require_expected_count=int(restored.get("records_expected") or 0) > 0)
+            openalex_cli_provider.write_json(Path(str(restored.get("dump_manifest") or restored.get("manifest_path") or raw_path.with_name("dump_manifest.json"))), restored)
             return str(raw_path), restored
         repair_status = openalex_cli_provider.repair_missing_cli_files(
             {**dump, "raw_jsonl": str(raw_path)},

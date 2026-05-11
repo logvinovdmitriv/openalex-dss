@@ -836,14 +836,21 @@ def _slice_payload_from_dump_manifest(dump: dict[str, Any]) -> dict[str, Any]:
     plan_payload = plan.get("technical_payload") if isinstance(plan.get("technical_payload"), dict) else {}
     if plan_payload:
         return dict(plan_payload)
+    openalex_request = dump.get("openalex_request") if isinstance(dump.get("openalex_request"), dict) else {}
+    estimate = plan.get("estimate") if isinstance(plan.get("estimate"), dict) else {}
+    corpus_request = estimate.get("corpus_request") if isinstance(estimate.get("corpus_request"), dict) else {}
     filter_value = str(
         dump.get("openalex_filter")
-        or ((dump.get("openalex_request") or {}).get("filter") if isinstance(dump.get("openalex_request"), dict) else "")
+        or openalex_request.get("filter")
         or plan.get("openalex_filter")
-        or (((plan.get("estimate") or {}).get("corpus_request") or {}).get("filter") if isinstance(plan.get("estimate"), dict) else "")
+        or corpus_request.get("filter")
         or ""
     )
+    search_value = str(openalex_request.get("search") or corpus_request.get("search") or plan.get("search") or "").strip()
     parsed = _slice_payload_from_openalex_filter(filter_value)
+    if search_value:
+        parsed["filter_mode"] = "search"
+        parsed["text_search_query"] = search_value
     if slice_id and parsed:
         parsed.setdefault("slice_name", slice_id)
     return parsed
@@ -853,13 +860,16 @@ def _slice_payload_from_openalex_filter(filter_value: str) -> dict[str, Any]:
     if not filter_value.strip():
         return {}
     payload: dict[str, Any] = {"filter_mode": "all"}
+    passthrough_parts: list[str] = []
     raw_parts = [part.strip() for part in filter_value.split(",") if part.strip()]
     for part in raw_parts:
         if ":" not in part:
+            passthrough_parts.append(part)
             continue
         key, raw_value = part.split(":", 1)
         key = key.strip()
         value = raw_value.strip()
+        handled = True
         if key == "from_publication_date":
             payload["from_publication_date"] = value
         elif key == "to_publication_date":
@@ -888,13 +898,42 @@ def _slice_payload_from_openalex_filter(filter_value: str) -> dict[str, Any]:
             payload["open_access_is_oa"] = value.lower()
         elif key == "has_abstract":
             payload["has_abstract"] = value.lower()
+        elif key == "cited_by_count":
+            min_count = _min_cited_by_count_from_filter_value(value)
+            if min_count is None:
+                handled = False
+            else:
+                payload["min_cited_by_count"] = min_count
         elif key == "doi":
             payload["doi"] = value
         elif key.startswith("primary_topic") and key.endswith(".id"):
             _apply_subject_filter_payload(payload, key, value, mode="primary_topic")
         elif key.startswith("topics") and key.endswith(".id"):
             _apply_subject_filter_payload(payload, key, value, mode="topics_any")
+        else:
+            handled = False
+        if not handled:
+            passthrough_parts.append(part)
+    if passthrough_parts:
+        payload["raw_openalex_filter"] = ",".join(passthrough_parts)
     return payload
+
+
+def _min_cited_by_count_from_filter_value(value: str) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.startswith(">="):
+        try:
+            return max(0, int(text[2:].strip()))
+        except ValueError:
+            return None
+    if text.startswith(">"):
+        try:
+            return max(0, int(text[1:].strip()) + 1)
+        except ValueError:
+            return None
+    return None
 
 
 def _apply_subject_filter_payload(payload: dict[str, Any], key: str, value: str, *, mode: str) -> None:

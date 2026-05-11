@@ -521,6 +521,33 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(scoped_manifest["technical_payload"]["country_code"], "RU")
         self.assertEqual(captured["extra_primary_artifacts"]["dump/dump_manifest.json"], data / "dumps" / "dump_ru" / "dump_manifest.json")
 
+    def test_dump_filter_context_recovers_search_min_citations_and_raw_filters(self) -> None:
+        payload = pipeline._slice_payload_from_dump_manifest(
+            {
+                "dump_id": "dump_search",
+                "slice_id": "slice_search",
+                "openalex_request": {
+                    "search": "graph neural",
+                    "filter": (
+                        "from_publication_date:2026-01-01,"
+                        "to_publication_date:2026-12-31,"
+                        "type:article,"
+                        "cited_by_count:>4,"
+                        "has_doi:true"
+                    ),
+                },
+            }
+        )
+
+        self.assertEqual(payload["slice_name"], "slice_search")
+        self.assertEqual(payload["filter_mode"], "search")
+        self.assertEqual(payload["text_search_query"], "graph neural")
+        self.assertEqual(payload["from_publication_date"], "2026-01-01")
+        self.assertEqual(payload["to_publication_date"], "2026-12-31")
+        self.assertEqual(payload["work_type"], "article")
+        self.assertEqual(payload["min_cited_by_count"], 5)
+        self.assertEqual(payload["raw_openalex_filter"], "has_doi:true")
+
     def test_import_local_file_normalizes_dump_tables_under_dump_scope(self) -> None:
         captured: dict[str, object] = {}
 
@@ -785,6 +812,44 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual(restored["technical_payload"]["slice_name"], "slice_ru")
             self.assertEqual(restored["technical_payload"]["country_code"], "RU")
 
+    def test_repair_dump_existing_raw_canonicalizes_manifest_on_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            raw = base / "works.jsonl.gz"
+            with gzip.open(raw, "wt", encoding="utf-8") as handle:
+                handle.write(json.dumps({"id": "https://openalex.org/W1"}) + "\n")
+                handle.write(json.dumps({"id": "https://openalex.org/W2"}) + "\n")
+            manifest_path = base / "dump_manifest.json"
+            dump = {
+                "dump_id": "dump_old",
+                "slice_id": "slice_ru",
+                "raw_jsonl": str(raw),
+                "dump_manifest": str(manifest_path),
+                "records_downloaded": 1,
+                "records_expected": 2,
+                "records_delta": -1,
+                "scientific_completeness": "partial_count_mismatch",
+                "allowed_for_final_analysis": False,
+                "technical_payload": {"slice_name": "slice_ru", "filter_mode": "all", "country_code": "RU", "work_type": ""},
+                "signatures": {
+                    "compatible": True,
+                    "estimate_signature_verified": True,
+                    "accepted_estimate_signature_verified": True,
+                    "download_signature_verified": True,
+                },
+            }
+
+            raw_jsonl, restored = materialization_jobs._ensure_repair_raw_file(dump, str(raw), None)
+            stored = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(raw_jsonl, str(raw))
+        self.assertEqual(restored["records_downloaded"], 2)
+        self.assertEqual(stored["records_downloaded"], 2)
+        self.assertEqual(stored["records_delta"], 0)
+        self.assertTrue(stored["records_count_verified"])
+        self.assertEqual(stored["scientific_completeness"], "complete")
+        self.assertTrue(stored["allowed_for_final_analysis"])
+
     def test_backfill_truncated_authorships_hands_off_to_import(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             raw = Path(tmp) / "works.jsonl.gz"
@@ -815,6 +880,62 @@ class PipelineIntegrityTests(unittest.TestCase):
         backfill.assert_called_once()
         self.assertEqual(progress[0], (None, "Проверка локального среза перед backfill"))
         self.assertEqual(import_local_file.call_args.kwargs["compute_progress_base"], 55)
+
+    def test_backfill_does_not_restore_final_without_full_signature_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "works.jsonl.gz"
+            with gzip.open(raw, "wt", encoding="utf-8") as handle:
+                handle.write(json.dumps({"id": "https://openalex.org/W1"}) + "\n")
+            dump = {
+                "dump_id": "dump_backfill",
+                "raw_jsonl": str(raw),
+                "records_downloaded": 1,
+                "records_expected": 1,
+                "scientific_completeness": "complete",
+                "allowed_for_final_analysis": False,
+                "quality_gate": {"reason": "truncated_authorships_require_backfill"},
+                "signatures": {
+                    "compatible": True,
+                    "download_signature_verified": True,
+                    "estimate_signature_verified": False,
+                    "accepted_estimate_signature_verified": False,
+                },
+            }
+
+            updated = materialization_jobs._dump_after_backfill(
+                dump,
+                str(raw),
+                {
+                    "status": "complete",
+                    "sha256": materialization_jobs.openalex_cli_provider.sha256_file(raw),
+                    "manifest_path": str(raw.with_name("dump_manifest.json")),
+                },
+            )
+
+        self.assertFalse(updated["allowed_for_final_analysis"])
+
+    def test_job_recovery_finds_api_cursor_dump_manifests_outside_cli_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            manifest_dir = data / "raw/openalex_api/slice_api/run_api"
+            manifest_dir.mkdir(parents=True)
+            raw = manifest_dir / "works.jsonl.gz"
+            with gzip.open(raw, "wt", encoding="utf-8") as handle:
+                handle.write(json.dumps({"id": "https://openalex.org/W1"}) + "\n")
+            (manifest_dir / "dump_manifest.json").write_text(
+                json.dumps({"dump_id": "dump_api", "raw_jsonl": str(raw), "records_downloaded": 1, "scientific_completeness": "complete"}),
+                encoding="utf-8",
+            )
+            with patch.object(jobs, "DATA", data):
+                recovered = jobs._recover_dump_manifest_for_run(
+                    {
+                        "run_id": "run_api",
+                        "action": "build_from_openalex",
+                        "payload": {"slice_name": "slice_api"},
+                    }
+                )
+
+        self.assertEqual(recovered["dump_id"], "dump_api")
 
     def test_internal_plan_job_action_is_not_supported(self) -> None:
         with self.assertRaises(ValueError) as raised:

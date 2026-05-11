@@ -586,7 +586,7 @@ def _recover_dump_manifest_for_run(doc: dict[str, Any]) -> dict[str, Any]:
         _safe_token(payload.get("slice_name")),
     }
     tokens.discard("")
-    raw_root = DATA / "raw" / "openalex_cli"
+    raw_root = DATA / "raw"
     if raw_root.exists() and tokens:
         for manifest_path in raw_root.glob("**/dump_manifest.json"):
             parts = {_safe_token(part) for part in manifest_path.parts}

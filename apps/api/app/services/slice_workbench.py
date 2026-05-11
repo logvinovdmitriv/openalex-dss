@@ -858,12 +858,14 @@ def _resolve_dump_record(dump_id: str) -> tuple[str, dict[str, Any] | None]:
         return "", None
     exact = _metadata_dump_by_id(raw_dump_id)
     if exact:
-        return str(exact.get("dump_id") or raw_dump_id), exact
+        merged = _merge_dump_records(exact, _filesystem_dump_by_id(raw_dump_id))
+        return str(merged.get("dump_id") or raw_dump_id), merged
     prefixed = raw_dump_id if raw_dump_id.startswith("dump_") else f"dump_{_safe_id(raw_dump_id)}"
     if prefixed != raw_dump_id:
         candidate = _metadata_dump_by_id(prefixed)
         if candidate:
-            return str(candidate.get("dump_id") or prefixed), candidate
+            merged = _merge_dump_records(candidate, _filesystem_dump_by_id(prefixed))
+            return str(merged.get("dump_id") or prefixed), merged
     safe_raw = _safe_id(raw_dump_id)
     for candidate in _merged_dump_records(limit=250):
         candidate_id = str(candidate.get("dump_id") or "")
@@ -883,13 +885,24 @@ def _merged_dump_records(limit: int = 250) -> list[dict[str, Any]]:
         dump_id = str(dump.get("dump_id") or "").strip()
         if not dump_id:
             continue
-        merged[dump_id] = {**dump, **merged.get(dump_id, {})}
+        merged[dump_id] = _merge_dump_records(merged.get(dump_id, {}), dump)
     records = [_with_dump_health(dump_id, dump) for dump_id, dump in merged.items()]
     return sorted(
         records,
         key=lambda item: str(item.get("created_at_utc") or item.get("download_finished_at_utc") or ""),
         reverse=True,
     )
+
+
+def _merge_dump_records(metadata_record: dict[str, Any] | None, filesystem_record: dict[str, Any] | None) -> dict[str, Any]:
+    metadata = dict(metadata_record or {})
+    filesystem = dict(filesystem_record or {})
+    if not metadata:
+        return filesystem
+    if not filesystem:
+        return metadata
+    source = "metadata+filesystem"
+    return {**metadata, **filesystem, "source": source}
 
 
 def _with_dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
@@ -1115,6 +1128,17 @@ def _metadata_dump_by_id(dump_id: str) -> dict[str, Any] | None:
         return metadata_store.get_slice_dump_by_dump_id(dump_id)
     except sqlite3.OperationalError:
         return None
+
+
+def _filesystem_dump_by_id(dump_id: str) -> dict[str, Any]:
+    target = _safe_id(str(dump_id or ""))
+    if not target:
+        return {}
+    for candidate in _filesystem_dump_records(limit=250):
+        candidate_id = _safe_id(str(candidate.get("dump_id") or ""))
+        if candidate_id == target or candidate_id == f"dump_{target}" or candidate_id.endswith(f"_{target}"):
+            return candidate
+    return {}
 
 
 def _filesystem_dump_records(limit: int = 250) -> list[dict[str, Any]]:
