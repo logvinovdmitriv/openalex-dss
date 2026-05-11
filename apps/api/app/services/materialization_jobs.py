@@ -250,10 +250,25 @@ def _ensure_repair_raw_file(
     api_key: str = "",
 ) -> tuple[str, dict[str, Any]]:
     raw_path = Path(raw_jsonl).expanduser() if raw_jsonl else Path("")
+    storage_plan = dump.get("storage_plan") if isinstance(dump.get("storage_plan"), dict) else {}
+    files_dir_raw = str(dump.get("cli_files_dir") or storage_plan.get("cli_output_dir") or "").strip()
+    files_dir = Path(files_dir_raw).expanduser() if files_dir_raw else None
     if raw_jsonl and raw_path.is_file():
         validated = dump_integrity.manifest_with_integrity({**dump, "raw_jsonl": str(raw_path)}, require_expected_count=False)
         if validated.get("integrity_validation", {}).get("ok"):
-            return str(raw_path), validated
+            records = int((validated.get("integrity_validation") or {}).get("records_actual") or validated.get("records_downloaded") or 0)
+            checksum = str((validated.get("integrity_validation") or {}).get("raw_jsonl_sha256_actual") or validated.get("raw_jsonl_sha256") or "")
+            files_manifest_path = Path(str(validated.get("files_manifest") or raw_path.with_name("files_manifest.json")))
+            restored = _repaired_dump_manifest(
+                validated,
+                raw_path=raw_path,
+                files_dir=files_dir,
+                files_manifest_path=files_manifest_path,
+                records=records,
+                checksum=checksum,
+            )
+            restored = dump_integrity.manifest_with_integrity(restored, require_expected_count=int(restored.get("records_expected") or 0) > 0)
+            return str(raw_path), restored
         repair_status = openalex_cli_provider.repair_missing_cli_files(
             {**dump, "raw_jsonl": str(raw_path)},
             api_key=api_key,
@@ -269,11 +284,8 @@ def _ensure_repair_raw_file(
         )
         if not repair_status.get("repairable"):
             raise ValueError("Локальный raw_jsonl поврежден, а исходные файлы OpenAlex CLI недоступны для повторной упаковки.")
-    storage_plan = dump.get("storage_plan") if isinstance(dump.get("storage_plan"), dict) else {}
-    files_dir_raw = str(dump.get("cli_files_dir") or storage_plan.get("cli_output_dir") or "").strip()
-    if not files_dir_raw:
+    if files_dir is None:
         raise ValueError("Для восстановления нужен локальный файл среза или папка скачанных файлов OpenAlex.")
-    files_dir = Path(files_dir_raw).expanduser()
     if not files_dir.is_dir():
         raise ValueError("Папка скачанных файлов OpenAlex не найдена.")
     base_dir = files_dir.parent
@@ -301,33 +313,82 @@ def _ensure_repair_raw_file(
     if records <= 0:
         raise ValueError("В скачанных файлах OpenAlex не найдено работ для восстановления среза.")
     checksum = openalex_cli_provider.sha256_file(raw_path)
+    restored = _repaired_dump_manifest(
+        dump,
+        raw_path=raw_path,
+        files_dir=files_dir,
+        files_manifest_path=files_manifest_path,
+        records=records,
+        checksum=checksum,
+    )
+    restored = dump_integrity.manifest_with_integrity(restored, require_expected_count=int(restored.get("records_expected") or 0) > 0)
+    openalex_cli_provider.write_json(base_dir / "dump_manifest.json", restored)
+    return str(raw_path), restored
+
+
+def _repaired_dump_manifest(
+    dump: dict[str, Any],
+    *,
+    raw_path: Path,
+    files_dir: Path | None,
+    files_manifest_path: Path,
+    records: int,
+    checksum: str,
+) -> dict[str, Any]:
     finished_at = datetime.now(timezone.utc).isoformat()
-    restored = {
+    expected = int(dump.get("records_expected") or 0)
+    records_count_verified = records > 0 and (expected <= 0 or records == expected)
+    if records <= 0:
+        completeness = "empty"
+    elif records_count_verified:
+        completeness = "complete"
+    elif expected > 0:
+        completeness = "partial_count_mismatch"
+    else:
+        completeness = str(dump.get("scientific_completeness") or "partial")
+    signatures = dump.get("signatures") if isinstance(dump.get("signatures"), dict) else {}
+    if not signatures and isinstance(dump.get("analysis_eligibility"), dict):
+        checks = dump["analysis_eligibility"].get("signature_checks")
+        signatures = checks if isinstance(checks, dict) else {}
+    allowed_for_final = (
+        completeness == "complete"
+        and records_count_verified
+        and bool(signatures.get("compatible"))
+        and bool(signatures.get("estimate_signature_verified"))
+        and bool(signatures.get("accepted_estimate_signature_verified"))
+        and bool(signatures.get("download_signature_verified"))
+    )
+    technical_payload = pipeline._slice_payload_from_dump_manifest(dump)
+    if not technical_payload and isinstance(dump.get("technical_payload"), dict):
+        technical_payload = dict(dump["technical_payload"])
+    base_dir = files_dir.parent if files_dir is not None else raw_path.parent
+    return {
         **dump,
         "dump_id": f"dump_{checksum[:16]}" if checksum else str(dump.get("dump_id") or base_dir.name),
         "raw_jsonl": str(raw_path),
         "raw_jsonl_sha256": checksum,
         "records_downloaded": records,
+        "records_expected": expected or dump.get("records_expected"),
+        "records_delta": (records - expected) if expected else dump.get("records_delta"),
+        "records_count_verified": bool(records_count_verified),
         "bytes_written": raw_path.stat().st_size,
         "files_manifest": str(files_manifest_path),
         "dump_manifest": str(base_dir / "dump_manifest.json"),
         "manifest_path": str(base_dir / "dump_manifest.json"),
         "download_finished_at_utc": dump.get("download_finished_at_utc") or finished_at,
         "created_at_utc": dump.get("created_at_utc") or finished_at,
-        "scientific_completeness": dump.get("scientific_completeness") or "partial",
+        "scientific_completeness": completeness,
         "usable_for_exploratory_analysis": True,
-        "allowed_for_final_analysis": bool(dump.get("allowed_for_final_analysis")),
+        "allowed_for_final_analysis": allowed_for_final,
         "stop_reason": dump.get("stop_reason") or "restored_from_downloaded_files",
+        "technical_payload": technical_payload or dump.get("technical_payload"),
         "storage_plan": {
             **(dump.get("storage_plan") if isinstance(dump.get("storage_plan"), dict) else {}),
             "download_base_dir": str(base_dir),
-            "cli_output_dir": str(files_dir),
+            **({"cli_output_dir": str(files_dir)} if files_dir is not None else {}),
             "raw_jsonl": str(raw_path),
         },
     }
-    restored = dump_integrity.manifest_with_integrity(restored, require_expected_count=False)
-    openalex_cli_provider.write_json(base_dir / "dump_manifest.json", restored)
-    return str(raw_path), restored
 
 
 def mark_completed(run_id: str, action: str, result: dict[str, Any], payload: dict[str, Any]) -> None:

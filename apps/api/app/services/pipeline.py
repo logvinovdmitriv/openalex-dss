@@ -32,6 +32,7 @@ PRECOMPUTE_RANK_TOP_N = 100
 
 
 def recalculate(payload: dict[str, Any], progress_callback: StageProgressCallback | None = None) -> dict[str, Any]:
+    payload = _payload_with_dump_context(payload)
     cfg = _cfg(payload)
     _write_runtime_config(cfg)
     run_id = str(payload.get("run_id") or cfg.slice_name or "recalculate")
@@ -168,6 +169,7 @@ def fetch_slice_dump(
         if not passport.get("dump_id"):
             checksum = str(passport.get("raw_jsonl_sha256") or "")
             passport["dump_id"] = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
+        passport.setdefault("technical_payload", config_to_payload(cfg))
         raw_jsonl = passport.get("raw_jsonl")
         if raw_jsonl:
             write_json(Path(str(raw_jsonl)).with_name("dump_manifest.json"), passport)
@@ -206,6 +208,10 @@ def import_local_file(
             {**dump_manifest, "raw_jsonl": str(source)},
             require_expected_count=str(dump_manifest.get("scientific_completeness") or "") in {"complete", "full"},
         )
+        payload = _payload_with_dump_context({**payload, "dump_manifest": dump_manifest})
+        dump_manifest = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else dump_manifest
+    else:
+        payload = dict(payload)
     analysis_eligibility = payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else analysis_eligibility_from_dump(dump_manifest)
     if isinstance(dump_manifest.get("integrity_validation"), dict) and not dump_manifest["integrity_validation"].get("ok"):
         analysis_eligibility = analysis_eligibility_from_dump(dump_manifest)
@@ -223,7 +229,7 @@ def import_local_file(
             "Расширьте период, уберите организацию или выберите более широкую предметную область."
         )
     if dump_manifest:
-        dump_manifest = {**dump_manifest, "dump_id": dump_id}
+        dump_manifest = {**dump_manifest, "dump_id": dump_id, "technical_payload": config_to_payload(cfg)}
     dump_manifest_path = _write_dump_manifest_if_present(dump_id, dump_manifest)
     if not dump_manifest_path:
         _clear_stale_dump_manifest(dump_id)
@@ -781,6 +787,139 @@ def _cfg(payload: dict[str, Any]) -> Any:
     return author_slice.config_from_payload(payload)
 
 
+def _payload_with_dump_context(payload: dict[str, Any]) -> dict[str, Any]:
+    """Fill missing slice fields from dump provenance before building SliceConfig."""
+
+    base = dict(payload or {})
+    dump_manifest = _dump_manifest_from_payload(base)
+    if dump_manifest and not isinstance(base.get("dump_manifest"), dict):
+        base["dump_manifest"] = dump_manifest
+    context = _slice_payload_from_dump_manifest(dump_manifest)
+    if not context:
+        return base
+    merged = dict(base)
+    for key, value in context.items():
+        if _payload_value_missing(merged.get(key)):
+            merged[key] = value
+    return merged
+
+
+def _dump_manifest_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    manifest = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
+    if manifest:
+        return manifest
+    dump_id = _resolve_dump_id(str(payload.get("dump_id") or ""))
+    if dump_id:
+        loaded = _read_artifact_json(DATA / "dumps" / _safe_id(dump_id) / "dump_manifest.json")
+        if loaded:
+            return loaded
+    return {}
+
+
+def _slice_payload_from_dump_manifest(dump: dict[str, Any]) -> dict[str, Any]:
+    if not dump:
+        return {}
+    inline_payload = dump.get("technical_payload") if isinstance(dump.get("technical_payload"), dict) else {}
+    if inline_payload:
+        payload = dict(inline_payload)
+        slice_id = str(dump.get("slice_id") or "").strip()
+        if slice_id:
+            payload.setdefault("slice_name", slice_id)
+        return payload
+    slice_id = str(dump.get("slice_id") or "").strip()
+    if slice_id:
+        slice_doc = _read_artifact_json(DATA / "slices" / _safe_id(slice_id) / "slice_definition.json")
+        technical_payload = slice_doc.get("technical_payload") if isinstance(slice_doc.get("technical_payload"), dict) else {}
+        if technical_payload:
+            return dict(technical_payload)
+    plan = dump.get("query_plan") if isinstance(dump.get("query_plan"), dict) else {}
+    plan_payload = plan.get("technical_payload") if isinstance(plan.get("technical_payload"), dict) else {}
+    if plan_payload:
+        return dict(plan_payload)
+    filter_value = str(
+        dump.get("openalex_filter")
+        or ((dump.get("openalex_request") or {}).get("filter") if isinstance(dump.get("openalex_request"), dict) else "")
+        or plan.get("openalex_filter")
+        or (((plan.get("estimate") or {}).get("corpus_request") or {}).get("filter") if isinstance(plan.get("estimate"), dict) else "")
+        or ""
+    )
+    parsed = _slice_payload_from_openalex_filter(filter_value)
+    if slice_id and parsed:
+        parsed.setdefault("slice_name", slice_id)
+    return parsed
+
+
+def _slice_payload_from_openalex_filter(filter_value: str) -> dict[str, Any]:
+    if not filter_value.strip():
+        return {}
+    payload: dict[str, Any] = {"filter_mode": "all"}
+    raw_parts = [part.strip() for part in filter_value.split(",") if part.strip()]
+    for part in raw_parts:
+        if ":" not in part:
+            continue
+        key, raw_value = part.split(":", 1)
+        key = key.strip()
+        value = raw_value.strip()
+        if key == "from_publication_date":
+            payload["from_publication_date"] = value
+        elif key == "to_publication_date":
+            payload["to_publication_date"] = value
+        elif key == "type":
+            payload["work_type"] = value
+        elif key == "is_retracted":
+            payload["exclude_retracted"] = value.lower() == "false"
+        elif key == "is_paratext":
+            payload["exclude_paratext"] = value.lower() == "false"
+        elif key == "is_xpac":
+            payload["include_xpac"] = value.lower() == "true"
+        elif key == "authorships.institutions.country_code":
+            payload["country_code"] = value.upper()
+        elif key == "authorships.institutions.id":
+            payload["institution_id"] = value
+        elif key == "authorships.author.id":
+            payload["author_id"] = value
+        elif key == "primary_location.source.id":
+            payload["source_id"] = value
+        elif key == "primary_location.source.type":
+            payload["source_type"] = value
+        elif key == "language":
+            payload["language"] = value.lower()
+        elif key == "open_access.is_oa":
+            payload["open_access_is_oa"] = value.lower()
+        elif key == "has_abstract":
+            payload["has_abstract"] = value.lower()
+        elif key == "doi":
+            payload["doi"] = value
+        elif key.startswith("primary_topic") and key.endswith(".id"):
+            _apply_subject_filter_payload(payload, key, value, mode="primary_topic")
+        elif key.startswith("topics") and key.endswith(".id"):
+            _apply_subject_filter_payload(payload, key, value, mode="topics_any")
+    return payload
+
+
+def _apply_subject_filter_payload(payload: dict[str, Any], key: str, value: str, *, mode: str) -> None:
+    if ".subfield." in key:
+        level = "subfield"
+    elif ".field." in key:
+        level = "field"
+    else:
+        level = "topic"
+    short_id = value.rstrip("/").rsplit("/", 1)[-1]
+    payload["filter_mode"] = mode
+    payload["entity_level"] = level
+    payload["entity_id_short"] = short_id
+    payload["entity_id_full"] = f"https://openalex.org/{short_id}" if level == "topic" else f"https://openalex.org/{level}s/{short_id}"
+    payload.setdefault("entity_display_name", short_id)
+
+
+def _payload_value_missing(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
 def _openalex_cli_api_key(payload: dict[str, Any], cfg: Any) -> str:
     return str(payload.get("api_key") or os.environ.get(cfg.api_key_env) or "").strip()
 
@@ -1146,6 +1285,7 @@ def _safe_id(value: str) -> str:
 
 def config_to_payload(cfg: Any) -> dict[str, Any]:
     return {
+        "slice_name": cfg.slice_name,
         "entity_level": cfg.entity_level,
         "entity_id_short": cfg.entity_id_short,
         "entity_id_full": cfg.entity_id_full,

@@ -450,6 +450,77 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertEqual(captured["extra_primary_artifacts"]["dump/dump_manifest.json"], dump_manifest_path)
             self.assertFalse((root / "data/passports/fetch_meta.json").exists())
 
+    def test_import_local_file_uses_slice_definition_context_from_dump_manifest(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_compute(cfg: object, *args: object, **kwargs: object) -> dict[str, object]:
+            captured["cfg"] = cfg
+            captured["extra_primary_artifacts"] = kwargs["extra_primary_artifacts"]
+            return {"input_tables": {}, "input_table_checksums": {}, "passport_outputs": {}}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "data"
+            raw = root / "works.jsonl"
+            work = {**_work("W1"), "publication_year": 2026, "publication_date": "2026-01-10", "type": "dataset"}
+            raw.write_text(json.dumps(work) + "\n", encoding="utf-8")
+            profile = {"path": str(raw), "bytes": raw.stat().st_size, "sha256": "raw-sha"}
+            slice_dir = data / "slices" / "slice_ru"
+            slice_dir.mkdir(parents=True)
+            slice_dir.joinpath("slice_definition.json").write_text(
+                json.dumps(
+                    {
+                        "slice_id": "slice_ru",
+                        "technical_payload": {
+                            "slice_name": "slice_ru",
+                            "filter_mode": "all",
+                            "country_code": "RU",
+                            "from_publication_date": "2026-01-01",
+                            "to_publication_date": "2026-01-31",
+                            "work_type": "",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(pipeline, "DATA", data),
+                patch.object(pipeline, "resolve_safe_path", return_value=raw),
+                patch.object(pipeline, "file_profile", return_value=profile),
+                patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
+                patch.object(pipeline, "_archive_run_artifacts", return_value={}),
+                patch.object(pipeline, "_write_pipeline_summary", return_value=None),
+                patch.object(pipeline.reports, "build_report_bundle", return_value={}),
+            ):
+                pipeline.import_local_file(
+                    {
+                        "source_path": str(raw),
+                        "run_id": "run_ru",
+                        "dump_id": "dump_ru",
+                        "dump_manifest": {
+                            "dump_id": "dump_ru",
+                            "slice_id": "slice_ru",
+                            "raw_jsonl": str(raw),
+                            "raw_jsonl_sha256": "raw-sha",
+                            "records_downloaded": 1,
+                        },
+                    }
+                )
+
+            cfg = captured["cfg"]
+            scoped_manifest = json.loads((data / "dumps" / "dump_ru" / "dump_manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(getattr(cfg, "slice_name"), "slice_ru")
+        self.assertEqual(getattr(cfg, "filter_mode"), "all")
+        self.assertEqual(getattr(cfg, "country_code"), "RU")
+        self.assertEqual(getattr(cfg, "from_publication_date"), "2026-01-01")
+        self.assertEqual(getattr(cfg, "to_publication_date"), "2026-01-31")
+        self.assertEqual(getattr(cfg, "work_type"), "")
+        self.assertEqual(scoped_manifest["technical_payload"]["slice_name"], "slice_ru")
+        self.assertEqual(scoped_manifest["technical_payload"]["country_code"], "RU")
+        self.assertEqual(captured["extra_primary_artifacts"]["dump/dump_manifest.json"], data / "dumps" / "dump_ru" / "dump_manifest.json")
+
     def test_import_local_file_normalizes_dump_tables_under_dump_scope(self) -> None:
         captured: dict[str, object] = {}
 
@@ -663,6 +734,57 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(progress[0], (None, "Проверка локальных файлов среза"))
         self.assertEqual(import_local_file.call_args.kwargs["compute_progress_base"], 40)
 
+    def test_repair_dump_repacked_manifest_marks_verified_complete_dump(self) -> None:
+        def fake_pack(_files_dir: object, raw_path: object, **_kwargs: object) -> tuple[int, Path]:
+            target = Path(raw_path)
+            with gzip.open(target, "wt", encoding="utf-8") as handle:
+                handle.write(json.dumps({"id": "https://openalex.org/W1"}) + "\n")
+                handle.write(json.dumps({"id": "https://openalex.org/W2"}) + "\n")
+            manifest_path = Path(_kwargs["manifest_path"])
+            manifest_path.write_text("{}", encoding="utf-8")
+            return 2, manifest_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            files_dir = base / "files"
+            files_dir.mkdir()
+            dump = {
+                "dump_id": "dump_old",
+                "slice_id": "slice_ru",
+                "records_downloaded": 1,
+                "records_expected": 2,
+                "records_delta": -1,
+                "scientific_completeness": "partial_count_mismatch",
+                "allowed_for_final_analysis": False,
+                "technical_payload": {
+                    "slice_name": "slice_ru",
+                    "filter_mode": "all",
+                    "country_code": "RU",
+                    "from_publication_date": "2026-01-01",
+                    "to_publication_date": "2026-01-31",
+                    "work_type": "",
+                },
+                "signatures": {
+                    "compatible": True,
+                    "estimate_signature_verified": True,
+                    "accepted_estimate_signature_verified": True,
+                    "download_signature_verified": True,
+                },
+                "storage_plan": {"cli_output_dir": str(files_dir)},
+            }
+            with patch.object(materialization_jobs.openalex_cli_provider, "pack_existing_cli_files", side_effect=fake_pack):
+                raw_jsonl, restored = materialization_jobs._ensure_repair_raw_file(dump, "", None)
+
+            self.assertTrue(Path(raw_jsonl).is_file())
+            self.assertEqual(restored["records_downloaded"], 2)
+            self.assertEqual(restored["records_expected"], 2)
+            self.assertEqual(restored["records_delta"], 0)
+            self.assertTrue(restored["records_count_verified"])
+            self.assertEqual(restored["scientific_completeness"], "complete")
+            self.assertTrue(restored["allowed_for_final_analysis"])
+            self.assertEqual(restored["technical_payload"]["slice_name"], "slice_ru")
+            self.assertEqual(restored["technical_payload"]["country_code"], "RU")
+
     def test_backfill_truncated_authorships_hands_off_to_import(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             raw = Path(tmp) / "works.jsonl.gz"
@@ -766,6 +888,70 @@ class PipelineIntegrityTests(unittest.TestCase):
         self.assertEqual(captured["extra_primary_artifacts"]["dump/quality_report.json"], dump_dir / "quality_report.json")
         self.assertEqual(captured["extra_primary_artifacts"]["dump/dump_manifest.json"], dump_dir / "dump_manifest.json")
         self.assertEqual(result["analysis_eligibility"]["allowed_for_final_analysis"], True)
+
+    def test_recalculate_uses_dump_manifest_context_without_request_slice_fields(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_run_compute(cfg: object, *args: object, **kwargs: object) -> dict[str, object]:
+            captured["cfg"] = cfg
+            captured.update(kwargs)
+            return {"input_tables": {}, "input_table_checksums": {}}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dump_dir = root / "dumps" / "dump_recalc_ctx"
+            dump_dir.mkdir(parents=True)
+            (dump_dir / "dump_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "dump_id": "dump_recalc_ctx",
+                        "slice_id": "slice_ru",
+                        "allowed_for_final_analysis": True,
+                        "records_downloaded": 5,
+                        "scientific_completeness": "complete",
+                        "signatures": {
+                            "estimate_signature_verified": True,
+                            "accepted_estimate_signature_verified": True,
+                            "download_signature_verified": True,
+                            "compatible": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            slice_dir = root / "slices" / "slice_ru"
+            slice_dir.mkdir(parents=True)
+            (slice_dir / "slice_definition.json").write_text(
+                json.dumps(
+                    {
+                        "technical_payload": {
+                            "slice_name": "slice_ru",
+                            "filter_mode": "all",
+                            "country_code": "RU",
+                            "from_publication_date": "2026-01-01",
+                            "to_publication_date": "2026-01-31",
+                            "work_type": "",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "resolve_dump_tables", return_value={"works": root / "works.parquet", "authorships": root / "authorships.parquet", "work_topics": root / "work_topics.parquet"}),
+                patch.object(pipeline, "_run_compute", side_effect=fake_run_compute),
+                patch.object(pipeline, "_archive_run_artifacts", return_value={}),
+                patch.object(pipeline, "_write_pipeline_summary", return_value=None),
+                patch.object(pipeline.reports, "build_report_bundle", return_value={}),
+            ):
+                pipeline.recalculate({"dump_id": "dump_recalc_ctx", "run_id": "run_recalc_ctx"})
+
+        cfg = captured["cfg"]
+        self.assertEqual(getattr(cfg, "slice_name"), "slice_ru")
+        self.assertEqual(getattr(cfg, "country_code"), "RU")
+        self.assertEqual(getattr(cfg, "from_publication_date"), "2026-01-01")
+        self.assertEqual(getattr(cfg, "to_publication_date"), "2026-01-31")
+        self.assertEqual(getattr(cfg, "work_type"), "")
 
     def test_recalculate_omits_missing_dump_provenance_from_checksums(self) -> None:
         captured: dict[str, object] = {}
