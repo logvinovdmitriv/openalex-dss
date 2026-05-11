@@ -26,13 +26,13 @@ from openalex_dss.ranking import build_ratings  # noqa: E402
 
 StageProgressCallback = Callable[[int | None, str, dict[str, Any] | None], None]
 
-PRECOMPUTE_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "custom_added_rating")
+PRECOMPUTE_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "custom_iupv_s")
 PRECOMPUTE_CUSTOM_METRICS = (
     {
-        "id": "custom_added_rating",
-        "label": "Пример собственного рейтинга",
-        "description": "Дефолтная пользовательская формула на основе процентилей публикаций, индекса Хирша и долевых цитирований.",
-        "expression": "100 * (pr_p * pr_h * pr_c_frac) ** (1 / 3)",
+        "id": "custom_iupv_s",
+        "label": "IUPV-S",
+        "description": "Простая авторская формула на основе робастного долевого вклада RFI.",
+        "expression": "100 * pr_rfi_log_frac",
     },
 )
 PRECOMPUTE_RANK_TOP_N = 100

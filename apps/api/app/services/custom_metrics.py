@@ -24,10 +24,13 @@ BASE_NUMERIC_FIELDS = metric_registry.computed_metric_ids() | {
     "g",
     "m_local",
     "top1_share",
+    "rfi_log_frac",
     "f5",
     "fm5",
     "pci",
     "iupv",
+    "iupv_s",
+    "iupv_sb",
     "islv",
     "lrdi",
     "mean_authors_per_work",
@@ -236,7 +239,16 @@ def duckdb_percentile_expressions(definitions: list[dict[str, str]] | None, avai
         if field not in available_fields:
             expressions.append(f"0.0 AS {alias}")
         else:
-            expressions.append(f"COALESCE(percent_rank() OVER (ORDER BY TRY_CAST({_quote_identifier(field)} AS DOUBLE)), 0.0) AS {alias}")
+            value_sql = f"COALESCE(TRY_CAST({_quote_identifier(field)} AS DOUBLE), 0.0)"
+            partition_cols = [_quote_identifier("fraction_mode")] if "fraction_mode" in available_fields else []
+            partition_sql = f"PARTITION BY {', '.join(partition_cols)}" if partition_cols else ""
+            ordered_window = f"{partition_sql} ORDER BY {value_sql}".strip()
+            rank_sql = f"RANK() OVER ({ordered_window})"
+            tie_partition = ", ".join([*partition_cols, value_sql])
+            tie_count_sql = f"COUNT(*) OVER (PARTITION BY {tie_partition})"
+            total_count_sql = f"COUNT(*) OVER ({partition_sql})" if partition_sql else "COUNT(*) OVER ()"
+            average_rank_sql = f"(({rank_sql}) + ({rank_sql}) + ({tie_count_sql}) - 1) / 2.0"
+            expressions.append(f"COALESCE(GREATEST(1e-6, ({average_rank_sql}) / NULLIF({total_count_sql}, 0)), 0.0) AS {alias}")
     return expressions
 
 

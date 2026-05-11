@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 import unittest
@@ -97,6 +98,33 @@ class EdgeCaseTests(unittest.TestCase):
         for row in indices:
             self.assertEqual(row["mean_authors_per_work"], 2.0)
             self.assertEqual(row["share_single_authored"], 0.0)
+
+    def test_iupv_s_uses_log_fractional_impact_percentile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "raw.jsonl"
+            raw.write_text(
+                "\n".join(
+                    [
+                        json.dumps(_work("WRFI1", "A1", 9), ensure_ascii=False),
+                        json.dumps(_work("WRFI2", "A2", 0), ensure_ascii=False),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            normalize_raw(raw, root / "works.csv", root / "auth.csv", root / "quality.json")
+            build_author_work_metrics(root / "works.csv", root / "auth.csv", root / "awm.csv", ("integer",))
+            indices = compute_indices(root / "awm.csv", root / "indices.csv")
+
+        by_author = {row["author_id"]: row for row in indices}
+        a1 = by_author["https://openalex.org/A1"]
+        a2 = by_author["https://openalex.org/A2"]
+        self.assertAlmostEqual(a1["rfi_log_frac"], math.log1p(9.0))
+        self.assertAlmostEqual(a1["iupv_s"], 100.0)
+        self.assertAlmostEqual(a1["iupv_sb"], 100.0 * math.sqrt(0.75))
+        self.assertEqual(a2["rfi_log_frac"], 0.0)
+        self.assertEqual(a2["iupv_s"], 0.0)
 
     def test_author_work_filters_retracted_paratext_and_xpac_locally(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -144,12 +144,14 @@ const FORMULA_VARIABLES = [
   { token: "i10", label: "Работы с 10+ цитированиями" },
   { token: "g", label: "Индекс g" },
   { token: "m_local", label: "Индекс m" },
+  { token: "rfi_log_frac", label: "RFI: логарифмический долевой вклад" },
   { token: "f5", label: "Работы с 5+ цитированиями" },
   { token: "fm5", label: "Долевой вклад в работы с 5+ цитированиями" },
   { token: "lrdi", label: "Индекс устойчивости" },
   { token: "pr_p", label: "Процентиль публикаций" },
   { token: "pr_h", label: "Процентиль Хирша" },
   { token: "pr_c_frac", label: "Процентиль долевых цитирований" },
+  { token: "pr_rfi_log_frac", label: "Процентиль RFI" },
   { token: "pr_g", label: "Процентиль g-индекса" },
 ];
 
@@ -250,8 +252,14 @@ export function CustomMetricBuilder({
       </div>
       <div className="formula-example">
         <b>Пример:</b>
-        <code>100 * (pr_p * pr_h * pr_c_frac) ** (1 / 3)</code>
-        <span>Это интегральный рейтинг по публикациям, индексу Хирша и долевым цитированиям.</span>
+        <code>100 * pr_rfi_log_frac</code>
+        <span>IUPV-S переводит сумму log1p долевых цитирований автора в процентильную шкалу 0–100.</span>
+      </div>
+      <div className="formula-example">
+        <b>IUPV-S:</b>
+        <span>cited_credit = cited_by_count × credit_weight</span>
+        <span>RFI = Σ log1p(cited_credit)</span>
+        <span>IUPV-S = 100 × pr_RFI</span>
       </div>
       <div className="formula-form-grid">
         <Field label="Название">
@@ -431,10 +439,13 @@ export function metricFormulaMarkup(metricName: string) {
     i10: `<math><mrow><mi>i10</mi><mo>(</mo><mi>a</mi><mo>)</mo><mo>=</mo><mo>|</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mi>c</mi><mi>i</mi></msub><mo>≥</mo><mn>10</mn><mo>}</mo><mo>|</mo></mrow></math>`,
     g: `<math><mrow><mi>g</mi><mo>=</mo><mi>max</mi><mo>{</mo><mi>k</mi><mo>:</mo><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>k</mi></munderover><msub><mi>c</mi><mi>i</mi></msub><mo>≥</mo><msup><mi>k</mi><mn>2</mn></msup><mo>}</mo></mrow></math>`,
     m_local: `<math><mrow><mi>m</mi><mo>(</mo><mi>a</mi><mo>)</mo><mo>=</mo><mfrac><mrow><mi>h</mi><mo>(</mo><mi>a</mi><mo>)</mo></mrow><msub><mi>T</mi><mi>a</mi></msub></mfrac></mrow></math>`,
+    rfi_log_frac: `<math><mrow><mi>RFI</mi><mo>(</mo><mi>a</mi><mo>)</mo><mo>=</mo><munderover><mo>∑</mo><mi>i</mi><msub><mi>W</mi><mi>a</mi></msub></munderover><mi>log1p</mi><mo>(</mo><msub><mi>credit</mi><mi>i</mi></msub><mo>)</mo></mrow></math>`,
     f5: `<math><mrow><mi>f5</mi><mo>(</mo><mi>a</mi><mo>)</mo><mo>=</mo><mo>|</mo><mo>{</mo><mi>i</mi><mo>:</mo><msub><mi>c</mi><mi>i</mi></msub><mo>≥</mo><mn>5</mn><mo>}</mo><mo>|</mo></mrow></math>`,
     fm5: `<math><mrow><mi>fm5</mi><mo>(</mo><mi>a</mi><mo>)</mo><mo>=</mo><munderover><mo>∑</mo><mrow><msub><mi>c</mi><mi>i</mi></msub><mo>≥</mo><mn>5</mn></mrow><msub><mi>W</mi><mi>a</mi></msub></munderover><msub><mi>w</mi><mi>i</mi></msub></mrow></math>`,
     pci: `<math><mrow><mi>PCI</mi><mo>=</mo><mn>100</mn><mo>·</mo><msup><mrow><mo>(</mo><mi>pr</mi><mo>(</mo><mi>P</mi><mo>)</mo><mo>·</mo><mi>pr</mi><mo>(</mo><mi>h</mi><mo>)</mo><mo>·</mo><mi>pr</mi><mo>(</mo><msub><mi>C</mi><mi>д</mi></msub><mo>)</mo><mo>)</mo></mrow><mfrac><mn>1</mn><mn>3</mn></mfrac></msup></mrow></math>`,
     iupv: `<math><mrow><mi>IUPV</mi><mo>=</mo><mi>alias</mi><mo>(</mo><mi>PCI</mi><mo>)</mo></mrow></math>`,
+    iupv_s: `<math><mrow><mi>IUPV-S</mi><mo>=</mo><mn>100</mn><mo>·</mo><mi>pr</mi><mo>(</mo><mi>RFI</mi><mo>)</mo></mrow></math>`,
+    iupv_sb: `<math><mrow><mi>IUPV-SB</mi><mo>=</mo><mn>100</mn><mo>·</mo><msqrt><mrow><mi>pr</mi><mo>(</mo><mi>P</mi><mo>)</mo><mo>·</mo><mi>pr</mi><mo>(</mo><mi>RFI</mi><mo>)</mo></mrow></msqrt></mrow></math>`,
     islv: `<math><mrow><msub><mi>R</mi><mn>2</mn></msub><mo>=</mo><mn>100</mn><mo>·</mo><msub><mi>G</mi><mi>w</mi></msub><mo>(</mo><mi>pr</mi><mo>(</mo><mi>h</mi><mo>)</mo><mo>,</mo><mi>pr</mi><mo>(</mo><msub><mi>C</mi><mi>д</mi></msub><mo>)</mo><mo>,</mo><mi>pr</mi><mo>(</mo><mi>g</mi><mo>)</mo><mo>,</mo><mi>pr</mi><mo>(</mo><mi>i10</mi><mo>)</mo><mo>,</mo><mi>pr</mi><mo>(</mo><mi>P</mi><mo>)</mo><mo>)</mo></mrow></math>`,
     lrdi: `<math><mrow><mi>LRDI</mi><mo>=</mo><mi>shrink</mi><mo>(</mo><mi>P</mi><mo>)</mo><mo>·</mo><munderover><mo>∑</mo><mi>i</mi><msub><mi>W</mi><mi>a</mi></msub></munderover><mfrac><mrow><mi>ln</mi><mo>(</mo><mn>1</mn><mo>+</mo><msub><mi>c</mi><mi>i</mi></msub><mo>)</mo></mrow><msub><mi>n</mi><mi>i</mi></msub></mfrac><mo>·</mo><msup><mi>e</mi><mrow><mo>-</mo><mi>λ</mi><mo>·</mo><msub><mi>age</mi><mi>i</mi></msub></mrow></msup></mrow></math>`,
   };

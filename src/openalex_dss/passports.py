@@ -105,8 +105,8 @@ def build_passports(
         },
     }
     indices = ["p", "c", "c_frac", "h", "i10", "g"]
-    support_indices = ["cpp", "m_local", "top1_share"]
-    experimental_indices = ["f5", "fm5", "iupv", "islv", "lrdi"]
+    support_indices = ["cpp", "m_local", "top1_share", "rfi_log_frac"]
+    experimental_indices = ["f5", "fm5", "pci", "iupv_s", "iupv_sb", "islv", "lrdi"]
     extra_formula = {
         "threshold_5_citation_indicators": {
             "status": "extension_not_core_baseline",
@@ -115,8 +115,14 @@ def build_passports(
             "fm5": "sum(credit_weight for works where cited_by_count >= 5)",
         },
         "pci_percentile_composite": {
-            "metric_id": "iupv",
+            "metric_id": "pci",
             "formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
+            "percentile_scope": "current slice within each fraction_mode",
+            "status": "extension_not_core_baseline",
+        },
+        "iupv_s_simple_robust_fractional_impact": {
+            "metric_id": "iupv_s",
+            "formula": "100 * percentile_rank(sum(log1p(cited_credit)))",
             "percentile_scope": "current slice within each fraction_mode",
             "status": "extension_not_core_baseline",
         },

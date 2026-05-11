@@ -305,6 +305,7 @@ def build_report_bundle(
             "storage_rule": "raw immutable dump -> dump tables -> run-scoped metric tables",
             "topic_mapping_rule": "ВАК-код не является OpenAlex-фильтром; mapping фиксируется отдельно как resolved entities / mapping file.",
             "pci_percentile_composite_formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
+            "iupv_s_formula": "100 * percentile_rank(sum(log1p(cited_credit)))",
             "islv_formula": "100 * weighted_geomean(pr(h), pr(C_frac), pr(g), pr(i10), pr(P)) * (1 - lambda * max(0, top1_share - tau))",
             "polyanin_status": "f5/fm5 are operational threshold metrics until a primary source definition is confirmed.",
         },

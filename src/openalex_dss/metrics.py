@@ -43,10 +43,13 @@ AUTHOR_INDEX_FIELDS = [
     "g",
     "m_local",
     "top1_share",
+    "rfi_log_frac",
     "f5",
     "fm5",
     "pci",
     "iupv",
+    "iupv_s",
+    "iupv_sb",
     "islv",
     "lrdi",
     "mean_authors_per_work",
@@ -125,19 +128,27 @@ def assign_iupv_percentiles(rows: list[dict[str, Any]], group_field: str = "frac
     for group in groups.values():
         percentile_maps = {
             field: _percentile_rank_map(group, field)
-            for field in ("p", "h", "c_frac", "g", "i10")
+            for field in ("p", "h", "c_frac", "g", "i10", "rfi_log_frac")
         }
         for row in group:
+            p_pr = percentile_maps["p"][id(row)]
+            rfi_pr = percentile_maps["rfi_log_frac"][id(row)]
             if as_float(row.get("p")) <= 0 or as_float(row.get("h")) <= 0 or as_float(row.get("c_frac")) <= 0:
                 row["pci"] = 0.0
                 row["iupv"] = 0.0
             else:
                 row["pci"] = iupv_from_percentiles(
-                    percentile_maps["p"][id(row)],
+                    p_pr,
                     percentile_maps["h"][id(row)],
                     percentile_maps["c_frac"][id(row)],
                 )
                 row["iupv"] = row["pci"]
+            if as_float(row.get("rfi_log_frac")) > 0:
+                row["iupv_s"] = 100.0 * rfi_pr
+                row["iupv_sb"] = 100.0 * math.sqrt(max(0.0, p_pr) * max(0.0, rfi_pr))
+            else:
+                row["iupv_s"] = 0.0
+                row["iupv_sb"] = 0.0
             row["islv"] = islv_from_percentiles(
                 percentile_maps["h"][id(row)],
                 percentile_maps["c_frac"][id(row)],
@@ -619,6 +630,7 @@ def _index_row(
     local_age = max(publication_years) - min(publication_years) + 1 if publication_years else 1
     f5_value = _f5(group)
     fm5_value = _fm5(group)
+    rfi_log_frac = float(sum(math.log1p(max(0.0, value)) for value in cited_credits))
     return {
         "run_id": run_id,
         "fraction_mode": mode,
@@ -633,10 +645,13 @@ def _index_row(
         "g": g,
         "m_local": h / max(1, local_age),
         "top1_share": (max(citations) / c) if c > 0 and citations else 0.0,
+        "rfi_log_frac": rfi_log_frac,
         "f5": f5_value,
         "fm5": fm5_value,
         "pci": 0.0,
         "iupv": 0.0,
+        "iupv_s": 0.0,
+        "iupv_sb": 0.0,
         "islv": 0.0,
         "lrdi": lrdi(group, analysis_year=analysis_year, p0=lrdi_p0, lam=lrdi_lambda),
         "mean_authors_per_work": sum(_actual_authors_count(row) for row in group) / len(group),

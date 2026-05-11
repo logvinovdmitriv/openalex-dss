@@ -65,6 +65,14 @@ metrics:
     source: "computed_from_slice_works"
     local_only: true
     visible: false
+  - metric_id: "rfi_log_frac"
+    label: "RFI: логарифмический долевой вклад"
+    group: "Диагностика робастного вклада"
+    formula: "sum(log1p(cited_credit))"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: false
+    warning: "Промежуточное поле для IUPV-S: учитывает все работы автора, долевой вклад и сглаживание citation outliers."
   - metric_id: "f5"
     label: "Работы с 5+ цитированиями"
     group: "Дополнительные показатели"
@@ -90,7 +98,7 @@ metrics:
     visible: false
     warning: "Экспериментальная процентильная формула PCI. Не является IUPV из расширенной методологии и не входит в baseline популярных индексов."
   - metric_id: "iupv"
-    label: "IUPV служебный алиас: используйте PCI или пользовательский IUPV-Light"
+    label: "IUPV служебный алиас: используйте PCI или IUPV-S"
     group: "Служебные совместимые алиасы"
     formula: "alias(pci)"
     source: "computed_from_slice_works"
@@ -98,6 +106,22 @@ metrics:
     visible: false
     deprecated: true
     warning: "Служебный алиас для прежних отчетов. Новые формулы IUPV сохраняйте как пользовательские модели."
+  - metric_id: "iupv_s"
+    label: "IUPV-S: простой робастный долевой вклад"
+    group: "Дополнительные показатели"
+    formula: "100 * percentile_rank(sum(log1p(cited_credit)))"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: false
+    warning: "Авторская extension-формула: долевой вклад, логарифмическое сглаживание и процентильная шкала 0-100 внутри текущего среза."
+  - metric_id: "iupv_sb"
+    label: "IUPV-SB: баланс публикаций и робастного вклада"
+    group: "Дополнительные показатели"
+    formula: "100 * sqrt(pr(P) * pr(RFI))"
+    source: "computed_from_slice_works"
+    local_only: true
+    visible: false
+    warning: "Расширенная версия IUPV-S, где автор должен иметь высокий процентиль и по публикациям, и по робастному долевому вкладу."
   - metric_id: "islv"
     label: "Процентильная формула: сбалансированный вклад"
     group: "Дополнительные показатели"

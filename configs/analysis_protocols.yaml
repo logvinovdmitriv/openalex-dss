@@ -40,28 +40,17 @@ protocols:
       useful_relation_min: 0.60
       useful_relation_max: 0.95
 templates:
-  iupv_light:
-    label_ru: "IUPV-Light"
-    description_ru: "Сбалансированная формула: публикационная устойчивость, долевая цитируемость и штраф за зависимость от одной сверхцитируемой работы."
-    expression_template: "100 * sqrt(p / (p + {N0})) * (log1p(c_frac) / (1 + log1p(c_frac))) * (1 - {alpha} * max(0, (top1_share - {tau}) / (1 - {tau})))"
-    parameters:
-      N0:
-        value: 5
-        min: 1
-        max: 20
-        step: 1
-        label_ru: "Порог публикационной устойчивости"
-      alpha:
-        value: 0.25
-        min: 0
-        max: 0.8
-        step: 0.05
-        label_ru: "Сила штрафа за концентрацию"
-      tau:
-        value: 0.6
-        min: 0.3
-        max: 0.9
-        step: 0.05
-        label_ru: "Допустимая доля top-1 работы"
-    base_fields: [p, c_frac, top1_share]
+  iupv_s:
+    label_ru: "IUPV-S"
+    description_ru: "Простая робастная формула: все работы автора, долевой вклад, log1p-сглаживание и процентильная шкала 0-100."
+    expression_template: "100 * pr_rfi_log_frac"
+    parameters: {}
+    base_fields: [rfi_log_frac]
+    range: [0, 100]
+  iupv_sb:
+    label_ru: "IUPV-SB"
+    description_ru: "Расширение IUPV-S: балансирует процентиль публикационной активности и процентиль робастного долевого вклада."
+    expression_template: "100 * sqrt(pr_p * pr_rfi_log_frac)"
+    parameters: {}
+    base_fields: [p, rfi_log_frac]
     range: [0, 100]

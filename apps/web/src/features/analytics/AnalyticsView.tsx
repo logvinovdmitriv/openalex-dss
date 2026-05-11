@@ -1040,10 +1040,13 @@ function metricShortLabel(value: string, metricLabels?: Record<string, string>) 
     g: "Индекс g",
     m_local: "Индекс m",
     top1_share: "Топ-1",
+    rfi_log_frac: "RFI",
     f5: "Работы 5+",
     fm5: "Долевой вклад 5+",
     pci: "PCI",
     iupv: "IUPV alias",
+    iupv_s: "IUPV-S",
+    iupv_sb: "IUPV-SB",
     islv: "Формула баланса",
     lrdi: "Устойчивость",
   };

@@ -75,11 +75,15 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
             "fraction_modes": list(cfg.fraction_modes),
             "default_fraction_mode": cfg.fraction_mode_default,
             "core_indices": ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"],
-            "experimental_indices": ["f5", "fm5", "iupv", "islv", "lrdi"],
+            "experimental_indices": ["f5", "fm5", "pci", "iupv_s", "iupv_sb", "islv", "lrdi"],
             "pci_percentile_composite": {
-                "metric_id": "iupv",
+                "metric_id": "pci",
                 "formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
                 "percentile_scope": "current slice and fraction mode",
+            },
+            "iupv_s": {
+                "formula": "100 * percentile_rank(sum(log1p(cited_credit)))",
+                "status": "own_formula",
             },
             "islv": {
                 "formula": "weighted geometric mean of pr(h), pr(C_frac), pr(g), pr(i10), pr(P) with top-1 concentration penalty",

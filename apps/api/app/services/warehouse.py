@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import logging
+import math
 import sys
 import time
 from collections import defaultdict
@@ -87,10 +88,13 @@ INDEX_NUMERIC_FIELDS = {
     "g",
     "m_local",
     "top1_share",
+    "rfi_log_frac",
     "f5",
     "fm5",
     "pci",
     "iupv",
+    "iupv_s",
+    "iupv_sb",
     "islv",
     "lrdi",
     "mean_authors_per_work",
@@ -109,10 +113,14 @@ AUTHOR_INDEX_DETAIL_FIELDS = (
     "i10",
     "g",
     "m_local",
+    "top1_share",
+    "rfi_log_frac",
     "f5",
     "fm5",
     "pci",
     "iupv",
+    "iupv_s",
+    "iupv_sb",
     "islv",
     "lrdi",
 )
@@ -160,7 +168,7 @@ AUTHOR_WORK_DETAIL_FIELDS = (
 
 NATIVE_LINE_CHART_METRICS = ("p", "c", "h", "i10")
 CORE_LINE_CHART_METRICS = ("p", "c", "c_frac", "h", "i10", "g")
-EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "cpp", "m_local", "top1_share", "pci", "iupv", "islv", "lrdi")
+EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "cpp", "m_local", "top1_share", "rfi_log_frac", "pci", "iupv", "iupv_s", "iupv_sb", "islv", "lrdi")
 LINE_CHART_METRICS = EXTENDED_LINE_CHART_METRICS
 
 FilterSet = dict[str, Any]
@@ -1505,7 +1513,6 @@ def _filtered_indices_fields(rows: list[dict[str, Any]]) -> list[str]:
         "metric_scope",
         "percentile_scope",
         *AUTHOR_INDEX_DETAIL_FIELDS,
-        "top1_share",
         "mean_authors_per_work",
         "share_single_authored",
         "n_flagged_works",
@@ -1862,6 +1869,7 @@ def _indices_from_filtered_author_work_rows(
         c_frac = float(sum(cited_credits))
         c = float(sum(citations))
         h = h_index(citations)
+        rfi_log_frac = float(sum(math.log1p(max(0.0, value)) for value in cited_credits))
         publication_years = [_as_int(row.get("publication_year")) for row in group if _as_int(row.get("publication_year")) > 0]
         local_age = max(publication_years) - min(publication_years) + 1 if publication_years else 1
         f5_value = _f5(group)
@@ -1885,10 +1893,13 @@ def _indices_from_filtered_author_work_rows(
                 "g": g_index(citations),
                 "m_local": h / max(1, local_age),
                 "top1_share": (max(citations) / c) if c > 0 and citations else 0.0,
+                "rfi_log_frac": rfi_log_frac,
                 "f5": f5_value,
                 "fm5": fm5_value,
                 "pci": 0.0,
                 "iupv": 0.0,
+                "iupv_s": 0.0,
+                "iupv_sb": 0.0,
                 "islv": 0.0,
                 "lrdi": lrdi_metric(
                     group,
@@ -2698,7 +2709,7 @@ def metric_line_series(
     filters: FilterSet | None = None,
     *,
     metrics: tuple[str, ...] | None = None,
-    rank_metric: str = "islv",
+    rank_metric: str = "h",
     limit: int = 30,
     run_id: str = "",
     dump_id: str = "",
@@ -2725,7 +2736,7 @@ def metric_line_series_from_rows(
     fraction_mode: str,
     *,
     metrics: tuple[str, ...] | None = None,
-    rank_metric: str = "islv",
+    rank_metric: str = "h",
     limit: int = 30,
     run_id: str = "",
     dump_id: str = "",
