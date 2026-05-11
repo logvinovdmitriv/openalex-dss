@@ -205,27 +205,29 @@ class EdgeCaseTests(unittest.TestCase):
             ]
         )
         rows = [
-            {"fraction_mode": "integer", "author_id": "A1", "rfi_log_frac": math.log1p(9.0), "iupv_s": 75.0},
-            {"fraction_mode": "integer", "author_id": "A2", "rfi_log_frac": 0.0, "iupv_s": 0.0},
-            {"fraction_mode": "integer", "author_id": "A3", "rfi_log_frac": math.log1p(9.0), "iupv_s": 75.0},
+            {"run_id": "run_1", "fraction_mode": "integer", "author_id": "A1", "rfi_log_frac": math.log1p(9.0), "iupv_s": 75.0},
+            {"run_id": "run_1", "fraction_mode": "integer", "author_id": "A2", "rfi_log_frac": 0.0, "iupv_s": 0.0},
+            {"run_id": "run_1", "fraction_mode": "integer", "author_id": "A3", "rfi_log_frac": math.log1p(9.0), "iupv_s": 75.0},
+            {"run_id": "run_2", "fraction_mode": "integer", "author_id": "B1", "rfi_log_frac": math.log1p(1.0), "iupv_s": 50.0},
+            {"run_id": "run_2", "fraction_mode": "integer", "author_id": "B2", "rfi_log_frac": math.log1p(2.0), "iupv_s": 100.0},
         ]
         python_rows = custom_metrics.apply_custom_metrics([dict(row) for row in rows], definitions)
         for row in python_rows:
             self.assertAlmostEqual(row["custom_rfi_percentile_test"], row["iupv_s"])
 
         with duckdb.connect(":memory:") as conn:
-            conn.execute("CREATE TABLE indices (fraction_mode VARCHAR, author_id VARCHAR, rfi_log_frac DOUBLE, iupv_s DOUBLE)")
+            conn.execute("CREATE TABLE indices (run_id VARCHAR, fraction_mode VARCHAR, author_id VARCHAR, rfi_log_frac DOUBLE, iupv_s DOUBLE)")
             conn.executemany(
-                "INSERT INTO indices VALUES (?, ?, ?, ?)",
-                [(row["fraction_mode"], row["author_id"], row["rfi_log_frac"], row["iupv_s"]) for row in rows],
+                "INSERT INTO indices VALUES (?, ?, ?, ?, ?)",
+                [(row["run_id"], row["fraction_mode"], row["author_id"], row["rfi_log_frac"], row["iupv_s"]) for row in rows],
             )
-            percentile_exprs = custom_metrics.duckdb_percentile_expressions(definitions, {"fraction_mode", "author_id", "rfi_log_frac", "iupv_s"})
+            percentile_exprs = custom_metrics.duckdb_percentile_expressions(definitions, {"run_id", "fraction_mode", "author_id", "rfi_log_frac", "iupv_s"})
             metric_exprs = custom_metrics.duckdb_metric_expressions(
                 definitions,
-                {"fraction_mode", "author_id", "rfi_log_frac", "iupv_s", "pr_rfi_log_frac"},
+                {"run_id", "fraction_mode", "author_id", "rfi_log_frac", "iupv_s", "pr_rfi_log_frac"},
             )
             sql = f"""
-            SELECT author_id, iupv_s, custom_rfi_percentile_test
+            SELECT run_id, author_id, iupv_s, custom_rfi_percentile_test
             FROM (
               SELECT *, {', '.join(percentile_exprs)}
               FROM indices
@@ -233,11 +235,11 @@ class EdgeCaseTests(unittest.TestCase):
             CROSS JOIN LATERAL (
               SELECT {', '.join(metric_exprs)}
             ) metrics
-            ORDER BY author_id
+            ORDER BY run_id, author_id
             """
             duckdb_rows = conn.execute(sql).fetchall()
 
-        for _, builtin, custom in duckdb_rows:
+        for _, _, builtin, custom in duckdb_rows:
             self.assertAlmostEqual(custom, builtin)
 
     def test_custom_metrics_reject_removed_iupv_alias(self) -> None:

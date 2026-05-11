@@ -65,16 +65,20 @@ export function ReportsPage({
     scientometric_metrics: scientometricMetrics.join(","),
     baseline_metric: baselineMetric,
     rank_top_n: rankTopN,
-    custom_metric_defs: customMetricDefsQuery(customMetrics),
+    custom_metric_defs: customMetricDefsQuery(customMetrics, scientometricMetrics),
     ...selectionQuery,
   });
   const rankingUrl = `${API_BASE}/analytics/ranking.csv?${reportParams.toString()}`;
   const bundleUrl = `${API_BASE}/reports/bundle.json?${reportParams.toString()}`;
   const hasReportDataScope = Boolean(runId || dumpId);
   const localIndicesUrl = `${API_BASE}${localDataPreviewCsvUrl("indices", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, fractionMode, dataFilters })}`;
+  const localRatingsUrl = `${API_BASE}${localDataPreviewCsvUrl("ratings", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, fractionMode, dataFilters })}`;
+  const localAuthorWorkUrl = `${API_BASE}${localDataPreviewCsvUrl("author_work", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, fractionMode, dataFilters })}`;
   const localWorksUrl = `${API_BASE}${localDataPreviewCsvUrl("works", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, dataFilters })}`;
   const localAuthorshipsUrl = `${API_BASE}${localDataPreviewCsvUrl("authorships", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, dataFilters })}`;
   const localWorkTopicsUrl = `${API_BASE}${localDataPreviewCsvUrl("work_topics", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, dataFilters })}`;
+  const localAuthorInstitutionsUrl = `${API_BASE}${localDataPreviewCsvUrl("author_institutions", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, dataFilters })}`;
+  const localAuthorCountriesUrl = `${API_BASE}${localDataPreviewCsvUrl("author_countries", { runId, dumpId, limit: 100_000, sort: dataSort, direction: dataDirection, dataFilters })}`;
   return (
     <div className="stack">
       <section className="panel">
@@ -104,9 +108,13 @@ export function ReportsPage({
               {hasReportDataScope && (
                 <>
                   <DownloadLink href={localIndicesUrl} label="Авторы и индексы" />
+                  <DownloadLink href={localRatingsUrl} label="Позиции в рейтингах" />
+                  <DownloadLink href={localAuthorWorkUrl} label="Авторские вклады по работам" />
                   <DownloadLink href={localWorksUrl} label="Работы" />
                   <DownloadLink href={localAuthorshipsUrl} label="Авторство в работах" />
                   <DownloadLink href={localWorkTopicsUrl} label="Темы работ" />
+                  <DownloadLink href={localAuthorInstitutionsUrl} label="Организации авторов" />
+                  <DownloadLink href={localAuthorCountriesUrl} label="Страны авторов" />
                 </>
               )}
               <DownloadLink href={`${API_BASE}/workbench`} label="Состояние системы" />

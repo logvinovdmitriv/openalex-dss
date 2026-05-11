@@ -3,7 +3,7 @@ import type { CustomMetricDefinition, TableColumnFilters } from "./api";
 
 export type View = "slices" | "data" | "rankings" | "statistics" | "reports";
 export type ResolverTab = "subject" | "organization" | "author" | "source";
-export type LocalDataKind = "works" | "authorships" | "work_topics" | "author_work" | "indices" | "ratings";
+export type LocalDataKind = "works" | "authorships" | "work_topics" | "author_institutions" | "author_countries" | "author_work" | "indices" | "ratings";
 export type ScientometricFindingSeverity = "high" | "medium" | "low" | "informational";
 export type DataSelectionParams = {
   kind?: LocalDataKind;
@@ -387,6 +387,8 @@ export const LOCAL_DATA_KIND_OPTIONS: Array<{ value: LocalDataKind; label: strin
   { value: "works", label: "Работы" },
   { value: "authorships", label: "Авторства" },
   { value: "work_topics", label: "Темы работ" },
+  { value: "author_institutions", label: "Организации авторов" },
+  { value: "author_countries", label: "Страны авторов" },
   { value: "author_work", label: "Автор-работа" },
 ];
 
@@ -593,7 +595,7 @@ function humanRunStage(stage: unknown, status?: string, action?: string) {
 }
 
 export function analyticsRankingUrl(filters: ActiveFilters, fractionMode: string, metric: string, runId = "", dumpId = "", limit = 100, dataQuery = "", dataSelection?: DataSelectionParams, customMetrics?: CustomMetricDefinition[], rankDirection: "asc" | "desc" = "desc") {
-  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, rank_direction: rankDirection, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection), custom_metric_defs: customMetricDefsQuery(customMetrics) }).toString()}`;
+  return `/analytics/ranking?${filterParams(filters, { fraction_mode: fractionMode, metric, limit, rank_direction: rankDirection, run_id: runId, dump_id: dumpId, q: dataQuery, ...dataSelectionQuery(dataSelection), custom_metric_defs: customMetricDefsQuery(customMetrics, [metric]) }).toString()}`;
 }
 
 export function localDataSummaryUrl(runId = "", dumpId = "") {
@@ -667,20 +669,24 @@ export function scientometricsUrl(params: {
     dump_id: params.dumpId ?? "",
     q: params.dataQuery ?? "",
     ...dataSelectionQuery(params.dataSelection),
-    custom_metric_defs: customMetricDefsQuery(params.customMetrics),
+    custom_metric_defs: customMetricDefsQuery(params.customMetrics, params.metrics),
   });
   return `/analytics/scientometrics?${query.toString()}`;
 }
 
-export function customMetricDefsQuery(customMetrics?: CustomMetricDefinition[]) {
+export function customMetricDefsQuery(customMetrics?: CustomMetricDefinition[], selectedMetricIds?: Iterable<string>) {
+  const selected = selectedMetricIds === undefined
+    ? null
+    : new Set(Array.from(selectedMetricIds, (value) => String(value ?? "").trim()).filter(Boolean));
   const clean = (customMetrics ?? [])
+    .filter((item) => item.enabled !== false)
     .map((item) => ({
       id: String(item.id ?? "").trim(),
       label: String(item.label ?? "").trim(),
       description: String(item.description ?? "").trim(),
       expression: String(item.expression ?? "").trim(),
     }))
-    .filter((item) => item.id && item.label && item.expression);
+    .filter((item) => item.id && item.label && item.expression && (selected === null || selected.has(item.id)));
   return clean.length ? JSON.stringify(clean) : "";
 }
 

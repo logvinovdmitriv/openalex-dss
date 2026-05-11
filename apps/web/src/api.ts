@@ -51,6 +51,7 @@ export type CustomMetricDefinition = {
   label: string;
   description?: string;
   expression: string;
+  enabled?: boolean;
 };
 
 export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {

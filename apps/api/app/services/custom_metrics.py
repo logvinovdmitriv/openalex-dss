@@ -238,7 +238,7 @@ def duckdb_percentile_expressions(definitions: list[dict[str, str]] | None, avai
             expressions.append(f"0.0 AS {alias}")
         else:
             value_sql = f"COALESCE(TRY_CAST({_quote_identifier(field)} AS DOUBLE), 0.0)"
-            partition_cols = [_quote_identifier("fraction_mode")] if "fraction_mode" in available_fields else []
+            partition_cols = [_quote_identifier(partition_field) for partition_field in ("run_id", "fraction_mode") if partition_field in available_fields]
             partition_sql = f"PARTITION BY {', '.join(partition_cols)}" if partition_cols else ""
             ordered_window = f"{partition_sql} ORDER BY {value_sql}".strip()
             rank_sql = f"RANK() OVER ({ordered_window})"
@@ -458,9 +458,9 @@ def _percentile_fields(definitions: list[dict[str, str]]) -> set[str]:
 
 
 def _percentile_rank_map(rows: list[dict[str, Any]], field: str) -> dict[int, float]:
-    groups: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    groups: defaultdict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        groups[str(row.get("fraction_mode") or "")].append(row)
+        groups[(str(row.get("run_id") or ""), str(row.get("fraction_mode") or ""))].append(row)
     out: dict[int, float] = {}
     for group in groups.values():
         for row in group:

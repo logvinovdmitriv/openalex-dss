@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Sigma } from "lucide-react";
 import { Area, Brush, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
@@ -64,6 +64,14 @@ export function AnalyticsView({
 }) {
   const metrics = (scientometrics?.metrics ?? scientometricMetrics).filter(Boolean);
   const analyticsMetrics = metrics.length ? metrics : [metric].filter(Boolean);
+  const analysisMetricLabels = useMemo(() => {
+    const customLabels = Object.fromEntries(
+      (scientometrics?.custom_metrics ?? [])
+        .map((item) => [String(item.value ?? "").trim(), String(item.label ?? "").trim()])
+        .filter(([value, label]) => value && label),
+    );
+    return { ...metricLabels, ...customLabels };
+  }, [metricLabels, scientometrics?.custom_metrics]);
   const warnings = (scientometrics?.warnings ?? []).filter((warning) => !/Кендалл|Kendall/i.test(String(warning)));
   const [showBoxplot, setShowBoxplot] = useState(true);
   const [boxplotScaleMode, setBoxplotScaleMode] = useState<BoxplotScaleMode>("p95");
@@ -96,7 +104,7 @@ export function AnalyticsView({
     top_n: rankTopN,
     run_id: runId,
     dump_id: dumpId,
-    custom_metric_defs: customMetricDefsQuery(customMetrics),
+    custom_metric_defs: customMetricDefsQuery(customMetrics, scientometricMetrics),
     ...selectionQuery,
   });
   const hasAnalyticsExportScope = Boolean(runId || dumpId);
@@ -141,8 +149,8 @@ export function AnalyticsView({
         </div>
         <div className="analytics-context-line">
           <span><b>Авторов после ограничений:</b> {scientometrics?.n_authors !== undefined ? fmt(Number(scientometrics.n_authors)) : "все"}</span>
-          <span><b>Основной показатель:</b> {metricLabelFor(baselineMetric, metricLabels)}</span>
-          <span><b>Показатели:</b> {analyticsMetrics.map((item) => metricLabelFor(item, metricLabels)).join(", ")}</span>
+          <span><b>Основной показатель:</b> {metricLabelFor(baselineMetric, analysisMetricLabels)}</span>
+          <span><b>Показатели:</b> {analyticsMetrics.map((item) => metricLabelFor(item, analysisMetricLabels)).join(", ")}</span>
         </div>
       </section>
       {Boolean(scientometricsError) && (
@@ -155,7 +163,7 @@ export function AnalyticsView({
         <section className="notice warn">
           <b>Ограничения интерпретации</b>
           <ul className="plain-list">
-            {warnings.map((warning: string) => <li key={warning}>{analysisWarningLabel(warning, metricLabels)}</li>)}
+            {warnings.map((warning: string) => <li key={warning}>{analysisWarningLabel(warning, analysisMetricLabels)}</li>)}
           </ul>
         </section>
       )}
@@ -263,14 +271,14 @@ export function AnalyticsView({
           <DescriptiveStatsPanel
             payload={scientometrics}
             metrics={analyticsMetrics}
-            metricLabels={metricLabels}
+            metricLabels={analysisMetricLabels}
             downloads={analyticsDownloads}
             hasExportScope={hasAnalyticsExportScope}
           />
           <DistributionComparisonPanel
             payload={scientometrics}
             metrics={analyticsMetrics}
-            metricLabels={metricLabels}
+            metricLabels={analysisMetricLabels}
             highlightedAuthors={selectedAuthorRows}
             loading={loadingScientometrics}
           />
@@ -303,11 +311,11 @@ export function AnalyticsView({
                 </button>
               </div>
             </div>
-            {showBoxplot && <MetricBoxplotPanel payload={scientometrics} metrics={analyticsMetrics} metricLabels={metricLabels} scaleMode={boxplotScaleMode} dataMode={boxplotDataMode} />}
+            {showBoxplot && <MetricBoxplotPanel payload={scientometrics} metrics={analyticsMetrics} metricLabels={analysisMetricLabels} scaleMode={boxplotScaleMode} dataMode={boxplotDataMode} />}
           </section>
-          <CorrelationMatrixPanel payload={scientometrics} method="spearman" metrics={analyticsMetrics} metricLabels={metricLabels} />
-          <FindingsPanel payload={scientometrics} metricLabels={metricLabels} />
-          <ConclusionDraftPanel payload={scientometrics} metricLabels={metricLabels} />
+          <CorrelationMatrixPanel payload={scientometrics} method="spearman" metrics={analyticsMetrics} metricLabels={analysisMetricLabels} />
+          <FindingsPanel payload={scientometrics} metricLabels={analysisMetricLabels} />
+          <ConclusionDraftPanel payload={scientometrics} metricLabels={analysisMetricLabels} />
         </>
       )}
     </div>
@@ -598,7 +606,8 @@ function MetricBoxplotPanel({ payload, metrics, metricLabels, scaleMode, dataMod
       const min = collapsed ? q1 : numberOrNull(boxplot.min_whisker ?? boxplot.min);
       const max = collapsed ? q3 : numberOrNull(boxplot.max_whisker ?? boxplot.max);
       if (![min, q1, median, q3, max].every((value) => value !== null)) return null;
-      if (readiness && readiness.is_chartable === false) {
+      const selectedViewChartable = isBoxplotViewChartable(boxplot);
+      if (readiness && readiness.is_chartable === false && !selectedViewChartable) {
         return {
           metricName,
           skipped: true,
@@ -761,6 +770,12 @@ function boxplotForDataMode(boxplot: Record<string, unknown>, mode: BoxplotDataM
   const candidate = mode === "nonzero" ? views.nonzero : mode === "central95" ? views.central_95 : boxplot;
   if (candidate && numberOrNull(candidate.q1) !== null && numberOrNull(candidate.q3) !== null) return candidate;
   return boxplot;
+}
+
+function isBoxplotViewChartable(boxplot: Record<string, unknown>) {
+  const n = Number(boxplot.n ?? 0);
+  const iqr = numberOrNull(boxplot.iqr);
+  return Number.isFinite(n) && n >= 5 && iqr !== null && iqr > 0;
 }
 
 function boxplotDataModeLabel(mode: BoxplotDataMode) {
