@@ -13,7 +13,7 @@ from app.core.paths import DATA
 from app.services import metric_registry
 
 
-BASE_NUMERIC_FIELDS = metric_registry.computed_metric_ids() | {
+BASE_NUMERIC_FIELDS = metric_registry.selectable_metric_ids() | {
     "p",
     "c",
     "c_frac",
@@ -27,7 +27,6 @@ BASE_NUMERIC_FIELDS = metric_registry.computed_metric_ids() | {
     "f5",
     "fm5",
     "pci",
-    "iupv",
     "iupv_s",
     "iupv_sb",
     "islv",

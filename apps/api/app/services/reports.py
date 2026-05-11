@@ -15,7 +15,7 @@ from app.services.analysis_filters import clean_analysis_filters
 
 REPORT_BUNDLE_SCHEMA = "report_bundle"
 REPORT_SCOPE_SCHEMA = "report_scope"
-DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "cpp", "h", "i10", "g")
+DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "iupv_s")
 REPORT_BUNDLE_KEEP = 5
 
 
@@ -276,7 +276,7 @@ def build_report_bundle(
         "warnings": _report_warnings(cohort_filter_policy),
         "interpretation_policy": {
             "strict_mode": "Математические выводы строятся только по локально пересчитанным works-based индексам.",
-            "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения. Уже скачанные локальные срезы анализируются без API; новая загрузка через установленный загрузчик OpenAlex может требовать ключ OpenAlex.",
+            "api_usage": "OpenAlex API используется для подсказок, ID, оценки, справочников лимитов и точечного обогащения. Уже скачанные локальные срезы анализируются без API; новая загрузка выполняется выбранным backend provider и может требовать ключ OpenAlex.",
             "decision_boundary": "Метрики формируют пул кандидатов и объяснение, но не заменяют экспертное решение.",
         },
         "slice_passport": slice_passport,

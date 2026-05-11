@@ -20,7 +20,8 @@ DUMP_ID = "validation_fixture_dump"
 FRACTION_MODE = "integer"
 BASELINE_METRIC = "h"
 RANK_TOP_N = 5
-METRICS = ["p", "c", "cpp", "h", "i10", "g"]
+METRICS = ["p", "c", "c_frac", "h", "i10", "g", "iupv_s"]
+REQUIRED_INDEX_FIELDS = ["rfi_log_frac", "iupv_s"]
 
 
 def main() -> None:
@@ -154,6 +155,7 @@ def main() -> None:
         "baseline_metric": BASELINE_METRIC,
         "rank_top_n": RANK_TOP_N,
         "metrics": METRICS,
+        "required_index_fields": REQUIRED_INDEX_FIELDS,
         "raw_works": 12,
         "n_authors": payload["n_authors"],
         "findings": len(payload.get("findings") or []),
@@ -402,6 +404,11 @@ def _assert_validation_invariants(
     _require(manifest["findings_schema"] == scientometrics_module.SCIENTOMETRIC_FINDINGS_SCHEMA, "findings schema mismatch")
     _require(manifest["conclusion_schema"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_SCHEMA, "conclusion schema mismatch")
     _require(payload["conclusion_draft"]["schema"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_SCHEMA, "payload conclusion schema mismatch")
+    _require(scope.get("data_scope") == "full_filtered_slice", "analysis must use full filtered slice scope")
+    _require("iupv_s" in payload.get("metrics", []), "validation analysis must include iupv_s")
+    _require("c_frac" in payload.get("metrics", []), "validation analysis must include c_frac")
+    _require(any(finding.get("metric") == "iupv_s" for finding in payload.get("findings") or []), "missing IUPV-S candidate finding")
+    _assert_iupv_s_tables(Path(manifest["data_dir"]))
     _require(build["analysis_eligibility"]["allowed_for_final_analysis"] is False, "validation fixture must not be eligible for final analysis")
     _require(bool(report["exports"]["scientometrics_conclusion_md"]), "report bundle is missing conclusion Markdown export")
     for key in (
@@ -417,6 +424,40 @@ def _assert_validation_invariants(
     for name, path in manifest["artifacts"].items():
         _require(Path(path).is_file(), f"missing validation artifact: {name}={path}")
         _require(bool(manifest["artifact_checksums"].get(name)), f"missing validation checksum for artifact: {name}")
+
+
+def _assert_iupv_s_tables(data_dir: Path) -> None:
+    indices_path = data_dir / "runs" / RUN_ID / "tables" / "indices.csv"
+    ratings_path = data_dir / "runs" / RUN_ID / "tables" / "ratings.csv"
+    _require(indices_path.is_file(), f"missing indices table: {indices_path}")
+    _require(ratings_path.is_file(), f"missing ratings table: {ratings_path}")
+    with indices_path.open("r", encoding="utf-8", newline="") as handle:
+        index_rows = list(csv.DictReader(handle))
+    _require(bool(index_rows), "indices table is empty")
+    index_fields = set(index_rows[0].keys())
+    for field in REQUIRED_INDEX_FIELDS:
+        _require(field in index_fields, f"indices table is missing {field}")
+    positive_iupv = False
+    for row in index_rows:
+        rfi = _float(row.get("rfi_log_frac"))
+        iupv_s = _float(row.get("iupv_s"))
+        if rfi <= 0.0:
+            _require(iupv_s == 0.0, "authors with rfi_log_frac=0 must have iupv_s=0")
+        if iupv_s > 0.0:
+            positive_iupv = True
+    _require(positive_iupv, "at least one validation author must have positive iupv_s")
+    with ratings_path.open("r", encoding="utf-8", newline="") as handle:
+        rating_metrics = {str(row.get("metric_name") or "") for row in csv.DictReader(handle)}
+    _require("iupv_s" in rating_metrics, "ratings table is missing metric_name=iupv_s")
+
+
+def _float(value: Any) -> float:
+    try:
+        if value in (None, ""):
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _require(condition: bool, message: str) -> None:

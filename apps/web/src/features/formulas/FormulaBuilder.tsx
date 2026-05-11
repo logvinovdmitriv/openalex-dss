@@ -6,7 +6,7 @@ import { metricDescription, metricFormula, metricLabel, type SelectOption } from
 import { Field } from "../../components/ui";
 import { mutationError } from "../../workbench";
 import { emitToast } from "../notifications/toast";
-import { DEFAULT_CUSTOM_METRICS } from "./defaultCustomMetrics";
+import { DEFAULT_CUSTOM_METRICS, DEFAULT_FORMULA_EXPRESSION } from "./defaultCustomMetrics";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -183,7 +183,7 @@ export function CustomMetricBuilder({
     id: "",
     label: "",
     description: "",
-    expression: DEFAULT_CUSTOM_METRICS[0].expression,
+    expression: DEFAULT_FORMULA_EXPRESSION,
   });
   const addToken = (token: string) => {
     const current = draft.expression.trim();
@@ -238,8 +238,8 @@ export function CustomMetricBuilder({
     setMetrics(DEFAULT_CUSTOM_METRICS);
     setSelectedMetrics([...new Set([...selectedMetrics.filter((item) => !item.startsWith("custom_")), ...defaultIds])]);
     if (activeMetric.startsWith("custom_")) setActiveMetric(defaultIds[0] ?? "h");
-    setDraft({ id: "", label: "", description: "", expression: DEFAULT_CUSTOM_METRICS[0].expression });
-    emitToast({ title: "Формулы сброшены", message: "Возвращен пример собственной формулы по умолчанию.", tone: "info" });
+    setDraft({ id: "", label: "", description: "", expression: DEFAULT_FORMULA_EXPRESSION });
+    emitToast({ title: "Формулы сброшены", message: "Пользовательские формулы очищены, пример оставлен в поле ввода.", tone: "info" });
   };
   return (
     <div className="formula-builder">

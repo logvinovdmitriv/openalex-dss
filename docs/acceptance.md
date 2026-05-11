@@ -69,9 +69,12 @@ python scripts/validate_scientometric_dss.py --reset
   используется только как дополнительная авторская формула.
 - Формульное поле `pr_rfi_log_frac` в Python- и DuckDB-пути дает тот же
   positive-only percentile policy, что и встроенный `iupv_s`.
+- `scripts/validate_scientometric_dss.py --reset` проверяет полный baseline
+  `P`, `C`, `C_frac`, `h`, `i10`, `g`, extension-метрику `iupv_s`, наличие
+  `rfi_log_frac` в `indices` и `metric_name=iupv_s` в `ratings`.
 - Использование ключа OpenAlex видно пользователю: справочники, оценка объема,
-  проверка лимитов, точечное обогащение и новая загрузка среза. Установленный
-  загрузчик OpenAlex может требовать ключ для новой загрузки.
+  проверка лимитов, точечное обогащение и новая загрузка среза. Выбранный
+  backend provider может требовать ключ для новой загрузки.
 
 ## Инварианты контракта
 

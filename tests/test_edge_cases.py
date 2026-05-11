@@ -153,12 +153,12 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertAlmostEqual(by_mode["integer"]["rfi_log_frac"], math.log1p(100.0))
         self.assertGreater(by_mode["integer"]["rfi_log_frac"], by_mode["strict_authors_count"]["rfi_log_frac"])
 
-    def test_custom_iupv_s_percentile_matches_builtin_python_and_duckdb(self) -> None:
+    def test_custom_rfi_percentile_matches_builtin_iupv_s_python_and_duckdb(self) -> None:
         definitions = custom_metrics.parse_custom_metrics(
             [
                 {
-                    "id": "custom_iupv_s_test",
-                    "label": "IUPV-S test",
+                    "id": "custom_rfi_percentile_test",
+                    "label": "RFI percentile test",
                     "expression": "100 * pr_rfi_log_frac",
                 }
             ]
@@ -170,7 +170,7 @@ class EdgeCaseTests(unittest.TestCase):
         ]
         python_rows = custom_metrics.apply_custom_metrics([dict(row) for row in rows], definitions)
         for row in python_rows:
-            self.assertAlmostEqual(row["custom_iupv_s_test"], row["iupv_s"])
+            self.assertAlmostEqual(row["custom_rfi_percentile_test"], row["iupv_s"])
 
         with duckdb.connect(":memory:") as conn:
             conn.execute("CREATE TABLE indices (fraction_mode VARCHAR, author_id VARCHAR, rfi_log_frac DOUBLE, iupv_s DOUBLE)")
@@ -184,7 +184,7 @@ class EdgeCaseTests(unittest.TestCase):
                 {"fraction_mode", "author_id", "rfi_log_frac", "iupv_s", "pr_rfi_log_frac"},
             )
             sql = f"""
-            SELECT author_id, iupv_s, custom_iupv_s_test
+            SELECT author_id, iupv_s, custom_rfi_percentile_test
             FROM (
               SELECT *, {', '.join(percentile_exprs)}
               FROM indices
@@ -198,6 +198,18 @@ class EdgeCaseTests(unittest.TestCase):
 
         for _, builtin, custom in duckdb_rows:
             self.assertAlmostEqual(custom, builtin)
+
+    def test_custom_metrics_reject_deprecated_iupv_alias(self) -> None:
+        with self.assertRaises(ValueError):
+            custom_metrics.parse_custom_metrics(
+                [
+                    {
+                        "id": "deprecated_iupv_formula",
+                        "label": "Deprecated IUPV",
+                        "expression": "100 * pr_iupv",
+                    }
+                ]
+            )
 
     def test_author_work_filters_retracted_paratext_and_xpac_locally(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

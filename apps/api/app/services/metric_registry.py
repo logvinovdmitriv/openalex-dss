@@ -42,6 +42,14 @@ def computed_metric_ids() -> set[str]:
     return {str(item["id"]) for item in computed_metrics()}
 
 
+def selectable_metric_ids() -> set[str]:
+    return {
+        str(item["id"])
+        for item in computed_metrics()
+        if item.get("visible", True) and item.get("selectable", True) and not item.get("deprecated", False)
+    }
+
+
 def metric_formula(metric_id: str) -> str:
     for item in computed_metrics():
         if item["id"] == metric_id:

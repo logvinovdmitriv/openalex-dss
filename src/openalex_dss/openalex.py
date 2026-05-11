@@ -307,7 +307,7 @@ def download_consistency(cfg: SliceConfig, source_strategy: str = "openalex_cli"
     reasons: list[str] = []
     strategy = str(source_strategy or "openalex_cli")
     if strategy == "openalex_cli" and cfg.filter_mode == "search" and cfg.text_search_query.strip():
-        reasons.append("Установленный загрузчик OpenAlex поддерживает фильтры, но не текстовый поиск API; выберите тему, организацию, автора, источник или другой структурированный фильтр.")
+        reasons.append("OpenAlex CLI provider поддерживает фильтры, но не текстовый поиск API; выберите тему, организацию, автора, источник или API/IDs стратегию.")
     compatible = not reasons
     signature = download_signature_for_strategy(cfg, strategy)
     return {

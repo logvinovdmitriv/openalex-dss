@@ -18,7 +18,9 @@
 
 ## Режим проверки
 
-Проверка выполнена на детерминированном локальном fixture, а не на сетевом скачивании OpenAlex. Причина: в текущем окружении нет ключа OpenAlex, а установленный загрузчик может требовать ключ для новой загрузки.
+Проверка выполнена на детерминированном локальном fixture, а не на сетевом
+скачивании OpenAlex. Причина: в текущем окружении нет ключа OpenAlex, а
+выбранный backend provider может требовать ключ для новой загрузки.
 
 Назначение этого прогона - проверить воспроизводимый технический контур, согласованность выбранного среза и наличие всех аналитических артефактов. Он не является научным OpenAlex-срезом и не должен использоваться как содержательный результат по предметной области.
 
@@ -53,11 +55,11 @@ cohort_checksum: 0d5ecb3a73559e74b6d8be304386f62cc0bd0e45222d0e04b5cbff88f945aeb
 fraction_mode: integer
 baseline_metric: h
 rank_top_n: 5
-metrics: p, c, cpp, h, i10, g
+metrics: p, c, c_frac, h, i10, g, iupv_s
 raw_works: 12
 n_authors: 5
-findings: 21
-report_scope_hash: c65f380e4da05a8e
+findings: 29
+report_scope_hash: e2047c9dd0be2266
 ```
 
 `n_authors: 5` - это число авторов в проверочной выборке TOP-5, а не полное число авторов raw fixture. В fixture есть шестой автор, который не входит в TOP-5 по индексу Хирша.
@@ -94,7 +96,7 @@ validation/exports/validation_scientometric/top-outliers.csv
 validation/exports/validation_scientometric/findings.csv
 validation/exports/validation_scientometric/conclusion.md
 validation/exports/validation_scientometric/report_bundle.json
-runs/validation_scientometric/reports/report_c65f380e4da05a8e.json
+runs/validation_scientometric/reports/report_e2047c9dd0be2266.json
 ```
 
 Артефакты расчетного запуска:
@@ -142,14 +144,14 @@ scientometrics_conclusion_md
 По контрольному прогону:
 
 ```text
-descriptive.csv: 7 lines
-correlations.csv: 109 lines
+descriptive.csv: 8 lines
+correlations.csv: 148 lines
 outliers.csv: 2 lines
 top-outliers.csv: 2 lines
-findings.csv: 22 lines
-conclusion.md: 47 lines
-scientometrics.json: 3566 lines
-report_bundle.json: 4240 lines
+findings.csv: 30 lines
+conclusion.md: 55 lines
+scientometrics.json: 5814 lines
+report_bundle.json: 6576 lines
 ```
 
 ## Checksums
@@ -166,6 +168,8 @@ report_bundle.json: 4240 lines
 4. Scientometric analysis строится по тому же `run_id/dump_id/fraction_mode` и выбранному TOP-N.
 5. Report bundle получает тот же scope hash и включает `scientometric_analysis`.
 6. JSON/CSV/Markdown exports создаются и трассируются к одному scope.
-7. Validation script проверяет инварианты выбранного среза, наличие report export links, существование файлов и SHA-256 checksums.
+7. Validation script проверяет инварианты выбранного среза, наличие IUPV-S в
+   `indices`/`ratings`, report export links, существование файлов и SHA-256
+   checksums.
 
 Ограничение: это validation fixture, а не финальный научный срез OpenAlex. Следующий содержательный контроль должен повторить тот же протокол на реальном малом OpenAlex-срезе с ключом OpenAlex, подтвержденными подписями оценки/загрузки и финальным manifest среза.
