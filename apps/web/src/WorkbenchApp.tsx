@@ -148,7 +148,7 @@ function Workbench() {
   const [dataOffset, setDataOffset] = useState(0);
   const [dataPageCursors, setDataPageCursors] = useState<Record<number, string>>({ 0: "" });
   const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
-  const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "i10", "g", "iupv_s"]);
+  const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "i10", "g"]);
   const [baselineMetric, setBaselineMetric] = useState("h");
   const [storageProfileId, setStorageProfileId] = useState("");
   const [downloadDir, setDownloadDir] = useState("");

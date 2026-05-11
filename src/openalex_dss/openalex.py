@@ -20,7 +20,6 @@ API_BASE = "https://api.openalex.org/works"
 WORK_TYPE_LABELS = {
     "article": "Статья",
     "review": "Обзор",
-    "conference-paper": "Материалы конференции",
     "book": "Книга",
     "book-chapter": "Глава книги",
     "book-section": "Раздел книги",

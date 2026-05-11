@@ -11,7 +11,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_METRICS = "p,c,c_frac,h,i10,g,iupv_s"
+DEFAULT_METRICS = "p,c,c_frac,h,i10,g"
 
 
 def main() -> None:

@@ -11,11 +11,9 @@ work_types:
     openalex_types:
       - "article"
       - "review"
-  - preset_id: "it_broad"
-    label: "Статьи, обзоры, конференции"
-    public_description: "Расширенный корпус для ИТ-направлений, где важны конференции."
+  - preset_id: "articles_reviews_conference_sources"
+    label: "Статьи и обзоры из конференционных источников"
+    public_description: "OpenAlex не использует отдельный work type для конференций; конференционность задавайте source type = conference."
     openalex_types:
       - "article"
       - "review"
-      - "conference-paper"
-

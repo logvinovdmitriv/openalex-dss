@@ -75,7 +75,7 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
             "fraction_modes": list(cfg.fraction_modes),
             "default_fraction_mode": cfg.fraction_mode_default,
             "core_indices": ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local"],
-            "experimental_indices": ["f5", "fm5", "pci", "iupv_s", "iupv_sb", "islv", "lrdi"],
+            "experimental_indices": ["n_cited5", "frac_cited5", "pci", "iupv_s", "iupv_sb", "islv", "lrdi"],
             "pci_percentile_composite": {
                 "metric_id": "pci",
                 "formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
@@ -89,7 +89,7 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
                 "formula": "weighted geometric mean of pr(h), pr(C_frac), pr(g), pr(i10), pr(P) with top-1 concentration penalty",
                 "status": "own_formula",
             },
-            "f5_fm5_status": "operational_definition_requires_primary_source_confirmation",
+            "cited5_status": "operational_definition_requires_primary_source_confirmation",
             "lrdi_p0": cfg.lrdi_p0,
             "lrdi_lambda": cfg.lrdi_lambda,
             "analysis_year": cfg.analysis_year,

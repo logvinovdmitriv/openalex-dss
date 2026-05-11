@@ -34,10 +34,13 @@ h
 i10
 g
 rfi_log_frac
-iupv_s
+iupv_s   # extension, не baseline
 ```
 
-В `ratings` должна быть строка `metric_name = iupv_s`.
+Таблица `ratings` может содержать все материализованные метрики из `indices`.
+Baseline-анализ и baseline-отчет по умолчанию используют только
+`p,c,c_frac,h,i10,g`; для IUPV-S запускается отдельный extension-анализ или
+явный report с этой метрикой.
 
 Авторы с `rfi_log_frac = 0` должны иметь `iupv_s = 0`.
 
@@ -61,4 +64,3 @@ iupv_s
 - CSV exports для descriptive, correlations, findings и outliers;
 - `conclusion.md`;
 - checksum manifest.
-

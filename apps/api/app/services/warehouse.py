@@ -89,8 +89,8 @@ INDEX_NUMERIC_FIELDS = {
     "m_local",
     "top1_share",
     "rfi_log_frac",
-    "f5",
-    "fm5",
+    "n_cited5",
+    "frac_cited5",
     "pci",
     "iupv_s",
     "iupv_sb",
@@ -114,8 +114,8 @@ AUTHOR_INDEX_DETAIL_FIELDS = (
     "m_local",
     "top1_share",
     "rfi_log_frac",
-    "f5",
-    "fm5",
+    "n_cited5",
+    "frac_cited5",
     "pci",
     "iupv_s",
     "iupv_sb",
@@ -1870,8 +1870,8 @@ def _indices_from_filtered_author_work_rows(
         rfi_log_frac = float(sum(math.log1p(max(0.0, value)) for value in cited_credits))
         publication_years = [_as_int(row.get("publication_year")) for row in group if _as_int(row.get("publication_year")) > 0]
         local_age = max(publication_years) - min(publication_years) + 1 if publication_years else 1
-        f5_value = _f5(group)
-        fm5_value = _fm5(group)
+        n_cited5_value = _n_cited5(group)
+        frac_cited5_value = _frac_cited5(group)
         out.append(
             {
                 "run_id": "filtered",
@@ -1892,8 +1892,8 @@ def _indices_from_filtered_author_work_rows(
                 "m_local": h / max(1, local_age),
                 "top1_share": (max(citations) / c) if c > 0 and citations else 0.0,
                 "rfi_log_frac": rfi_log_frac,
-                "f5": f5_value,
-                "fm5": fm5_value,
+                "n_cited5": n_cited5_value,
+                "frac_cited5": frac_cited5_value,
                 "pci": 0.0,
                 "iupv_s": 0.0,
                 "iupv_sb": 0.0,
@@ -3173,11 +3173,11 @@ def _actual_authors_count(row: dict[str, Any]) -> float:
     return used if used > 0 else 1.0
 
 
-def _f5(group: list[dict[str, Any]]) -> float:
+def _n_cited5(group: list[dict[str, Any]]) -> float:
     return float(sum(1 for row in group if _as_int(row.get("cited_by_count")) >= 5))
 
 
-def _fm5(group: list[dict[str, Any]]) -> float:
+def _frac_cited5(group: list[dict[str, Any]]) -> float:
     return float(sum(_as_float(row.get("credit_weight")) for row in group if _as_int(row.get("cited_by_count")) >= 5))
 
 

@@ -67,3 +67,21 @@ class OpenAlexApiProviderTests(unittest.TestCase):
         self.assertEqual(calls[0]["select"], "id")
         self.assertEqual(calls[0]["search"], "graph neural")
 
+    def test_cursor_download_rejects_non_advancing_cursor(self) -> None:
+        cfg = replace_config(load_config(ROOT / "config/slice.yaml"), slice_name="api_cursor_loop", filter_mode="primary_topic", entity_level="subfield", entity_id_short="1706")
+
+        def fake_get_json(_url: str, _params: dict[str, str]) -> dict[str, object]:
+            return {"meta": {"count": 2, "next_cursor": "*"}, "results": [{"id": "https://openalex.org/W1"}]}
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openalex_api_provider, "_get_json", side_effect=fake_get_json):
+            with self.assertRaisesRegex(RuntimeError, "cursor did not advance"):
+                openalex_api_provider.download_works_cursor(
+                    cfg,
+                    api_key="key",
+                    out_dir=Path(tmp),
+                    estimate={
+                        "estimate_count": 2,
+                        "accepted_estimate_signature": corpus_signature(cfg),
+                        "accepted_download_signature": api_cursor_download_signature(cfg),
+                    },
+                )

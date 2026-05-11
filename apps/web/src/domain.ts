@@ -1,4 +1,4 @@
-export const METRICS = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "rfi_log_frac", "lrdi", "f5", "fm5", "pci", "iupv_s", "iupv_sb", "islv"] as const;
+export const METRICS = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "rfi_log_frac", "lrdi", "n_cited5", "frac_cited5", "pci", "iupv_s", "iupv_sb", "islv"] as const;
 export const FRACTION_MODES = ["strict_authors_count", "renorm_valid_authors", "integer"] as const;
 export const TABLES = ["indices", "ratings", "works", "authorships", "work_topics", "author_institutions", "author_countries", "author_work"] as const;
 
@@ -118,8 +118,8 @@ const metricLabels: Record<string, string> = {
   top1_share: "Доля цитирований самой цитируемой работы",
   rfi_log_frac: "RFI: логарифмический долевой вклад",
   lrdi: "Индекс устойчивости результата",
-  f5: "Работы с 5+ цитированиями",
-  fm5: "Долевой вклад в работы с 5+ цитированиями",
+  n_cited5: "Работы с 5+ цитированиями",
+  frac_cited5: "Долевой вклад в работы с 5+ цитированиями",
   pci: "PCI: процентильный композит",
   iupv_s: "IUPV-S: робастный долевой вклад",
   iupv_sb: "IUPV-SB: баланс публикаций и вклада",
@@ -140,8 +140,8 @@ const metricDescriptions: Record<string, string> = {
   top1_share: "Показывает концентрацию цитирований в самой цитируемой работе автора.",
   rfi_log_frac: "Сумма log1p(cited_credit) по всем работам автора: учитывает долевой вклад и снижает влияние citation outliers.",
   lrdi: "Показывает устойчивость результата с учетом соавторства и свежести публикаций.",
-  f5: "Дополнительный пороговый показатель: сколько публикаций автора имеют 5 и более цитирований.",
-  fm5: "Дополнительный пороговый показатель с долевым учетом вклада автора в публикации с 5 и более цитированиями.",
+  n_cited5: "Дополнительный пороговый показатель: сколько публикаций автора имеют 5 и более цитирований.",
+  frac_cited5: "Дополнительный пороговый показатель с долевым учетом вклада автора в публикации с 5 и более цитированиями.",
   pci: "Экспериментальная формула рейтинга на процентильной шкале: объединяет число публикаций, индекс Хирша и долевые цитирования внутри выбранного среза.",
   iupv_s: "Авторская extension-формула: процентиль 0–100 по робастному долевому вкладу RFI внутри выбранного среза.",
   iupv_sb: "Расширение IUPV-S: балансирует процентиль публикаций и процентиль робастного долевого вклада.",
@@ -161,8 +161,8 @@ const metricFormulas: Record<string, string> = {
   m_local: "m(a) = h(a) / T_a",
   top1_share: "S₁(a) = max(c_i) / C(a)",
   rfi_log_frac: "RFI(a) = Σ log1p(cited_credit_i)",
-  f5: "f5(a) = |{i: c_i ≥ 5}|",
-  fm5: "fm5(a) = Σ w_i для работ, где c_i ≥ 5",
+  n_cited5: "n_cited5(a) = |{i: c_i ≥ 5}|",
+  frac_cited5: "frac_cited5(a) = Σ w_i для работ, где c_i ≥ 5",
   pci: "PCI(a) = 100 · (pr(P) · pr(h) · pr(Cд))^(1/3)",
   iupv_s: "IUPV-S(a) = 100 · pr(RFI)",
   iupv_sb: "IUPV-SB(a) = 100 · sqrt(pr(P) · pr(RFI))",
@@ -300,8 +300,8 @@ const columnLabels: Record<string, string> = {
   m_local: "Индекс m",
   top1_share: "Доля самой цитируемой работы",
   rfi_log_frac: "RFI: логарифмический долевой вклад",
-  f5: "Работы с 5+ цитированиями",
-  fm5: "Долевой вклад в работы с 5+ цитированиями",
+  n_cited5: "Работы с 5+ цитированиями",
+  frac_cited5: "Долевой вклад в работы с 5+ цитированиями",
   pci: "PCI: процентильный композит",
   iupv_s: "IUPV-S: робастный долевой вклад",
   iupv_sb: "IUPV-SB: баланс публикаций и вклада",
@@ -356,7 +356,6 @@ const columnLabels: Record<string, string> = {
 export const WORK_TYPE_LABELS: Record<string, string> = {
   article: "Статья",
   review: "Обзор",
-  "conference-paper": "Материалы конференции",
   book: "Книга",
   "book-chapter": "Глава книги",
   "book-section": "Раздел книги",

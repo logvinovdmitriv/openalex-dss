@@ -3,9 +3,21 @@ name = "openalex-dss-indices"
 version = "0.1.0"
 description = "Reproducible DSS for author-level scientometric indices on an OpenAlex subject slice."
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+  "duckdb==1.5.2",
+  "fastapi==0.136.1",
+  "polars==1.40.1",
+  "pydantic==2.13.3",
+  "python-multipart==0.0.27",
+  "PyYAML==6.0.3",
+  "uvicorn[standard]==0.46.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.0.3",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-

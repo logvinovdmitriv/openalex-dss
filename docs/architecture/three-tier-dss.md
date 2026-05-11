@@ -21,7 +21,8 @@ tables, passports and report bundles.
 The UI intentionally hides unsupported or noisy filters. It exposes only
 OpenAlex-backed controls: subject object, keyword, institution, affiliation
 mode, publication period, country code from authorship institutions, work type
-`article` / `article|review` / `article|review|conference-paper`, fraction
+`article` / `article|review`; конференционные публикации отбираются через
+source type `conference`, fraction
 mode and ranking metric.
 
 ### Application/domain layer

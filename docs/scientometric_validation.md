@@ -55,7 +55,8 @@ cohort_checksum: 0d5ecb3a73559e74b6d8be304386f62cc0bd0e45222d0e04b5cbff88f945aeb
 fraction_mode: integer
 baseline_metric: h
 rank_top_n: 5
-metrics: p, c, c_frac, h, i10, g, iupv_s
+baseline metrics: p, c, c_frac, h, i10, g
+extension check: iupv_s
 raw_works: 12
 n_authors: 5
 findings: 29

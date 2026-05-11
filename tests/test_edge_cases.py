@@ -21,7 +21,7 @@ import duckdb  # noqa: E402
 from app.services import custom_metrics  # noqa: E402
 from openalex_dss.config import load_config, replace_config
 from openalex_dss.io_utils import read_table_dicts, write_parquet_dicts
-from openalex_dss.metrics import build_author_work_metrics, compute_indices
+from openalex_dss.metrics import assign_iupv_percentiles, build_author_work_metrics, compute_indices
 from openalex_dss.normalize import normalize_raw
 from openalex_dss.openalex import build_filter, download_consistency, estimate_works
 from openalex_dss.passports import build_passports
@@ -153,6 +153,47 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertAlmostEqual(by_mode["integer"]["rfi_log_frac"], math.log1p(100.0))
         self.assertGreater(by_mode["integer"]["rfi_log_frac"], by_mode["strict_authors_count"]["rfi_log_frac"])
 
+    def test_iupv_percentiles_are_scoped_by_run_and_fraction_mode(self) -> None:
+        def row(run_id: str, author_id: str, rfi: float) -> dict[str, object]:
+            return {
+                "run_id": run_id,
+                "fraction_mode": "integer",
+                "author_id": author_id,
+                "p": 1,
+                "h": 1,
+                "c_frac": 1,
+                "g": 1,
+                "i10": 1,
+                "rfi_log_frac": rfi,
+                "top1_share": 0,
+            }
+
+        rows = [
+            row("run_1", "A1", 9.0),
+            row("run_1", "A2", 0.0),
+            row("run_2", "B1", 1.0),
+            row("run_2", "B2", 2.0),
+        ]
+        assign_iupv_percentiles(rows)
+        by_author = {str(item["author_id"]): item for item in rows}
+        self.assertAlmostEqual(float(by_author["A1"]["iupv_s"]), 100.0)
+        self.assertEqual(float(by_author["A2"]["iupv_s"]), 0.0)
+        self.assertAlmostEqual(float(by_author["B1"]["iupv_s"]), 50.0)
+        self.assertAlmostEqual(float(by_author["B2"]["iupv_s"]), 100.0)
+
+    def test_normalized_strict_weight_uses_reported_author_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = _work("WREPORTED", "A1", 10)
+            work["authors_count"] = 10
+            raw = root / "raw.jsonl"
+            raw.write_text(json.dumps(work, ensure_ascii=False) + "\n", encoding="utf-8")
+            normalize_raw(raw, root / "works.csv", root / "auth.csv", root / "quality.json")
+            authorships = read_table_dicts(root / "auth.csv")
+
+        self.assertEqual(len(authorships), 1)
+        self.assertAlmostEqual(float(authorships[0]["frac_weight_strict"]), 0.1)
+
     def test_custom_rfi_percentile_matches_builtin_iupv_s_python_and_duckdb(self) -> None:
         definitions = custom_metrics.parse_custom_metrics(
             [
@@ -276,8 +317,8 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertEqual(a1["i10"], 1)
             self.assertAlmostEqual(a1["m_local"], 2.0)
             self.assertAlmostEqual(a1["top1_share"], 12 / 17)
-            self.assertEqual(a1["f5"], 2.0)
-            self.assertEqual(a1["fm5"], 2.0)
+            self.assertEqual(a1["n_cited5"], 2.0)
+            self.assertEqual(a1["frac_cited5"], 2.0)
             self.assertAlmostEqual(a1["pci"], 100.0 * (0.5 ** (1.0 / 3.0)))
             self.assertNotIn("i" + "upv", a1)
             self.assertGreater(a1["islv"], 0.0)
@@ -397,10 +438,10 @@ class EdgeCaseTests(unittest.TestCase):
     def test_openalex_filter_accepts_pipe_separated_work_types(self) -> None:
         cfg = replace_config(
             load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"),
-            work_type="article|review|conference-paper",
+            work_type="article|review",
         )
         query = build_filter(cfg)
-        self.assertIn("type:article|review|conference-paper", query)
+        self.assertIn("type:article|review", query)
 
     def test_estimate_works_uses_sample_and_facets_without_network(self) -> None:
         cfg = replace_config(load_config(Path(__file__).resolve().parents[1] / "config/slice.yaml"))

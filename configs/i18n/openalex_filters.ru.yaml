@@ -33,7 +33,7 @@ filters:
   work_type:
     label: "Тип публикации"
     short_label: "Тип"
-    description: "Ограничивает срез типами работ OpenAlex, например article, review или conference-paper."
+    description: "Ограничивает срез типами работ OpenAlex, например article или review. Конференционные публикации отделяйте через source type = conference."
   from_publication_date:
     label: "Дата публикации от"
     short_label: "Дата от"

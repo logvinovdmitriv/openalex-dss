@@ -286,7 +286,8 @@ def normalize_raw(
                         )
                     )
                     author_country_count += 1
-                strict_weight = 1.0 / raw_count if raw_count > 0 else None
+                strict_denominator = authors_count_reported or raw_count
+                strict_weight = 1.0 / strict_denominator if strict_denominator > 0 else None
                 renorm_weight = 1.0 / valid_count if valid_count > 0 and not (qf_null or qf_deleted) else None
 
                 authorship_writer.writerow(

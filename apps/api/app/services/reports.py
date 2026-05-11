@@ -15,7 +15,7 @@ from app.services.analysis_filters import clean_analysis_filters
 
 REPORT_BUNDLE_SCHEMA = "report_bundle"
 REPORT_SCOPE_SCHEMA = "report_scope"
-DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "iupv_s")
+DEFAULT_REPORT_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g")
 REPORT_BUNDLE_KEEP = 5
 
 
@@ -307,7 +307,7 @@ def build_report_bundle(
             "pci_percentile_composite_formula": "100 * (pr(P) * pr(h) * pr(C_frac)) ** (1/3)",
             "iupv_s_formula": "100 * percentile_rank(sum(log1p(cited_credit)))",
             "islv_formula": "100 * weighted_geomean(pr(h), pr(C_frac), pr(g), pr(i10), pr(P)) * (1 - lambda * max(0, top1_share - tau))",
-            "polyanin_status": "f5/fm5 are operational threshold metrics until a primary source definition is confirmed.",
+            "threshold5_status": "n_cited5/frac_cited5 are operational threshold diagnostics, not Polyanin top-5 indices.",
         },
     }
     _write_report_bundle(run_id, scope_hash, report)

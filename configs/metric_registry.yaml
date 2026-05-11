@@ -73,7 +73,7 @@ metrics:
     local_only: true
     visible: false
     warning: "Промежуточное поле для IUPV-S: учитывает все работы автора, долевой вклад и сглаживание citation outliers."
-  - metric_id: "f5"
+  - metric_id: "n_cited5"
     label: "Работы с 5+ цитированиями"
     group: "Дополнительные показатели"
     formula: "count(works where cited_by_count >= 5)"
@@ -81,7 +81,7 @@ metrics:
     local_only: true
     visible: false
     warning: "Дополнительный пороговый показатель. Он не подается как канонический именованный индекс без подтверждения первоисточником."
-  - metric_id: "fm5"
+  - metric_id: "frac_cited5"
     label: "Долевой вклад в работы с 5+ цитированиями"
     group: "Дополнительные показатели"
     formula: "sum(credit_weight for works where cited_by_count >= 5)"

@@ -3,7 +3,6 @@ from __future__ import annotations
 WORK_TYPE_LABELS = {
     "article": "Статья",
     "review": "Обзор",
-    "conference-paper": "Материалы конференции",
     "book": "Книга",
     "book-chapter": "Глава книги",
     "book-section": "Раздел книги",

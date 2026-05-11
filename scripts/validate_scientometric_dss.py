@@ -20,7 +20,8 @@ DUMP_ID = "validation_fixture_dump"
 FRACTION_MODE = "integer"
 BASELINE_METRIC = "h"
 RANK_TOP_N = 5
-METRICS = ["p", "c", "c_frac", "h", "i10", "g", "iupv_s"]
+METRICS = ["p", "c", "c_frac", "h", "i10", "g"]
+EXTENSION_METRICS = ["iupv_s"]
 REQUIRED_INDEX_FIELDS = ["rfi_log_frac", "iupv_s"]
 
 
@@ -98,6 +99,12 @@ def main() -> None:
         "top_n": RANK_TOP_N,
     }
     payload = scientometrics.build_scientometric_analysis(**analysis_kwargs)
+    extension_payload = scientometrics.build_scientometric_analysis(
+        **{
+            **analysis_kwargs,
+            "metrics": [*METRICS, *EXTENSION_METRICS],
+        }
+    )
     report = reports.build_report_bundle(
         metric=BASELINE_METRIC,
         fraction_mode=FRACTION_MODE,
@@ -155,6 +162,7 @@ def main() -> None:
         "baseline_metric": BASELINE_METRIC,
         "rank_top_n": RANK_TOP_N,
         "metrics": METRICS,
+        "extension_metrics": EXTENSION_METRICS,
         "required_index_fields": REQUIRED_INDEX_FIELDS,
         "raw_works": 12,
         "n_authors": payload["n_authors"],
@@ -171,6 +179,7 @@ def main() -> None:
     _assert_validation_invariants(
         manifest=manifest,
         payload=payload,
+        extension_payload=extension_payload,
         report=report,
         build=build,
         cohort=cohort,
@@ -376,6 +385,7 @@ def _assert_validation_invariants(
     *,
     manifest: dict[str, Any],
     payload: dict[str, Any],
+    extension_payload: dict[str, Any],
     report: dict[str, Any],
     build: dict[str, Any],
     cohort: dict[str, Any],
@@ -405,9 +415,13 @@ def _assert_validation_invariants(
     _require(manifest["conclusion_schema"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_SCHEMA, "conclusion schema mismatch")
     _require(payload["conclusion_draft"]["schema"] == scientometrics_module.SCIENTOMETRIC_CONCLUSION_SCHEMA, "payload conclusion schema mismatch")
     _require(scope.get("data_scope") == "full_filtered_slice", "analysis must use full filtered slice scope")
-    _require("iupv_s" in payload.get("metrics", []), "validation analysis must include iupv_s")
+    _require("iupv_s" not in payload.get("metrics", []), "baseline validation analysis must not include iupv_s")
     _require("c_frac" in payload.get("metrics", []), "validation analysis must include c_frac")
-    _require(any(finding.get("metric") == "iupv_s" for finding in payload.get("findings") or []), "missing IUPV-S candidate finding")
+    _require("iupv_s" in extension_payload.get("metrics", []), "extension validation analysis must include iupv_s")
+    _require(
+        any(finding.get("metric") == "iupv_s" for finding in extension_payload.get("findings") or []),
+        "missing IUPV-S candidate finding in extension validation",
+    )
     _assert_iupv_s_tables(Path(manifest["data_dir"]))
     _require(build["analysis_eligibility"]["allowed_for_final_analysis"] is False, "validation fixture must not be eligible for final analysis")
     _require(bool(report["exports"]["scientometrics_conclusion_md"]), "report bundle is missing conclusion Markdown export")
@@ -448,7 +462,8 @@ def _assert_iupv_s_tables(data_dir: Path) -> None:
     _require(positive_iupv, "at least one validation author must have positive iupv_s")
     with ratings_path.open("r", encoding="utf-8", newline="") as handle:
         rating_metrics = {str(row.get("metric_name") or "") for row in csv.DictReader(handle)}
-    _require("iupv_s" in rating_metrics, "ratings table is missing metric_name=iupv_s")
+    for metric in METRICS:
+        _require(metric in rating_metrics, f"ratings table is missing baseline metric_name={metric}")
 
 
 def _float(value: Any) -> float:

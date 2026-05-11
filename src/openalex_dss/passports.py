@@ -106,13 +106,13 @@ def build_passports(
     }
     indices = ["p", "c", "c_frac", "h", "i10", "g"]
     support_indices = ["cpp", "m_local", "top1_share", "rfi_log_frac"]
-    experimental_indices = ["f5", "fm5", "pci", "iupv_s", "iupv_sb", "islv", "lrdi"]
+    experimental_indices = ["n_cited5", "frac_cited5", "pci", "iupv_s", "iupv_sb", "islv", "lrdi"]
     extra_formula = {
         "threshold_5_citation_indicators": {
             "status": "extension_not_core_baseline",
             "threshold": 5,
-            "f5": "count(works where cited_by_count >= 5)",
-            "fm5": "sum(credit_weight for works where cited_by_count >= 5)",
+            "n_cited5": "count(works where cited_by_count >= 5)",
+            "frac_cited5": "sum(credit_weight for works where cited_by_count >= 5)",
         },
         "pci_percentile_composite": {
             "metric_id": "pci",

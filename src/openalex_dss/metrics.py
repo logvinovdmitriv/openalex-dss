@@ -44,8 +44,8 @@ AUTHOR_INDEX_FIELDS = [
     "m_local",
     "top1_share",
     "rfi_log_frac",
-    "f5",
-    "fm5",
+    "n_cited5",
+    "frac_cited5",
     "pci",
     "iupv_s",
     "iupv_sb",
@@ -119,10 +119,10 @@ def islv_from_percentiles(
     return 100.0 * geometric * max(0.0, min(1.0, concentration_penalty))
 
 
-def assign_iupv_percentiles(rows: list[dict[str, Any]], group_field: str = "fraction_mode") -> None:
-    groups: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+def assign_iupv_percentiles(rows: list[dict[str, Any]], group_fields: tuple[str, ...] = ("run_id", "fraction_mode")) -> None:
+    groups: defaultdict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        groups[str(row.get(group_field) or "")].append(row)
+        groups[tuple(str(row.get(field) or "") for field in group_fields)].append(row)
 
     for group in groups.values():
         percentile_maps = {
@@ -625,8 +625,8 @@ def _index_row(
     g = g_index(citations)
     publication_years = [as_int(row.get("publication_year")) for row in group if as_int(row.get("publication_year")) > 0]
     local_age = max(publication_years) - min(publication_years) + 1 if publication_years else 1
-    f5_value = _f5(group)
-    fm5_value = _fm5(group)
+    n_cited5_value = _n_cited5(group)
+    frac_cited5_value = _frac_cited5(group)
     rfi_log_frac = float(sum(math.log1p(max(0.0, value)) for value in cited_credits))
     return {
         "run_id": run_id,
@@ -643,8 +643,8 @@ def _index_row(
         "m_local": h / max(1, local_age),
         "top1_share": (max(citations) / c) if c > 0 and citations else 0.0,
         "rfi_log_frac": rfi_log_frac,
-        "f5": f5_value,
-        "fm5": fm5_value,
+        "n_cited5": n_cited5_value,
+        "frac_cited5": frac_cited5_value,
         "pci": 0.0,
         "iupv_s": 0.0,
         "iupv_sb": 0.0,
@@ -667,11 +667,11 @@ def _denominator(mode: str, raw_count: int, valid_count: int, reported_count: in
     raise ValueError(f"Unsupported fraction mode: {mode}")
 
 
-def _f5(group: list[dict[str, str]]) -> float:
+def _n_cited5(group: list[dict[str, str]]) -> float:
     return float(sum(1 for row in group if as_int(row["cited_by_count"]) >= 5))
 
 
-def _fm5(group: list[dict[str, str]]) -> float:
+def _frac_cited5(group: list[dict[str, str]]) -> float:
     return float(sum(as_float(row["credit_weight"]) for row in group if as_int(row["cited_by_count"]) >= 5))
 
 

@@ -75,9 +75,13 @@ def collect_work_ids_cursor(
 
     params = _cursor_params(cfg, api_key=api_key, select_fields=("id",))
     cursor = "*"
+    seen_cursors: set[str] = set()
     ids: list[str] = []
     total = 0
     while cursor:
+        if cursor in seen_cursors:
+            raise RuntimeError(f"OpenAlex cursor did not advance while collecting work IDs: {cursor}")
+        seen_cursors.add(cursor)
         if cancel_callback and cancel_callback():
             break
         payload = _get_json(API_BASE, {**params, "cursor": cursor})
@@ -105,7 +109,10 @@ def collect_work_ids_cursor(
                 }
             )
         if cursor:
-            cursor = str(meta.get("next_cursor") or "")
+            next_cursor = str(meta.get("next_cursor") or "")
+            if next_cursor and next_cursor == cursor:
+                raise RuntimeError(f"OpenAlex cursor did not advance while collecting work IDs: {cursor}")
+            cursor = next_cursor
     return ids
 
 
@@ -190,8 +197,12 @@ def _download_query(
     bytes_written = int(checkpoint.get("bytes_written") or 0) if resume_allowed else 0
     stop_reason = "api_completed"
     mode = "at" if resume_allowed else "wt"
+    seen_cursors: set[str] = set()
     with gzip.open(raw_path, mode, encoding="utf-8", newline="\n") as handle:
         while cursor:
+            if cursor in seen_cursors:
+                raise RuntimeError(f"OpenAlex cursor did not advance while downloading Works: {cursor}")
+            seen_cursors.add(cursor)
             if cancel_callback and cancel_callback():
                 stop_reason = "user_cancelled"
                 _write_checkpoint(
@@ -241,7 +252,19 @@ def _download_query(
                     stop_reason=stop_reason,
                 )
                 break
-            cursor = str(meta.get("next_cursor") or "")
+            next_cursor = str(meta.get("next_cursor") or "")
+            if next_cursor and next_cursor == cursor:
+                _write_checkpoint(
+                    checkpoint_path,
+                    status="in_progress",
+                    next_cursor=next_cursor,
+                    records_downloaded=records,
+                    records_expected=total,
+                    bytes_written=bytes_written,
+                    stop_reason="cursor_not_advanced",
+                )
+                raise RuntimeError(f"OpenAlex cursor did not advance while downloading Works: {cursor}")
+            cursor = next_cursor
             _write_checkpoint(
                 checkpoint_path,
                 status="in_progress" if cursor else "complete",

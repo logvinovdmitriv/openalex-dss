@@ -24,7 +24,7 @@ DEFAULT_SCIENTOMETRIC_METRICS = (
 )
 CORE_METRIC_IDS = ("p", "c", "c_frac", "h", "i10", "g")
 DIAGNOSTIC_METRIC_IDS = ("cpp", "m_local", "top1_share", "rfi_log_frac", "mean_authors_per_work", "share_single_authored", "n_flagged_works", "n_truncated_works")
-EXPERIMENTAL_METRIC_IDS = ("f5", "fm5", "pci", "iupv_s", "iupv_sb", "islv", "lrdi")
+EXPERIMENTAL_METRIC_IDS = ("n_cited5", "frac_cited5", "pci", "iupv_s", "iupv_sb", "islv", "lrdi")
 BASELINE_ANALYSIS_PROTOCOL = {
     "protocol_id": "baseline_core_protocol",
     "baseline_metric": "h",
@@ -1320,8 +1320,8 @@ def _metric_label(metric: str) -> str:
         "m_local": "Индекс m внутри среза",
         "top1_share": "Доля цитирований самой цитируемой работы",
         "rfi_log_frac": "RFI: логарифмический долевой вклад",
-        "f5": "Работы с 5+ цитированиями",
-        "fm5": "Долевой вклад в работы с 5+ цитированиями",
+        "n_cited5": "Работы с 5+ цитированиями",
+        "frac_cited5": "Долевой вклад в работы с 5+ цитированиями",
         "pci": "PCI: процентильный композит",
         "iupv_s": "IUPV-S: робастный долевой вклад",
         "iupv_sb": "IUPV-SB: баланс публикаций и вклада",

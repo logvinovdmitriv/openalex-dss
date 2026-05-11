@@ -45,6 +45,8 @@ class RepositoryHygieneTests(unittest.TestCase):
             "extra_" + "previous",
             "iupv_" + "n0",
             "iupv_" + "lambda",
+            "conference-" + "paper",
+            "custom_" + "iupv_s",
         )
         files = subprocess.check_output(["git", "ls-files"], cwd=ROOT, text=True).splitlines()
         violations: list[str] = []
