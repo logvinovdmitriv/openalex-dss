@@ -118,13 +118,15 @@ export function buildDownloadedSliceRows(downloadedDumps: WorkbenchDump[]): Down
       const dumpId = String(dump?.dump_id ?? "").trim();
       const sliceId = String(dump?.slice_id ?? "").trim();
       const records = Number(dump?.records_downloaded ?? 0);
-      const mb = bytesToMb(Number(dump?.bytes_written ?? dump?.raw_size_bytes ?? 0));
+      const storageSummary = (dump?.storage ?? dump?.storage_summary ?? {}) as Record<string, unknown>;
+      const fullLocalBytes = Number(storageSummary?.total_known_bytes ?? storageSummary?.raw_package_bytes ?? dump?.bytes_written ?? dump?.raw_size_bytes ?? 0);
+      const mb = bytesToMb(fullLocalBytes);
       const updated = String(dump?.updated_at_utc ?? dump?.created_at_utc ?? dump?.created_at ?? "").trim();
       const health = dumpHealth(dump);
       const disabled = health.status === "broken" || health.status === "needs_repair";
       const detail = [
         records ? `${fmt(records)} работ` : "",
-        Number.isFinite(mb) && mb > 0 ? `${fmt(mb)} МБ` : "",
+        Number.isFinite(mb) && mb > 0 ? `${fmt(mb)} МБ локально` : "",
         updated ? `обновлен: ${updated}` : "",
         health.reason && health.tone !== "ok" ? health.reason : "",
       ].filter(Boolean).join(" · ") || "локальные файлы готовы";
@@ -279,12 +281,12 @@ export function DumpInfoModal({ dump, onClose }: { dump: WorkbenchDump; onClose:
           <KeyValue label="Идентификатор среза" value={String(dump?.dump_id ?? "—")} />
           <KeyValue label="Работ" value={fmt(Number(dump?.records_downloaded ?? 0))} />
           <KeyValue label="Ожидалось работ" value={dump?.records_expected ? fmt(Number(dump.records_expected)) : "—"} />
-          <KeyValue label="Пакет загрузки" value={`${fmt(bytesToMb(Number(storageSummary?.download_base_bytes ?? storageSummary?.raw_bytes ?? dump?.bytes_written ?? 0)))} МБ`} />
-          <KeyValue label="Размер файла среза" value={`${fmt(bytesToMb(Number(storageSummary?.raw_package_bytes ?? dump?.bytes_written ?? 0)))} МБ`} />
+          <KeyValue label="Папка загрузчика" value={`${fmt(bytesToMb(Number(storageSummary?.download_base_bytes ?? storageSummary?.raw_bytes ?? dump?.bytes_written ?? 0)))} МБ`} />
+          <KeyValue label="Архив OpenAlex" value={`${fmt(bytesToMb(Number(storageSummary?.raw_package_bytes ?? dump?.bytes_written ?? 0)))} МБ`} />
           <KeyValue label="Размер таблиц" value={`${fmt(bytesToMb(Number(storageSummary?.tables_bytes ?? 0)))} МБ`} />
           <KeyValue label="Кэш аналитики" value={`${fmt(bytesToMb(Number(storageSummary?.analytics_cache_bytes ?? 0)))} МБ`} />
-          <KeyValue label="Всего для этого среза" value={`${fmt(bytesToMb(Number(storageSummary?.total_known_bytes ?? dump?.bytes_written ?? 0)))} МБ`} />
-          <KeyValue label="Все хранилище" value={`${fmt(bytesToMb(Number(storageSummary?.data_root_bytes ?? 0)))} МБ`} />
+          <KeyValue label="Полный локальный объем среза" value={`${fmt(bytesToMb(Number(storageSummary?.total_known_bytes ?? dump?.bytes_written ?? 0)))} МБ`} />
+          <KeyValue label="Все хранилище DSS" value={`${fmt(bytesToMb(Number(storageSummary?.data_root_bytes ?? 0)))} МБ`} />
           <KeyValue label="Скачан" value={String(dump?.created_at_utc ?? dump?.download_finished_at_utc ?? "—")} />
           <KeyValue label="Время загрузки" value={dump?.elapsed_seconds ? `${fmt(Number(dump.elapsed_seconds))} сек.` : "—"} />
           <KeyValue label="Полнота" value={dumpCompletenessLabel(String(dump?.scientific_completeness ?? ""))} />
@@ -294,9 +296,10 @@ export function DumpInfoModal({ dump, onClose }: { dump: WorkbenchDump; onClose:
           <KeyValue label="Финальный анализ" value={dump?.allowed_for_final_analysis ? "доступен" : "только предварительный"} />
           <KeyValue label="Индексы" value={dump?.health?.indices_ready ? "рассчитаны" : "не рассчитаны"} />
         </div>
+        <p className="field-hint">Архив OpenAlex — это сжатый raw-файл works.jsonl.gz. Полный локальный объем среза дополнительно включает таблицы, индексы, рейтинги, паспорта и кэш аналитики.</p>
         <div className="key-grid">
-          <KeyValue label="Папка загрузки" value={String(storageSummary?.download_base_path ?? storage?.download_base_dir ?? "—")} />
-          <KeyValue label="Файл среза" value={rawPath || "—"} />
+          <KeyValue label="Папка загрузчика" value={String(storageSummary?.download_base_path ?? storage?.download_base_dir ?? "—")} />
+          <KeyValue label="Путь к архиву OpenAlex" value={rawPath || "—"} />
           <KeyValue label="Папка файлов OpenAlex" value={String(dump?.cli_files_dir ?? storage?.cli_output_dir ?? "—")} />
           <KeyValue label="Паспорт загрузки" value={manifestPath || "—"} />
           <KeyValue label="Список файлов" value={String(dump?.files_manifest ?? "—")} />

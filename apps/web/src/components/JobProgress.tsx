@@ -88,9 +88,9 @@ export function RunCard({ run }: { run: WorkbenchRun }) {
           {downloadingExternalFiles && targetWorks > 0 && <span>Ожидается до упаковки: {fmt(targetWorks)} работ</span>}
           {details.page_count ? <span>{fmt(details.page_count)} страниц</span> : null}
           {details.files_seen ? <span>{filesSeenLabel}</span> : null}
-          {hasFilesCounter ? <span>{fmt(bytesToMb(Number(details.bytes_written ?? 0)))} МБ временных файлов</span> : null}
-          {finalRawBytes > 0 ? <span>Файл среза: {fmt(bytesToMb(finalRawBytes))} МБ</span> : null}
-          {plannedBytes > 0 ? <span>Ориентир загрузки: {fmt(bytesToMb(plannedBytes))} МБ</span> : null}
+          {hasFilesCounter ? <span>{fmt(bytesToMb(Number(details.bytes_written ?? 0)))} МБ временных файлов загрузчика</span> : null}
+          {finalRawBytes > 0 ? <span>Архив OpenAlex: {fmt(bytesToMb(finalRawBytes))} МБ</span> : null}
+          {plannedBytes > 0 ? <span>Ориентир временной загрузки: {fmt(bytesToMb(plannedBytes))} МБ</span> : null}
           {details.elapsed_seconds ? <span>{formatElapsed(details.elapsed_seconds)}</span> : null}
         </div>
       )}

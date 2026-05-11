@@ -1246,7 +1246,7 @@ function SlicesPage({
           <div>
             <span className="step-badge">Оценка и получение данных</span>
             <h2>План локального среза</h2>
-            <p>Система оценивает объем через OpenAlex API, а уже скачанные срезы выбираются без API. Для новой загрузки установленный загрузчик OpenAlex требует ключ.</p>
+            <p>Система оценивает объем через OpenAlex API, а уже скачанные срезы выбираются без API. Для новой загрузки выбранный способ получения данных может требовать ключ OpenAlex.</p>
           </div>
           <button onClick={() => onEstimate(true)} disabled={estimating || dateInvalid || subjectMissing}>{estimating ? <Loader2 size={16} className="spin" /> : <Gauge size={16} />} {estimating ? "Оцениваем..." : "Обновить оценку"}</button>
         </div>
@@ -1254,9 +1254,9 @@ function SlicesPage({
           <MetricCard label="Работ найдено" value={hasEstimate ? fmt(rawEstimate?.estimate_count ?? 0) : "—"} />
           <MetricCard label="Полный срез / к загрузке" value={hasEstimate ? `${fmt(rawEstimate?.estimate_count ?? 0)} / ${fmt(decision.records_to_fetch ?? rawEstimate?.planned_records ?? 0)}` : "—"} />
           <MetricCard label="API-запросов" value={hasEstimate ? fmt(decision.api_requests_planned ?? rawEstimate?.api_requests_planned ?? 0) : "—"} />
-          <MetricCard label="Прогноз загрузки" value={hasEstimate ? `${fmt(rawEstimate?.estimated_cli_metadata_mb ?? decision.estimated_raw_mb ?? rawEstimate?.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
-          <MetricCard label="Прогноз предпросмотра" value={hasEstimate ? `${fmt(rawEstimate?.estimated_selected_api_mb ?? rawEstimate?.estimated_raw_mb ?? 0)}–${fmt(rawEstimate?.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
-          <MetricCard label="Parquet прогноз" value={hasEstimate ? `${fmt(rawEstimate?.estimated_parquet_mb ?? 0)} МБ` : emptyEstimateValue} />
+          <MetricCard label="Прогноз полных метаданных" value={hasEstimate ? `${fmt(rawEstimate?.estimated_cli_metadata_mb ?? decision.estimated_raw_mb ?? rawEstimate?.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
+          <MetricCard label="Прогноз предпросмотра API" value={hasEstimate ? `${fmt(rawEstimate?.estimated_selected_api_mb ?? rawEstimate?.estimated_raw_mb ?? 0)}–${fmt(rawEstimate?.estimated_raw_mb_p90 ?? decision.estimated_raw_mb ?? 0)} МБ` : emptyEstimateValue} />
+          <MetricCard label="Прогноз таблиц Parquet" value={hasEstimate ? `${fmt(rawEstimate?.estimated_parquet_mb ?? 0)} МБ` : emptyEstimateValue} />
           <MetricCard label="Кэш оценки" value={hasEstimate ? estimateCacheLabel(String(estimateCache.status ?? "")) : "—"} />
         </div>
         <EstimateBudget estimate={rawEstimate} decision={decision} />
@@ -1284,7 +1284,7 @@ function SlicesPage({
           </span>
           <Field label="Ключ OpenAlex для новой загрузки">
             <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Введите ключ OpenAlex" />
-            <small className="field-hint">Ключ нужен только для новой загрузки через OpenAlex CLI. Он не требуется для выбора, просмотра, восстановления и пересчета уже скачанных локальных срезов.</small>
+            <small className="field-hint">Ключ нужен только для новой загрузки через OpenAlex API/CLI. Он не требуется для выбора, просмотра, восстановления, локального сканирования snapshot и пересчета уже скачанных локальных срезов.</small>
           </Field>
         </section>
         {[...(decision.reasons ?? []), ...(decision.warnings ?? [])].length > 0 && (

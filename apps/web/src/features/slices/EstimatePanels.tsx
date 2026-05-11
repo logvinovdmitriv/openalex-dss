@@ -38,7 +38,7 @@ export function EstimateBudget({ estimate, decision }: { estimate?: EstimateValu
   return (
     <div className="estimate-budget">
       <div className="progress-meta">
-        <span>Прогноз: предпросмотр {fmt(bytesToMb(avg))} МБ, загрузка {fmt(bytesToMb(p90))} МБ</span>
+        <span>Оценка объема API: предпросмотр {fmt(bytesToMb(avg))} МБ, полные метаданные {fmt(bytesToMb(p90))} МБ</span>
         <b>{decision?.status ?? "estimate"}</b>
       </div>
       <div className="budget-track" aria-label={`Средний прогноз ${avgPct}%, p90 ${p90Pct}%`}>
@@ -85,4 +85,3 @@ function FacetBars({ title, rows }: { title: string; rows: Array<{ key?: string;
     </section>
   );
 }
-

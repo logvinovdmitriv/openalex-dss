@@ -15,6 +15,34 @@ def test_frontend_progress_component_uses_structured_phases() -> None:
     assert "Расчет индексов" in component
 
 
+def test_slice_storage_labels_distinguish_archive_and_local_footprint() -> None:
+    progress = (ROOT / "apps/web/src/components/JobProgress.tsx").read_text(encoding="utf-8")
+    downloaded = (ROOT / "apps/web/src/features/slices/DownloadedSlices.tsx").read_text(encoding="utf-8")
+    estimate = (ROOT / "apps/web/src/features/slices/EstimatePanels.tsx").read_text(encoding="utf-8")
+    main = (ROOT / "apps/web/src/WorkbenchApp.tsx").read_text(encoding="utf-8")
+
+    assert "Архив OpenAlex" in progress
+    assert "Ориентир временной загрузки" in progress
+    assert "Файл среза:" not in progress
+    assert "Ориентир загрузки" not in progress
+
+    assert "total_known_bytes" in downloaded
+    assert "raw_package_bytes" in downloaded
+    assert "Полный локальный объем среза" in downloaded
+    assert "Все хранилище DSS" in downloaded
+    assert "Путь к архиву OpenAlex" in downloaded
+    assert "Пакет загрузки" not in downloaded
+    assert "Размер файла среза" not in downloaded
+
+    assert "Оценка объема API" in estimate
+    assert "полные метаданные" in estimate
+    assert "raw/API" not in estimate
+
+    assert "Прогноз полных метаданных" in main
+    assert "Прогноз загрузки" not in main
+    assert "установленный загрузчик OpenAlex требует ключ" not in main
+
+
 def test_workbench_uses_scope_and_data_selection_hooks() -> None:
     main = (ROOT / "apps/web/src/WorkbenchApp.tsx").read_text(encoding="utf-8")
     assert "useWorkbenchScope" in main

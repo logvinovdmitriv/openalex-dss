@@ -309,12 +309,21 @@ def apply_estimate_calibration(storage_estimate: dict[str, Any], estimate: dict[
 
 
 def record_estimate_calibration(dump_manifest: dict[str, Any], estimate: dict[str, Any]) -> None:
-    actual = int(dump_manifest.get("bytes_written") or 0)
-    estimated = int(dump_manifest.get("estimated_raw_bytes") or estimate.get("estimated_cli_metadata_bytes") or estimate.get("estimated_raw_bytes") or 0)
+    raw_package_bytes = _manifest_raw_package_bytes(dump_manifest)
+    download_base_bytes = _manifest_download_base_bytes(dump_manifest)
+    actual = download_base_bytes or raw_package_bytes or int(dump_manifest.get("bytes_written") or 0)
+    estimated_selected_api_bytes = int(estimate.get("estimated_selected_api_bytes") or estimate.get("estimated_raw_bytes") or 0)
+    estimated_full_metadata_bytes = int(
+        estimate.get("estimated_cli_metadata_bytes")
+        or dump_manifest.get("estimated_raw_bytes")
+        or estimate.get("estimated_raw_bytes")
+        or 0
+    )
+    estimated = estimated_full_metadata_bytes or estimated_selected_api_bytes
     if actual <= 0 or estimated <= 0:
         return
     record = {
-        "schema": "download_estimate_calibration_v1",
+        "schema": "download_estimate_calibration_v2",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "slice_id": dump_manifest.get("slice_id"),
         "dump_id": dump_manifest.get("dump_id"),
@@ -323,6 +332,15 @@ def record_estimate_calibration(dump_manifest: dict[str, Any], estimate: dict[st
         "records_downloaded": dump_manifest.get("records_downloaded"),
         "estimated_bytes": estimated,
         "actual_bytes": actual,
+        "actual_bytes_kind": "download_base_or_archive",
+        "actual_raw_package_bytes": raw_package_bytes,
+        "actual_download_base_bytes": download_base_bytes,
+        "estimated_selected_api_bytes": estimated_selected_api_bytes,
+        "estimated_full_metadata_bytes": estimated_full_metadata_bytes,
+        "estimated_final_raw_jsonl_gz_bytes": _byte_estimate_value(estimate, "final_raw_jsonl_gz"),
+        "estimated_parquet_tables_bytes": _byte_estimate_value(estimate, "parquet_tables"),
+        "estimated_cli_temp_peak_bytes": _byte_estimate_value(estimate, "cli_temp_files_peak"),
+        "estimated_recommended_free_space_bytes": _byte_estimate_value(estimate, "recommended_free_space"),
         "ratio": round(actual / estimated, 6),
         "estimate_signature": estimate.get("estimate_signature") or ((dump_manifest.get("signatures") or {}).get("estimate_signature")),
         "download_signature": estimate.get("download_signature") or ((dump_manifest.get("signatures") or {}).get("download_signature")),
@@ -331,6 +349,41 @@ def record_estimate_calibration(dump_manifest: dict[str, Any], estimate: dict[st
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _byte_estimate_value(estimate: dict[str, Any], key: str) -> int:
+    byte_estimate = estimate.get("byte_estimate") if isinstance(estimate.get("byte_estimate"), dict) else {}
+    section = byte_estimate.get(key) if isinstance(byte_estimate.get(key), dict) else {}
+    return int(section.get("p90_bytes") or section.get("bytes") or 0)
+
+
+def _manifest_raw_package_bytes(dump_manifest: dict[str, Any]) -> int:
+    raw_jsonl = str(dump_manifest.get("raw_jsonl") or "")
+    if raw_jsonl:
+        try:
+            size = Path(raw_jsonl).stat().st_size
+            if size > 0:
+                return int(size)
+        except OSError:
+            pass
+    return int(dump_manifest.get("bytes_written") or 0)
+
+
+def _manifest_download_base_bytes(dump_manifest: dict[str, Any]) -> int:
+    storage_plan = dump_manifest.get("storage_plan") if isinstance(dump_manifest.get("storage_plan"), dict) else {}
+    raw_jsonl = str(dump_manifest.get("raw_jsonl") or "")
+    explicit = str(storage_plan.get("download_base_dir") or "").strip()
+    path = Path(explicit) if explicit else Path(raw_jsonl).parent if raw_jsonl else None
+    if path is None or not path.exists() or not path.is_dir():
+        return 0
+    total = 0
+    try:
+        for child in path.rglob("*"):
+            if child.is_file():
+                total += child.stat().st_size
+    except OSError:
+        return 0
+    return int(total)
 
 
 def _calibration_summary() -> dict[str, Any]:
