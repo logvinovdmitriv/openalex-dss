@@ -4,7 +4,6 @@ import ast
 import json
 import math
 import re
-from bisect import bisect_right
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -116,8 +115,8 @@ def apply_custom_metrics(rows: list[dict[str, Any]], definitions: list[dict[str,
     context_names = sorted({name for _, expression in compiled for name in _expression_names(expression)})
     out: list[dict[str, Any]] = []
     for row in rows:
+        context = _row_context(row, percentile_maps, context_names)
         next_row = dict(row)
-        context = _row_context(next_row, percentile_maps, context_names)
         for definition, expression in compiled:
             metric_id = definition["id"]
             try:
@@ -246,9 +245,11 @@ def duckdb_percentile_expressions(definitions: list[dict[str, str]] | None, avai
             rank_sql = f"RANK() OVER ({ordered_window})"
             tie_partition = ", ".join([*partition_cols, value_sql])
             tie_count_sql = f"COUNT(*) OVER (PARTITION BY {tie_partition})"
-            total_count_sql = f"COUNT(*) OVER ({partition_sql})" if partition_sql else "COUNT(*) OVER ()"
-            average_rank_sql = f"(({rank_sql}) + ({rank_sql}) + ({tie_count_sql}) - 1) / 2.0"
-            expressions.append(f"COALESCE(GREATEST(1e-6, ({average_rank_sql}) / NULLIF({total_count_sql}, 0)), 0.0) AS {alias}")
+            nonpositive_count_sql = f"SUM(CASE WHEN {value_sql} <= 0.0 THEN 1 ELSE 0 END) OVER ({partition_sql})" if partition_sql else f"SUM(CASE WHEN {value_sql} <= 0.0 THEN 1 ELSE 0 END) OVER ()"
+            positive_count_sql = f"SUM(CASE WHEN {value_sql} > 0.0 THEN 1 ELSE 0 END) OVER ({partition_sql})" if partition_sql else f"SUM(CASE WHEN {value_sql} > 0.0 THEN 1 ELSE 0 END) OVER ()"
+            positive_rank_sql = f"(({rank_sql}) - ({nonpositive_count_sql}))"
+            average_rank_sql = f"(({positive_rank_sql}) + ({positive_rank_sql}) + ({tie_count_sql}) - 1) / 2.0"
+            expressions.append(f"CASE WHEN {value_sql} <= 0.0 THEN 0.0 ELSE COALESCE(GREATEST(1e-6, ({average_rank_sql}) / NULLIF({positive_count_sql}, 0)), 0.0) END AS {alias}")
     return expressions
 
 
@@ -463,16 +464,23 @@ def _percentile_rank_map(rows: list[dict[str, Any]], field: str) -> dict[int, fl
         groups[str(row.get("fraction_mode") or "")].append(row)
     out: dict[int, float] = {}
     for group in groups.values():
-        values = sorted(_as_float(row.get(field)) for row in group)
-        n = len(values)
-        if n <= 1:
-            for row in group:
-                out[id(row)] = 1.0
-            continue
         for row in group:
-            value = _as_float(row.get(field))
-            rank = bisect_right(values, value)
-            out[id(row)] = max(0.0, min(1.0, (rank - 1) / (n - 1)))
+            out[id(row)] = 0.0
+        positive = sorted((row for row in group if _as_float(row.get(field)) > 0.0), key=lambda row: (_as_float(row.get(field)), str(row.get("author_id") or "")))
+        n = len(positive)
+        if n <= 0:
+            continue
+        pos = 0
+        while pos < n:
+            end = pos + 1
+            value = _as_float(positive[pos].get(field))
+            while end < n and _as_float(positive[end].get(field)) == value:
+                end += 1
+            average_rank = ((pos + 1) + end) / 2.0
+            percentile = max(1e-6, min(1.0, average_rank / n))
+            for row in positive[pos:end]:
+                out[id(row)] = percentile
+            pos = end
     return out
 
 

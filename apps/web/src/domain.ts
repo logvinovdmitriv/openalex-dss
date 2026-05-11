@@ -1,6 +1,6 @@
-export const METRICS = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "rfi_log_frac", "lrdi", "f5", "fm5", "pci", "iupv", "iupv_s", "iupv_sb", "islv"] as const;
+export const METRICS = ["p", "c", "c_frac", "cpp", "h", "i10", "g", "m_local", "top1_share", "rfi_log_frac", "lrdi", "f5", "fm5", "pci", "iupv_s", "iupv_sb", "islv"] as const;
 export const FRACTION_MODES = ["strict_authors_count", "renorm_valid_authors", "integer"] as const;
-export const TABLES = ["indices", "ratings", "works", "authorships", "work_topics", "author_work"] as const;
+export const TABLES = ["indices", "ratings", "works", "authorships", "work_topics", "author_institutions", "author_countries", "author_work"] as const;
 
 export type Metric = (typeof METRICS)[number];
 export type FractionMode = (typeof FRACTION_MODES)[number];
@@ -191,6 +191,8 @@ const tableLabels: Record<string, string> = {
   works: "Работы OpenAlex",
   authorships: "Авторства",
   work_topics: "Темы работ",
+  author_institutions: "Организации авторов",
+  author_countries: "Страны авторов",
   author_work: "Плоская связь автор-работа",
 };
 
@@ -200,6 +202,8 @@ const tableDescriptions: Record<string, string> = {
   works: "Плоская таблица работ, полученных из OpenAlex.",
   authorships: "Авторства и организации из OpenAlex.",
   work_topics: "Развернутый список OpenAlex topics для локального topics_any.",
+  author_institutions: "Нормализованная связь авторов, работ и организаций для локальной фильтрации.",
+  author_countries: "Нормализованная связь авторов, работ и стран организаций для локальной фильтрации.",
   author_work: "Работа, автор, вклад и качество связи.",
 };
 

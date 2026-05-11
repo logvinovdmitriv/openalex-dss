@@ -840,6 +840,7 @@ def interpretation_findings(
 
 def finding_summary(findings: list[dict[str, Any]], *, metrics: list[str], baseline_metric: str) -> dict[str, Any]:
     has_candidate = any(finding.get("type") == "balanced_candidate_metric" for finding in findings)
+    candidate_metrics = _finding_metrics(findings, "balanced_candidate_metric")
     limitations = [
         {
             "id": finding.get("id"),
@@ -861,13 +862,14 @@ def finding_summary(findings: list[dict[str, Any]], *, metrics: list[str], basel
     if any(finding.get("type") == "rank_instability" for finding in findings):
         discussion_points.append(f"Разобрать крупнейшие сдвиги рангов относительно {_metric_label(baseline_metric)}.")
     if has_candidate:
-        discussion_points.append("Описывать сбалансированный индекс локального вклада как дополнительный исследовательский показатель, а не как автоматически лучший индекс.")
+        discussion_points.append("Описывать авторские кандидатные метрики как дополнительные исследовательские показатели, а не как автоматически лучшие индексы.")
     return {
         "schema": SCIENTOMETRIC_FINDINGS_SCHEMA,
         "n_findings": len(findings),
         "high_count": sum(1 for finding in findings if finding.get("severity") == "high"),
         "medium_count": sum(1 for finding in findings if finding.get("severity") == "medium"),
-        "candidate_metric": "islv" if has_candidate else None,
+        "candidate_metric": candidate_metrics[0] if candidate_metrics else None,
+        "candidate_metrics": candidate_metrics,
         "candidate_metric_claim": "balanced_candidate_not_proven_best" if has_candidate else None,
         "primary_limitations": limitations,
         "recommended_discussion_points": discussion_points,
@@ -1018,15 +1020,16 @@ def conclusion_draft(
         )
 
     if any(finding.get("type") == "balanced_candidate_metric" for finding in findings):
+        candidate_metrics = _finding_metrics(findings, "balanced_candidate_metric")
         paragraphs.append(
             {
                 "role": "candidate_metric",
                 "text": (
-                    "Сбалансированный индекс локального вклада может рассматриваться как дополнительная исследовательская модификация, поскольку объединяет процентильные компоненты, дробное цитирование и штраф концентрации в одной сверхцитируемой работе. "
-                    "Его преимущество следует формулировать только в пределах текущего среза и по указанным критериям, а не как универсальное превосходство."
+                    f"Кандидатные авторские метрики {_metric_list_text(candidate_metrics)} могут рассматриваться как дополнительные исследовательские показатели внутри текущего среза. "
+                    "Их интерпретацию следует подтверждать через связь с базовыми индексами, изменения мест, устойчивость к выбросам и влияние соавторства, а не формулировать как универсальное превосходство."
                 ),
                 "evidence_finding_ids": _finding_ids(findings, "balanced_candidate_metric"),
-                "evidence_metrics": _finding_metrics(findings, "balanced_candidate_metric"),
+                "evidence_metrics": candidate_metrics,
             }
         )
 
@@ -1408,27 +1411,51 @@ def _rank_findings(
 
 
 def _candidate_metric_findings(metrics: list[str], metric_scorecard: dict[str, Any], *, n_authors: int) -> list[dict[str, Any]]:
-    if n_authors <= 0 or "islv" not in metrics:
+    if n_authors <= 0:
         return []
-    scorecard = metric_scorecard.get("islv") or {}
-    return [
-        _finding(
-            id="balanced_candidate:islv",
-            type="balanced_candidate_metric",
-            metric="islv",
-            severity="informational",
-            evidence={
-                "uses_percentile_components": True,
-                "uses_fractional_citations": True,
-                "uses_top1_penalty": True,
-                "publication_dependence_abs": ((scorecard.get("publication_volume_dependence") or {}).get("abs_spearman_rho")),
-                "citation_dependence_abs": ((scorecard.get("citation_volume_dependence") or {}).get("abs_spearman_rho")),
-                "top1_dependence_abs": ((scorecard.get("top1_dominance_dependence") or {}).get("abs_spearman_rho")),
-            },
-            text="Сбалансированный индекс локального вклада рассматривается как дополнительная исследовательская модификация рейтинга внутри текущего среза, а не как автоматически доказанный лучший индекс.",
-            recommendation="Обосновывать его через сводную оценку, изменения мест и сравнение с индексом Хирша, цитированиями, долевыми цитированиями и индексом g.",
+    findings: list[dict[str, Any]] = []
+    if "islv" in metrics:
+        scorecard = metric_scorecard.get("islv") or {}
+        findings.append(
+            _finding(
+                id="balanced_candidate:islv",
+                type="balanced_candidate_metric",
+                metric="islv",
+                severity="informational",
+                evidence={
+                    "uses_percentile_components": True,
+                    "uses_fractional_citations": True,
+                    "uses_top1_penalty": True,
+                    "publication_dependence_abs": ((scorecard.get("publication_volume_dependence") or {}).get("abs_spearman_rho")),
+                    "citation_dependence_abs": ((scorecard.get("citation_volume_dependence") or {}).get("abs_spearman_rho")),
+                    "top1_dependence_abs": ((scorecard.get("top1_dominance_dependence") or {}).get("abs_spearman_rho")),
+                },
+                text="Сбалансированный индекс локального вклада рассматривается как дополнительная исследовательская модификация рейтинга внутри текущего среза, а не как автоматически доказанный лучший индекс.",
+                recommendation="Обосновывать его через сводную оценку, изменения мест и сравнение с индексом Хирша, цитированиями, долевыми цитированиями и индексом g.",
+            )
         )
-    ]
+    if "iupv_s" in metrics:
+        scorecard = metric_scorecard.get("iupv_s") or {}
+        findings.append(
+            _finding(
+                id="balanced_candidate:iupv_s",
+                type="balanced_candidate_metric",
+                metric="iupv_s",
+                severity="informational",
+                evidence={
+                    "uses_rfi_log_fractional_impact": True,
+                    "uses_log1p_outlier_damping": True,
+                    "uses_positive_only_percentile_scale": True,
+                    "uses_fractional_citations": True,
+                    "publication_dependence_abs": ((scorecard.get("publication_volume_dependence") or {}).get("abs_spearman_rho")),
+                    "citation_dependence_abs": ((scorecard.get("citation_volume_dependence") or {}).get("abs_spearman_rho")),
+                    "top1_dependence_abs": ((scorecard.get("top1_dominance_dependence") or {}).get("abs_spearman_rho")),
+                },
+                text="IUPV-S рассматривается как кандидатная авторская метрика робастного долевого citation impact: она суммирует log1p долевого вклада работ и переводит результат в процентильную шкалу внутри среза.",
+                recommendation="Проверять IUPV-S отдельно от core-набора через связь с h, C_frac и g, изменения мест, top-N overlap и чувствительность к сверхцитируемым работам.",
+            )
+        )
+    return findings
 
 
 def _finding(

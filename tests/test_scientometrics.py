@@ -299,6 +299,28 @@ class ScientometricServiceTests(unittest.TestCase):
         self.assertNotIn("best metric", str(candidate["text"]).lower())
         self.assertNotIn("best metric", str(candidate["recommendation"]).lower())
 
+    def test_iupv_s_finding_is_candidate_not_best_metric_claim(self) -> None:
+        findings = scientometrics.interpretation_findings(
+            metrics=["h", "iupv_s"],
+            baseline_metric="h",
+            n_authors=20,
+            descriptive={},
+            normality={},
+            correlations={"spearman": {}},
+            rank_comparisons={},
+            metric_scorecard={"iupv_s": {}},
+        )
+        candidate = next(finding for finding in findings if finding["id"] == "balanced_candidate:iupv_s")
+        summary = scientometrics.finding_summary(findings, metrics=["h", "iupv_s"], baseline_metric="h")
+
+        self.assertEqual(candidate["severity"], "informational")
+        self.assertEqual(candidate["evidence"]["uses_rfi_log_fractional_impact"], True)
+        self.assertEqual(candidate["evidence"]["uses_positive_only_percentile_scale"], True)
+        self.assertEqual(summary["candidate_metric"], "iupv_s")
+        self.assertIn("iupv_s", summary["candidate_metrics"])
+        self.assertNotIn("best metric", str(candidate["text"]).lower())
+        self.assertNotIn("best metric", str(candidate["recommendation"]).lower())
+
     def test_empty_analysis_does_not_produce_candidate_finding_or_claim(self) -> None:
         findings = scientometrics.interpretation_findings(
             metrics=["h", "islv"],

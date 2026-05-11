@@ -17,6 +17,7 @@ import {
   DEFAULT_FILTERS,
   CORE_METRIC_OPTIONS,
   FRACTION_MODE_OPTIONS,
+  METRIC_OPTIONS,
   countryLabel,
   filterParams,
   fmt,
@@ -147,7 +148,7 @@ function Workbench() {
   const [dataOffset, setDataOffset] = useState(0);
   const [dataPageCursors, setDataPageCursors] = useState<Record<number, string>>({ 0: "" });
   const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
-  const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "i10", "g", "custom_iupv_s"]);
+  const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "i10", "g", "iupv_s"]);
   const [baselineMetric, setBaselineMetric] = useState("h");
   const [storageProfileId, setStorageProfileId] = useState("");
   const [downloadDir, setDownloadDir] = useState("");
@@ -437,7 +438,11 @@ function Workbench() {
     formula: item.expression,
     custom: true,
   }));
-  const allMetricOptions = [...primaryMetricOptions, ...customMetricOptions];
+  const allMetricOptions = [
+    ...primaryMetricOptions,
+    ...METRIC_OPTIONS.filter((item) => !primaryMetricOptions.some((option) => option.value === item.value)),
+    ...customMetricOptions,
+  ];
   const metricLabelMap = buildMetricLabelMap(allMetricOptions);
   const fractionModeOptions = configuredOptions(catalog.data?.fraction_modes ?? []);
   const displayFractionModeOptions = fractionModeOptions.length ? fractionModeOptions : FRACTION_MODE_OPTIONS;

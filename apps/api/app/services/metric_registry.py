@@ -25,6 +25,8 @@ def computed_metrics() -> tuple[dict[str, Any], ...]:
                 "algorithm": item.get("algorithm"),
                 "warning": item.get("warning"),
                 "visible": bool(item.get("visible", True)),
+                "selectable": bool(item.get("selectable", not item.get("deprecated", False))),
+                "deprecated": bool(item.get("deprecated", False)),
                 "local_only": bool(item.get("local_only", True)),
                 "params": item.get("params") or {},
             }
@@ -33,7 +35,7 @@ def computed_metrics() -> tuple[dict[str, Any], ...]:
 
 
 def catalog_metrics() -> list[dict[str, Any]]:
-    return [dict(item) for item in computed_metrics() if item.get("visible", True)]
+    return [dict(item) for item in computed_metrics() if item.get("visible", True) and item.get("selectable", True)]
 
 
 def computed_metric_ids() -> set[str]:
@@ -45,4 +47,3 @@ def metric_formula(metric_id: str) -> str:
         if item["id"] == metric_id:
             return str(item.get("formula") or item.get("algorithm") or "")
     return ""
-

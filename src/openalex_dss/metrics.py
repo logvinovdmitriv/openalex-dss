@@ -692,8 +692,11 @@ def _actual_authors_count(row: dict[str, Any]) -> float:
 def _percentile_rank_map(rows: list[dict[str, Any]], field: str) -> dict[int, float]:
     if not rows:
         return {}
-    ordered = sorted(enumerate(rows), key=lambda item: (as_float(item[1].get(field)), str(item[1].get("author_id") or "")))
-    result: dict[int, float] = {}
+    result = {id(row): 0.0 for row in rows}
+    positive_rows = [row for row in rows if as_float(row.get(field)) > 0.0]
+    if not positive_rows:
+        return result
+    ordered = sorted(enumerate(positive_rows), key=lambda item: (as_float(item[1].get(field)), str(item[1].get("author_id") or "")))
     n = len(ordered)
     pos = 0
     while pos < n:

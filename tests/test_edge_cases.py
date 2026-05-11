@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -10,6 +11,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import _path  # noqa: F401
+
+ROOT = Path(__file__).resolve().parents[1]
+API = ROOT / "apps/api"
+if str(API) not in sys.path:
+    sys.path.insert(0, str(API))
+
+import duckdb  # noqa: E402
+from app.services import custom_metrics  # noqa: E402
 from openalex_dss.config import load_config, replace_config
 from openalex_dss.io_utils import read_table_dicts, write_parquet_dicts
 from openalex_dss.metrics import build_author_work_metrics, compute_indices
@@ -99,7 +108,7 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertEqual(row["mean_authors_per_work"], 2.0)
             self.assertEqual(row["share_single_authored"], 0.0)
 
-    def test_iupv_s_uses_log_fractional_impact_percentile(self) -> None:
+    def test_iupv_s_uses_log_fractional_impact_positive_percentile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw = root / "raw.jsonl"
@@ -108,6 +117,7 @@ class EdgeCaseTests(unittest.TestCase):
                     [
                         json.dumps(_work("WRFI1", "A1", 9), ensure_ascii=False),
                         json.dumps(_work("WRFI2", "A2", 0), ensure_ascii=False),
+                        json.dumps(_work("WRFI3", "A3", 9), ensure_ascii=False),
                     ]
                 )
                 + "\n",
@@ -120,11 +130,74 @@ class EdgeCaseTests(unittest.TestCase):
         by_author = {row["author_id"]: row for row in indices}
         a1 = by_author["https://openalex.org/A1"]
         a2 = by_author["https://openalex.org/A2"]
+        a3 = by_author["https://openalex.org/A3"]
         self.assertAlmostEqual(a1["rfi_log_frac"], math.log1p(9.0))
-        self.assertAlmostEqual(a1["iupv_s"], 100.0)
-        self.assertAlmostEqual(a1["iupv_sb"], 100.0 * math.sqrt(0.75))
+        self.assertAlmostEqual(a1["iupv_s"], 75.0)
         self.assertEqual(a2["rfi_log_frac"], 0.0)
         self.assertEqual(a2["iupv_s"], 0.0)
+        self.assertAlmostEqual(a3["iupv_s"], a1["iupv_s"])
+
+    def test_iupv_s_uses_cited_credit_not_raw_citations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = _work("WMULTIRFI", "A1", 100)
+            work["authors_count"] = 10
+            raw = root / "raw.jsonl"
+            raw.write_text(json.dumps(work, ensure_ascii=False) + "\n", encoding="utf-8")
+            normalize_raw(raw, root / "works.csv", root / "auth.csv", root / "quality.json")
+            build_author_work_metrics(root / "works.csv", root / "auth.csv", root / "awm.csv", ("strict_authors_count", "integer"))
+            indices = compute_indices(root / "awm.csv", root / "indices.csv")
+
+        by_mode = {row["fraction_mode"]: row for row in indices}
+        self.assertAlmostEqual(by_mode["strict_authors_count"]["rfi_log_frac"], math.log1p(10.0))
+        self.assertAlmostEqual(by_mode["integer"]["rfi_log_frac"], math.log1p(100.0))
+        self.assertGreater(by_mode["integer"]["rfi_log_frac"], by_mode["strict_authors_count"]["rfi_log_frac"])
+
+    def test_custom_iupv_s_percentile_matches_builtin_python_and_duckdb(self) -> None:
+        definitions = custom_metrics.parse_custom_metrics(
+            [
+                {
+                    "id": "custom_iupv_s_test",
+                    "label": "IUPV-S test",
+                    "expression": "100 * pr_rfi_log_frac",
+                }
+            ]
+        )
+        rows = [
+            {"fraction_mode": "integer", "author_id": "A1", "rfi_log_frac": math.log1p(9.0), "iupv_s": 75.0},
+            {"fraction_mode": "integer", "author_id": "A2", "rfi_log_frac": 0.0, "iupv_s": 0.0},
+            {"fraction_mode": "integer", "author_id": "A3", "rfi_log_frac": math.log1p(9.0), "iupv_s": 75.0},
+        ]
+        python_rows = custom_metrics.apply_custom_metrics([dict(row) for row in rows], definitions)
+        for row in python_rows:
+            self.assertAlmostEqual(row["custom_iupv_s_test"], row["iupv_s"])
+
+        with duckdb.connect(":memory:") as conn:
+            conn.execute("CREATE TABLE indices (fraction_mode VARCHAR, author_id VARCHAR, rfi_log_frac DOUBLE, iupv_s DOUBLE)")
+            conn.executemany(
+                "INSERT INTO indices VALUES (?, ?, ?, ?)",
+                [(row["fraction_mode"], row["author_id"], row["rfi_log_frac"], row["iupv_s"]) for row in rows],
+            )
+            percentile_exprs = custom_metrics.duckdb_percentile_expressions(definitions, {"fraction_mode", "author_id", "rfi_log_frac", "iupv_s"})
+            metric_exprs = custom_metrics.duckdb_metric_expressions(
+                definitions,
+                {"fraction_mode", "author_id", "rfi_log_frac", "iupv_s", "pr_rfi_log_frac"},
+            )
+            sql = f"""
+            SELECT author_id, iupv_s, custom_iupv_s_test
+            FROM (
+              SELECT *, {', '.join(percentile_exprs)}
+              FROM indices
+            ) source
+            CROSS JOIN LATERAL (
+              SELECT {', '.join(metric_exprs)}
+            ) metrics
+            ORDER BY author_id
+            """
+            duckdb_rows = conn.execute(sql).fetchall()
+
+        for _, builtin, custom in duckdb_rows:
+            self.assertAlmostEqual(custom, builtin)
 
     def test_author_work_filters_retracted_paratext_and_xpac_locally(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -57,9 +57,18 @@ python scripts/validate_scientometric_dss.py --reset
 - Ошибки OpenAlex API возвращаются как контролируемые `502` с диагностикой, а не
   как необработанный Internal Server Error.
 - Уже скачанные срезы можно выбрать, проанализировать и удалить без API.
+- Scoped dump tables доступны для `works`, `authorships`, `work_topics`,
+  `author_institutions`, `author_countries`, а расчетные таблицы доступны для
+  `author_work`, `indices`, `ratings`.
 - Интерактивные JSON-таблицы ограничены страницей/разумным лимитом ответа.
   Большие выгрузки выполняются через CSV endpoints; тяжелые фильтры,
   сортировка, TOP-N и собственные формулы применяются на backend.
+- `indices` и `ratings` содержат `rfi_log_frac` и `iupv_s`; авторы с
+  `rfi_log_frac = 0` получают `iupv_s = 0`.
+- `iupv_s` не входит в базовый набор `P`, `C`, `C_frac`, `h`, `i10`, `g` и
+  используется только как дополнительная авторская формула.
+- Формульное поле `pr_rfi_log_frac` в Python- и DuckDB-пути дает тот же
+  positive-only percentile policy, что и встроенный `iupv_s`.
 - Использование ключа OpenAlex видно пользователю: справочники, оценка объема,
   проверка лимитов, точечное обогащение и новая загрузка среза. Установленный
   загрузчик OpenAlex может требовать ключ для новой загрузки.
@@ -83,6 +92,8 @@ workbench/active_context.json
 works
 authorships
 work_topics
+author_institutions
+author_countries
 author_work
 indices
 ratings

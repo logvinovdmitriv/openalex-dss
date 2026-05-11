@@ -26,15 +26,8 @@ from openalex_dss.ranking import build_ratings  # noqa: E402
 
 StageProgressCallback = Callable[[int | None, str, dict[str, Any] | None], None]
 
-PRECOMPUTE_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "custom_iupv_s")
-PRECOMPUTE_CUSTOM_METRICS = (
-    {
-        "id": "custom_iupv_s",
-        "label": "IUPV-S",
-        "description": "Простая авторская формула на основе робастного долевого вклада RFI.",
-        "expression": "100 * pr_rfi_log_frac",
-    },
-)
+PRECOMPUTE_SCIENTOMETRIC_METRICS = ("p", "c", "c_frac", "h", "i10", "g", "iupv_s")
+PRECOMPUTE_CUSTOM_METRICS: tuple[dict[str, str], ...] = ()
 PRECOMPUTE_RANK_TOP_N = 100
 
 

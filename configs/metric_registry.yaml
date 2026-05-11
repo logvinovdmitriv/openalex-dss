@@ -104,6 +104,7 @@ metrics:
     source: "computed_from_slice_works"
     local_only: true
     visible: false
+    selectable: false
     deprecated: true
     warning: "Служебный алиас для прежних отчетов. Новые формулы IUPV сохраняйте как пользовательские модели."
   - metric_id: "iupv_s"
