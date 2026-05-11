@@ -1,0 +1,145 @@
+{
+  "analysis_eligibility": {
+    "allowed_for_final_analysis": true,
+    "dev_override": false,
+    "dump_id": "dump_685cee7bcbf4912b",
+    "raw_jsonl_sha256": "685cee7bcbf4912b9959637cfe831da3b924416798267d8e8da436545eae3d12",
+    "records_downloaded": 108691,
+    "scientific_completeness": "complete",
+    "signature_checks": {
+      "accepted_estimate_signature_verified": true,
+      "compatible": true,
+      "download_signature_verified": true,
+      "estimate_signature_verified": true
+    },
+    "status": "final",
+    "stop_reason": "api_completed",
+    "warning": ""
+  },
+  "baseline": {
+    "analysis_id": "analysis_9bfdd540e884935f",
+    "data_scope": "full_filtered_slice",
+    "filters_hash": "9bfdd540e884935f3dbe29053be2412d",
+    "metrics": [
+      "p",
+      "c",
+      "c_frac",
+      "h",
+      "i10",
+      "g"
+    ],
+    "status": null
+  },
+  "counts": {
+    "author_countries": 226027,
+    "author_institutions": 255065,
+    "author_work": 777369,
+    "authorships": 276179,
+    "indices": 359343,
+    "ratings": 6108831,
+    "work_topics": 314836,
+    "works": 108691
+  },
+  "dump": {
+    "allowed_for_final_analysis": true,
+    "bytes_written": 53757388,
+    "elapsed_seconds": 1297.92,
+    "raw_jsonl_sha256": "685cee7bcbf4912b9959637cfe831da3b924416798267d8e8da436545eae3d12",
+    "records_count_verified": true,
+    "records_delta": 0,
+    "records_downloaded": 108691,
+    "records_expected": 108691,
+    "scientific_completeness": "complete"
+  },
+  "dump_id": "dump_685cee7bcbf4912b",
+  "extension": {
+    "analysis_id": "analysis_5b4ee7361a0c49c0",
+    "data_scope": "full_filtered_slice",
+    "filters_hash": "5b4ee7361a0c49c0fba1db6d0243bc0f",
+    "metrics": [
+      "p",
+      "c",
+      "c_frac",
+      "h",
+      "i10",
+      "g",
+      "iupv_s"
+    ],
+    "status": null
+  },
+  "findings_baseline": 30,
+  "findings_extension": 37,
+  "n_authors_baseline": 119781,
+  "n_authors_extension": 119781,
+  "quality_counts": {
+    "authorships_duplicate_author_id": 451,
+    "authorships_null_author_id": 16831
+  },
+  "quality_funnel": null,
+  "run_id": "applied_math_2020_2024_v1",
+  "signatures": {
+    "accepted_download_signature": "ced93e43446bfd2ec3544b5db826491195db8b1061613076e6f4afaef6d35df2",
+    "accepted_estimate_signature": "480b3b9d7e51063c7f9f88d8c80796b3f82159ae3c3457d0844111b5eecdd440",
+    "accepted_estimate_signature_verified": true,
+    "compatible": true,
+    "corpus_signature": "480b3b9d7e51063c7f9f88d8c80796b3f82159ae3c3457d0844111b5eecdd440",
+    "download_equivalence": {
+      "equivalent": true,
+      "reasons": [],
+      "scope": "Запрос загрузчика OpenAlex покрывает тот же корпус Works, что и запрос оценки через API"
+    },
+    "download_signature": "ced93e43446bfd2ec3544b5db826491195db8b1061613076e6f4afaef6d35df2",
+    "download_signature_verified": true,
+    "estimate_signature": "480b3b9d7e51063c7f9f88d8c80796b3f82159ae3c3457d0844111b5eecdd440",
+    "estimate_signature_verified": true
+  },
+  "quality": {
+    "works": {
+      "n_works": 108691,
+      "is_authors_truncated": 0,
+      "missing_primary_topic": 0,
+      "is_retracted": 0,
+      "is_paratext": 0,
+      "is_xpac": 0
+    },
+    "authorships": {
+      "n_authorships": 276179,
+      "qf_null_author_id": 16831,
+      "qf_deleted_author_id": 0,
+      "qf_duplicate_authorship": 451,
+      "qf_authorship_truncated": 0,
+      "qf_author_count_mismatch": 0,
+      "qf_missing_primary_topic": 0,
+      "authors_count_reported_positive_rows": 276179
+    }
+  },
+  "iupv_s_checks": {
+    "strict_authors": 119781,
+    "iupv_positive_authors": 74424,
+    "zero_rfi_iupv_nonzero_violations": 0,
+    "ratings_contains_iupv_s": true,
+    "baseline_ratings_metrics_present": [
+      "p",
+      "c",
+      "c_frac",
+      "h",
+      "i10",
+      "g"
+    ],
+    "extension_metrics_present": [
+      "iupv_s",
+      "pci",
+      "iupv_sb",
+      "islv",
+      "lrdi",
+      "n_cited5",
+      "frac_cited5"
+    ]
+  },
+  "methodological_note": {
+    "authors_count_reported_in_openalex_list_select": "not_requestable_as_select_field",
+    "strict_denominator_for_this_run": "observed_authorships_fallback_when_reported_authors_count_is_absent",
+    "fallback_accepted_because_truncated_works_detected": 0,
+    "author_count_mismatch_flags": 0
+  }
+}

@@ -382,8 +382,14 @@ def _works_params(cfg: SliceConfig, per_page: int) -> dict[str, str]:
 
 
 def _works_select_fields(cfg: SliceConfig) -> tuple[str, ...]:
-    required = ("authors_count", "language", "open_access")
-    return tuple(dict.fromkeys([*cfg.select_fields, *required]))
+    # OpenAlex Works list/select does not currently expose `authors_count` as a
+    # valid root select field. Keep the denominator field opportunistic in
+    # normalization for local imports/singleton records, but do not request it
+    # from list endpoints.
+    invalid_select_fields = {"authors_count"}
+    required = ("language", "open_access")
+    fields = [field for field in cfg.select_fields if field not in invalid_select_fields]
+    return tuple(dict.fromkeys([*fields, *required]))
 
 
 def default_sort() -> str:

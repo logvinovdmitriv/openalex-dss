@@ -412,8 +412,10 @@ def _cursor_params(cfg: Any, *, api_key: str, select_fields: tuple[str, ...] | N
 
 
 def _select_fields(cfg: Any) -> tuple[str, ...]:
-    required = ("authors_count", "language", "open_access", "authorships", "primary_topic", "topics", "primary_location")
-    return tuple(dict.fromkeys([*tuple(getattr(cfg, "select_fields", ()) or ()), *required]))
+    invalid_select_fields = {"authors_count"}
+    required = ("language", "open_access", "authorships", "primary_topic", "topics", "primary_location")
+    fields = [field for field in tuple(getattr(cfg, "select_fields", ()) or ()) if field not in invalid_select_fields]
+    return tuple(dict.fromkeys([*fields, *required]))
 
 
 def _auth_params(api_key: str) -> dict[str, str]:

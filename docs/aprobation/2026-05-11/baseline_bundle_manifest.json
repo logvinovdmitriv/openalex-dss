@@ -1,0 +1,39 @@
+{
+  "analysis_author_scope": "full_filtered_slice",
+  "analysis_id": "analysis_9bfdd540e884935f",
+  "artifacts": {
+    "analysis_json": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_baseline/analysis.json",
+    "conclusion_md": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_baseline/conclusion.md",
+    "correlations_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_baseline/correlations.csv",
+    "descriptive_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_baseline/descriptive.csv",
+    "findings_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_baseline/findings.csv",
+    "pairwise_metric_comparison_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_baseline/pairwise_metric_comparison.csv",
+    "rank_comparisons_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_baseline/rank_comparisons.csv",
+    "report_bundle_json": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_baseline/report_bundle.json"
+  },
+  "baseline_metric": "h",
+  "checksums": {
+    "analysis_json": "b412dc77a1f65d865c2e88b535f42f9ba697632e27e1e2b7b126c24e2b404ae5",
+    "conclusion_md": "71b5cdbb73cb57c925bf4e0c32274e6d75d185bbe23423027f29844d8121811d",
+    "correlations_csv": "f84371a29bf08cdd3d13c0480a53b5e64132a148c656069fd519173e2b07a270",
+    "descriptive_csv": "afc1d8c6080a9c2becbf74cc10ab57045f30653dfafc64cc1f2c20066a594f0a",
+    "findings_csv": "51ff3e245461077f047be82b2a5e51ea6e68a26b54f006675e134a5ab3146105",
+    "pairwise_metric_comparison_csv": "f10aa5b99d9e385d94d211e389b85ee52e8f630d5e328015b28ec261c6ed76d1",
+    "rank_comparisons_csv": "9ff2603b5af3e9e846bc606f6ffd883912b45ce12d7bc96f1960034f9765debe",
+    "report_bundle_json": "e9efe0272c1dcc62c73a45ce35d10e0b90f75830816c3fad43f0536b2d5d9e17"
+  },
+  "data_scope": "full_filtered_slice",
+  "dump_id": "dump_685cee7bcbf4912b",
+  "filters_hash": "9bfdd540e884935f3dbe29053be2412d",
+  "fraction_mode": "strict_authors_count",
+  "metrics": [
+    "p",
+    "c",
+    "c_frac",
+    "h",
+    "i10",
+    "g"
+  ],
+  "run_id": "applied_math_2020_2024_v1",
+  "schema": "analysis_bundle_manifest"
+}

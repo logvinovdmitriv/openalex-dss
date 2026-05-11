@@ -1,0 +1,40 @@
+{
+  "analysis_author_scope": "full_filtered_slice",
+  "analysis_id": "analysis_5b4ee7361a0c49c0",
+  "artifacts": {
+    "analysis_json": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_extension_iupv_s/analysis.json",
+    "conclusion_md": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_extension_iupv_s/conclusion.md",
+    "correlations_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_extension_iupv_s/correlations.csv",
+    "descriptive_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_extension_iupv_s/descriptive.csv",
+    "findings_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_extension_iupv_s/findings.csv",
+    "pairwise_metric_comparison_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_extension_iupv_s/pairwise_metric_comparison.csv",
+    "rank_comparisons_csv": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_extension_iupv_s/rank_comparisons.csv",
+    "report_bundle_json": "/Users/logvinovdmitriv/University/Диплом/analysis_bundle_extension_iupv_s/report_bundle.json"
+  },
+  "baseline_metric": "h",
+  "checksums": {
+    "analysis_json": "376cf6dbb97b61de3e4be8e31312019e46b15c8bc2c0ff6bc5a4e8e03163fb00",
+    "conclusion_md": "abdff3e24ceffcff20dc42cc31ec3ff966e4a1c7561fa8b9d718397f13e03b18",
+    "correlations_csv": "367c24ae719fa46f9938f7d09786f4f03d8922a00716ff2cee1ee2addc6b551a",
+    "descriptive_csv": "ec9eb15a53b6dcc4b0a513e9c2518d91f002601a98ebb4900c7c5dcdb86c22f0",
+    "findings_csv": "b5190fd59cef8ff077822a540c9269c1135b6c9cc699d6178ac4d0b3d1c7d8c6",
+    "pairwise_metric_comparison_csv": "61fea5ff4ed2717eb998a75c35131fd09af1990b93f05b4272fef6aa0318365d",
+    "rank_comparisons_csv": "9ff2603b5af3e9e846bc606f6ffd883912b45ce12d7bc96f1960034f9765debe",
+    "report_bundle_json": "1be9faff5bfc4d1d9ee71714777710406a0a267bdcf8a28e65ac4fe7cdb635a0"
+  },
+  "data_scope": "full_filtered_slice",
+  "dump_id": "dump_685cee7bcbf4912b",
+  "filters_hash": "5b4ee7361a0c49c0fba1db6d0243bc0f",
+  "fraction_mode": "strict_authors_count",
+  "metrics": [
+    "p",
+    "c",
+    "c_frac",
+    "h",
+    "i10",
+    "g",
+    "iupv_s"
+  ],
+  "run_id": "applied_math_2020_2024_v1",
+  "schema": "analysis_bundle_manifest"
+}

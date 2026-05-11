@@ -1,0 +1,319 @@
+{
+  "decision": {
+    "allow_incomplete_preview": false,
+    "api_requests_planned": 1087,
+    "can_execute": true,
+    "complete_slice_required": true,
+    "estimated_disk_peak_mb": 8666.917,
+    "estimated_raw_mb": 8666.917,
+    "notebook_policy": "Срез будет скачан через OpenAlex API cursor с select-проекцией. Для очень крупных срезов предпочтительнее локальный snapshot/CLI или уже скачанный dump.",
+    "reasons": [],
+    "records_to_fetch": 108691,
+    "status": "medium_slice",
+    "strategy": "api_cursor_selected_fields",
+    "user_decides_after_estimate": true,
+    "warnings": [
+      "Срез среднего размера. Скачивание разрешено, но перед запуском проверьте прогноз объема."
+    ]
+  },
+  "elapsed_seconds": 4.749,
+  "estimate": {
+    "api_base": "https://api.openalex.org/works",
+    "api_requests_planned": 1087,
+    "byte_estimate": {
+      "cli_temp_files_peak": {
+        "model": "max(full_metadata_p95, selected_p90, selected_p50*2) * temp safety factor",
+        "p90_bytes": 5049783860,
+        "p90_mb": 4815.849
+      },
+      "confidence": "medium",
+      "final_raw_jsonl_gz": {
+        "p90_bytes": 773048433,
+        "p90_mb": 737.236
+      },
+      "full_metadata_jsonl": {
+        "p50_bytes": 1458524529,
+        "p50_mb": 1390.957,
+        "p90_bytes": 2019913544,
+        "p90_mb": 1926.34,
+        "p95_bytes": 2208709811,
+        "p95_mb": 2106.39,
+        "sample_size": 100
+      },
+      "parquet_tables": {
+        "p90_bytes": 908961094,
+        "p90_mb": 866.853
+      },
+      "recommended_free_space": {
+        "bytes": 9087921072,
+        "mb": 8666.917,
+        "reason": "cli_temp_peak_p90 + final_raw_jsonl_gz_p90 + parquet_tables_p90 with safety margin"
+      },
+      "schema": "openalex_storage_estimate_v1",
+      "selected_api_payload": {
+        "p50_bytes": 564323672,
+        "p50_mb": 538.181,
+        "p90_bytes": 738990109,
+        "p90_mb": 704.756,
+        "sample_size": 100
+      }
+    },
+    "cache": {
+      "hits_delta": 0,
+      "hits_total": 0,
+      "misses_delta": 6,
+      "misses_total": 6
+    },
+    "corpus_request": {
+      "filter": "primary_topic.subfield.id:2604,from_publication_date:2020-01-01,to_publication_date:2024-12-31,type:article,is_retracted:false,is_paratext:false,is_xpac:false"
+    },
+    "download_consistency": {
+      "compatible": true,
+      "corpus_signature": "480b3b9d7e51063c7f9f88d8c80796b3f82159ae3c3457d0844111b5eecdd440",
+      "download_equivalence": {
+        "equivalent": true,
+        "reasons": [],
+        "scope": "Запрос загрузчика OpenAlex покрывает тот же корпус Works, что и запрос оценки через API"
+      },
+      "download_signature": "ced93e43446bfd2ec3544b5db826491195db8b1061613076e6f4afaef6d35df2",
+      "estimate_signature": "480b3b9d7e51063c7f9f88d8c80796b3f82159ae3c3457d0844111b5eecdd440",
+      "reasons": [],
+      "tool": "openalex_api"
+    },
+    "download_signature": "ced93e43446bfd2ec3544b5db826491195db8b1061613076e6f4afaef6d35df2",
+    "download_signatures": {
+      "api_cursor_selected_fields": "ced93e43446bfd2ec3544b5db826491195db8b1061613076e6f4afaef6d35df2",
+      "ids_then_hydrate": "ea9a22e3b4efbcab5e829ca2b29ae6b4caa0365cca0e36c3754a95e711b21da6",
+      "openalex_api": "ced93e43446bfd2ec3544b5db826491195db8b1061613076e6f4afaef6d35df2",
+      "openalex_cli": "888c7ab8ab90cd369288c442c72054b766a0ae7f32cba62d38a63c50e95d391a",
+      "openalex_snapshot_jsonl": "95db0d28a85bee49f6f07665236ac77c7388eeeba83a5c7577d432082f8533fa",
+      "snapshot_partition_scan": "95db0d28a85bee49f6f07665236ac77c7388eeeba83a5c7577d432082f8533fa"
+    },
+    "estimate_count": 108691,
+    "estimate_scope": {
+      "api_sample": "выборка Works для оценки объема и фасетов",
+      "downloader_payload": "полные метаданные Works для локального среза; прогноз консервативный, потому что загрузчик не поддерживает select-проекцию"
+    },
+    "estimate_signature": "480b3b9d7e51063c7f9f88d8c80796b3f82159ae3c3457d0844111b5eecdd440",
+    "estimated_cli_metadata_bytes": 2208709811,
+    "estimated_cli_metadata_mb": 2106.39,
+    "estimated_cost_usd": 0.0006000000000000001,
+    "estimated_full_record_bytes": 13419,
+    "estimated_full_record_bytes_p90": 18584,
+    "estimated_full_record_bytes_p95": 20321,
+    "estimated_memory_mb": 26.951,
+    "estimated_parquet_mb": 172.218,
+    "estimated_raw_bytes": 564323672,
+    "estimated_raw_bytes_for_download": 2208709811,
+    "estimated_raw_bytes_p90": 738990109,
+    "estimated_raw_mb": 538.181,
+    "estimated_raw_mb_for_download": 2106.39,
+    "estimated_raw_mb_p90": 704.756,
+    "estimated_record_bytes": 5192,
+    "estimated_record_bytes_p90": 6799,
+    "estimated_selected_api_bytes": 564323672,
+    "estimated_selected_api_mb": 538.181,
+    "facets": {
+      "countries": {
+        "cost_usd": 0.0001,
+        "group_by": "authorships.institutions.country_code",
+        "rows": [
+          {
+            "count": 31159,
+            "key": "https://openalex.org/countries/ID",
+            "label": "Indonesia"
+          },
+          {
+            "count": 14889,
+            "key": "https://openalex.org/countries/CN",
+            "label": "China"
+          },
+          {
+            "count": 7237,
+            "key": "https://openalex.org/countries/US",
+            "label": "United States of America"
+          },
+          {
+            "count": 4556,
+            "key": "https://openalex.org/countries/RU",
+            "label": "Russian Federation"
+          },
+          {
+            "count": 4416,
+            "key": "https://openalex.org/countries/IN",
+            "label": "India"
+          },
+          {
+            "count": 3001,
+            "key": "https://openalex.org/countries/IT",
+            "label": "Italy"
+          },
+          {
+            "count": 2545,
+            "key": "https://openalex.org/countries/FR",
+            "label": "France"
+          },
+          {
+            "count": 2526,
+            "key": "https://openalex.org/countries/TR",
+            "label": "Turkey"
+          },
+          {
+            "count": 2496,
+            "key": "https://openalex.org/countries/SA",
+            "label": "Saudi Arabia"
+          },
+          {
+            "count": 2291,
+            "key": "https://openalex.org/countries/DE",
+            "label": "Germany"
+          },
+          {
+            "count": 1854,
+            "key": "https://openalex.org/countries/JP",
+            "label": "Japan"
+          },
+          {
+            "count": 1819,
+            "key": "https://openalex.org/countries/ES",
+            "label": "Spain"
+          },
+          {
+            "count": 1540,
+            "key": "https://openalex.org/countries/KR",
+            "label": "Korea, Republic of"
+          },
+          {
+            "count": 1512,
+            "key": "https://openalex.org/countries/BR",
+            "label": "Brazil"
+          },
+          {
+            "count": 1475,
+            "key": "https://openalex.org/countries/GB",
+            "label": "United Kingdom of Great Britain and Northern Ireland"
+          },
+          {
+            "count": 1413,
+            "key": "https://openalex.org/countries/IR",
+            "label": "Iran, Islamic Republic of"
+          },
+          {
+            "count": 1232,
+            "key": "https://openalex.org/countries/PK",
+            "label": "Pakistan"
+          },
+          {
+            "count": 1159,
+            "key": "https://openalex.org/countries/PL",
+            "label": "Poland"
+          },
+          {
+            "count": 1149,
+            "key": "https://openalex.org/countries/DZ",
+            "label": "Algeria"
+          },
+          {
+            "count": 1052,
+            "key": "https://openalex.org/countries/MA",
+            "label": "Morocco"
+          }
+        ]
+      },
+      "publication_years": {
+        "cost_usd": 0.0001,
+        "group_by": "publication_year",
+        "rows": [
+          {
+            "count": 22105,
+            "key": "2023",
+            "label": "2023"
+          },
+          {
+            "count": 21995,
+            "key": "2022",
+            "label": "2022"
+          },
+          {
+            "count": 21736,
+            "key": "2020",
+            "label": "2020"
+          },
+          {
+            "count": 21469,
+            "key": "2024",
+            "label": "2024"
+          },
+          {
+            "count": 21386,
+            "key": "2021",
+            "label": "2021"
+          }
+        ]
+      },
+      "work_types": {
+        "cost_usd": 0.0001,
+        "group_by": "type",
+        "rows": [
+          {
+            "count": 108691,
+            "key": "https://openalex.org/types/article",
+            "label": "Статья (article)"
+          }
+        ]
+      }
+    },
+    "full_sample_request": {
+      "filter": "primary_topic.subfield.id:2604,from_publication_date:2020-01-01,to_publication_date:2024-12-31,type:article,is_retracted:false,is_paratext:false,is_xpac:false",
+      "per_page": "100",
+      "sample": "100",
+      "seed": "42"
+    },
+    "openalex_request": {
+      "cursor": "*",
+      "filter": "primary_topic.subfield.id:2604,from_publication_date:2020-01-01,to_publication_date:2024-12-31,type:article,is_retracted:false,is_paratext:false,is_xpac:false",
+      "per_page": "1",
+      "select": "id,doi,display_name,publication_year,publication_date,type,cited_by_count,is_retracted,is_paratext,is_xpac,is_authors_truncated,authorships,primary_topic,topics,primary_location,ids,created_date,updated_date,language,open_access",
+      "sort": "publication_date:asc,openalex:asc"
+    },
+    "per_page": 100,
+    "planned_records": 108691,
+    "rate_limit": {
+      "credits_used": 1,
+      "limit": 10000,
+      "remaining": 9988,
+      "reset_seconds": 21562
+    },
+    "sample_record_bytes": 4714,
+    "sample_request": {
+      "filter": "primary_topic.subfield.id:2604,from_publication_date:2020-01-01,to_publication_date:2024-12-31,type:article,is_retracted:false,is_paratext:false,is_xpac:false",
+      "per_page": "100",
+      "sample": "100",
+      "seed": "42",
+      "select": "id,doi,display_name,publication_year,publication_date,type,cited_by_count,is_retracted,is_paratext,is_xpac,is_authors_truncated,authorships,primary_topic,topics,primary_location,ids,created_date,updated_date,language,open_access"
+    },
+    "sample_size": 100,
+    "source_strategy": "openalex_api"
+  },
+  "source_strategy": "openalex_api",
+  "status": "estimated",
+  "storage_estimate": {
+    "calibration": {
+      "recommended_multiplier": 1.0,
+      "samples": 0,
+      "status": "not_enough_history"
+    },
+    "cli_temp_files_peak_bytes": 5049783860,
+    "confidence": "medium",
+    "download_dir": "/Users/logvinovdmitriv/University/Диплом/openalex-dss-data",
+    "final_raw_jsonl_gz_bytes": 773048433,
+    "free_space_bytes": 148751380480,
+    "free_space_mb": 141860.371,
+    "free_space_status": "ok",
+    "message": "Свободного места достаточно для рекомендованного пикового объема.",
+    "parquet_tables_bytes": 908961094,
+    "recommended_free_space_bytes": 9087921072,
+    "recommended_free_space_mb": 8666.917,
+    "schema": "storage_estimate_v1"
+  }
+}
