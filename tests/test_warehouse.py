@@ -155,6 +155,55 @@ class WarehouseTests(unittest.TestCase):
         self.assertEqual(second["total"], 3)
         self.assertEqual(second["offset"], 2)
 
+    def test_ranking_country_and_institution_filters_use_author_relation_tables(self) -> None:
+        conn = warehouse.duckdb.connect(":memory:")
+        try:
+            conn.execute(
+                """
+                CREATE TABLE ranking_indices (
+                  author_id VARCHAR,
+                  author_display_name VARCHAR,
+                  fraction_mode VARCHAR,
+                  p INTEGER,
+                  c INTEGER,
+                  h INTEGER
+                )
+                """
+            )
+            conn.execute("CREATE TABLE author_countries (author_id VARCHAR, country_code VARCHAR)")
+            conn.execute("CREATE TABLE author_institutions (author_id VARCHAR, institution_id VARCHAR)")
+            conn.executemany(
+                "INSERT INTO ranking_indices VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    ("A1", "RU Author", "integer", 3, 30, 2),
+                    ("A2", "US Author", "integer", 9, 90, 8),
+                ],
+            )
+            conn.executemany("INSERT INTO author_countries VALUES (?, ?)", [("A1", "RU"), ("A2", "US")])
+            conn.executemany("INSERT INTO author_institutions VALUES (?, ?)", [("A1", "https://openalex.org/I1"), ("A2", "https://openalex.org/I2")])
+
+            sql, args, _fields = warehouse._metric_ranking_sql_query(
+                "ranking_indices",
+                ["author_id", "author_display_name", "fraction_mode", "p", "c", "h"],
+                fraction_mode="integer",
+                metric="h",
+                limit=20,
+                max_limit=100,
+                author_ids=None,
+                data_filters={"country_code": {"contains": "RU"}, "institution_id": {"contains": "I1"}},
+                data_search="",
+                data_sort="",
+                data_direction="desc",
+                data_limit=0,
+                custom_metric_defs=None,
+                include_total=True,
+            )
+            rows = warehouse._records(conn.execute(sql, args), max_rows=10)
+        finally:
+            conn.close()
+
+        self.assertEqual([row["author_id"] for row in rows], ["A1"])
+
     def test_metric_distribution_reads_full_scope_with_duckdb_sql(self) -> None:
         fields = ["run_id", "fraction_mode", "author_id", "author_display_name", "h", "p", "c", "c_frac", "i10", "g"]
         rows = [

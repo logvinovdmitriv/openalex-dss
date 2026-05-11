@@ -45,7 +45,9 @@ def plan_slice(payload: dict[str, Any]) -> dict[str, Any]:
     if source_strategy in {"openalex_api", "api_cursor_selected_fields"}:
         decision = {**decision, "strategy": "api_cursor_selected_fields", "notebook_policy": "Срез будет скачан через OpenAlex API cursor с select-проекцией. Для очень крупных срезов предпочтительнее локальный snapshot/CLI или уже скачанный dump."}
     elif source_strategy == "ids_then_hydrate":
-        decision = {**decision, "strategy": "ids_then_hydrate", "notebook_policy": "Система скачает singleton Works по заранее заданному списку OpenAlex work IDs."}
+        decision = {**decision, "strategy": "ids_then_hydrate", "notebook_policy": "Система соберет OpenAlex work IDs через cursor/search, затем скачает singleton Works по ID."}
+    elif source_strategy in {"openalex_snapshot_jsonl", "snapshot_partition_scan"}:
+        decision = {**decision, "strategy": "openalex_snapshot_jsonl", "notebook_policy": "Срез будет извлечен из локальной папки OpenAlex snapshot JSONL без bulk cursor API."}
     consistency = estimate.get("download_consistency") or {}
     if consistency.get("compatible") is False:
         reasons = [str(item) for item in consistency.get("reasons") or [] if str(item).strip()]
@@ -91,6 +93,8 @@ def _estimate_for_source_strategy(estimate: dict[str, Any], cfg: Any, source_str
         "openalex_api": download_signature_for_strategy(cfg, "openalex_api"),
         "api_cursor_selected_fields": download_signature_for_strategy(cfg, "api_cursor_selected_fields"),
         "ids_then_hydrate": download_signature_for_strategy(cfg, "ids_then_hydrate"),
+        "openalex_snapshot_jsonl": download_signature_for_strategy(cfg, "openalex_snapshot_jsonl"),
+        "snapshot_partition_scan": download_signature_for_strategy(cfg, "snapshot_partition_scan"),
     }
     return {
         **estimate,

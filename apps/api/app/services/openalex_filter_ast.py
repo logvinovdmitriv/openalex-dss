@@ -11,6 +11,8 @@ Relation = Literal["equal", "broader", "narrower", "overlap", "unknown"]
 class FilterCondition:
     field: str
     values: tuple[str, ...]
+    operator: str = "eq"
+    negated: bool = False
 
 
 def parse_filter_string(value: str) -> dict[str, FilterCondition]:
@@ -18,7 +20,7 @@ def parse_filter_string(value: str) -> dict[str, FilterCondition]:
 
     The parser intentionally avoids claiming support for the full OpenAlex
     grammar. Unsupported fragments are kept as opaque field/value pairs, which
-    makes compatibility checks conservative instead of silently treating raw
+    makes relation checks conservative instead of silently treating raw
     filters as compatible.
     """
 
@@ -29,10 +31,17 @@ def parse_filter_string(value: str) -> dict[str, FilterCondition]:
             continue
         field, raw = part.split(":", 1)
         field = _normalize_token(field)
+        negated_field = field.startswith("!")
+        if negated_field:
+            field = field[1:]
+        operator, raw = _parse_operator(raw)
         values = tuple(sorted({_normalize_value(item) for item in raw.split("|") if _normalize_value(item)}))
+        negated = negated_field or operator == "neq" or any(value.startswith("!") for value in values)
+        if negated:
+            values = tuple(sorted({value[1:] if value.startswith("!") else value for value in values if value}))
         if not field or not values:
             continue
-        out[field] = FilterCondition(field, values)
+        out[field] = FilterCondition(field, values, operator=operator, negated=negated)
     return out
 
 
@@ -57,7 +66,8 @@ def filter_relation(left: str, right: str) -> Relation:
         return "narrower"
     if left_covers_right and right_covers_left:
         return "equal"
-    if set(left_ast) & set(right_ast):
+    shared = set(left_ast) & set(right_ast)
+    if shared and any(_condition_relation(left_ast[field], right_ast[field]) == "overlap" for field in shared):
         return "overlap"
     return "unknown"
 
@@ -78,8 +88,14 @@ def _covers(candidate: dict[str, FilterCondition], target: dict[str, FilterCondi
 def _condition_relation(left: FilterCondition, right: FilterCondition) -> Relation:
     if left.field != right.field:
         return "unknown"
+    if left.negated or right.negated:
+        return "equal" if left == right else "unknown"
+    if left.operator != right.operator:
+        return _range_condition_relation(left, right)
     if left.values == right.values:
         return "equal"
+    if left.operator in {">", ">=", "<", "<="}:
+        return _range_condition_relation(left, right)
     if left.field.startswith("from_"):
         left_value = left.values[0]
         right_value = right.values[0]
@@ -103,12 +119,49 @@ def _condition_relation(left: FilterCondition, right: FilterCondition) -> Relati
     return "unknown"
 
 
+def _range_condition_relation(left: FilterCondition, right: FilterCondition) -> Relation:
+    if left.field != right.field or left.negated or right.negated:
+        return "unknown"
+    if not left.values or not right.values:
+        return "unknown"
+    if left.operator == right.operator and left.values == right.values:
+        return "equal"
+    if left.operator in {">", ">="} and right.operator in {">", ">="}:
+        left_value = _comparable_value(left.values[0])
+        right_value = _comparable_value(right.values[0])
+        if left_value <= right_value:
+            return "broader"
+        return "narrower"
+    if left.operator in {"<", "<="} and right.operator in {"<", "<="}:
+        left_value = _comparable_value(left.values[0])
+        right_value = _comparable_value(right.values[0])
+        if left_value >= right_value:
+            return "broader"
+        return "narrower"
+    return "unknown"
+
+
 def _split_filter_parts(value: str) -> list[str]:
     return [part.strip() for part in str(value or "").split(",") if part.strip()]
 
 
 def _normalize_token(value: str) -> str:
     return str(value or "").strip().lower()
+
+
+def _parse_operator(raw: str) -> tuple[str, str]:
+    text = str(raw or "").strip()
+    for op in (">=", "<=", "!=", ">", "<", "!"):
+        if text.startswith(op):
+            return ("neq" if op in {"!", "!="} else op), text[len(op) :].strip()
+    return "eq", text
+
+
+def _comparable_value(value: str) -> float | str:
+    try:
+        return float(str(value))
+    except ValueError:
+        return str(value)
 
 
 def _normalize_value(value: str) -> str:

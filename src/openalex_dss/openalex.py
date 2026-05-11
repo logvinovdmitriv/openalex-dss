@@ -287,12 +287,19 @@ def ids_hydrate_download_signature(cfg: SliceConfig) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def snapshot_download_signature(cfg: SliceConfig) -> str:
+    canonical = json.dumps({"request": corpus_request(cfg), "tool": "openalex_snapshot_partition_scan"}, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def download_signature_for_strategy(cfg: SliceConfig, source_strategy: str) -> str:
     strategy = str(source_strategy or "openalex_cli")
     if strategy in {"openalex_api", "api_cursor_selected_fields"}:
         return api_cursor_download_signature(cfg)
     if strategy == "ids_then_hydrate":
         return ids_hydrate_download_signature(cfg)
+    if strategy in {"openalex_snapshot_jsonl", "snapshot_partition_scan"}:
+        return snapshot_download_signature(cfg)
     return cli_download_signature(cfg)
 
 

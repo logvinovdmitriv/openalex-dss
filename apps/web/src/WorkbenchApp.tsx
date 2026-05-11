@@ -151,6 +151,7 @@ function Workbench() {
   const [baselineMetric, setBaselineMetric] = useState("h");
   const [storageProfileId, setStorageProfileId] = useState("");
   const [downloadDir, setDownloadDir] = useState("");
+  const [snapshotDir, setSnapshotDir] = useState("");
   const [maxDownloadMb, setMaxDownloadMb] = useState("");
   const [dataSort, setDataSort] = useState("");
   const [dataDirection, setDataDirection] = useState<"asc" | "desc">("desc");
@@ -441,7 +442,7 @@ function Workbench() {
   const fractionModeOptions = configuredOptions(catalog.data?.fraction_modes ?? []);
   const displayFractionModeOptions = fractionModeOptions.length ? fractionModeOptions : FRACTION_MODE_OPTIONS;
   const sourceStrategyOptions = configuredOptions(catalog.data?.data_sources ?? [])
-    .filter((item) => ["openalex_cli", "openalex_api", "api_cursor_selected_fields", "ids_then_hydrate"].includes(item.value));
+    .filter((item) => ["openalex_cli", "openalex_api", "api_cursor_selected_fields", "ids_then_hydrate", "openalex_snapshot_jsonl", "snapshot_partition_scan"].includes(item.value));
   const backendCliApiKeyConfigured = Boolean(catalog.data?.openalex_cli?.api_key_configured);
   const openAlexDownloadKeyRequired = Boolean(catalog.data?.openalex_cli?.api_key_required_for_remote_download ?? true);
   const defaultStorageProfileId = String(defaultOption(storageProfileOptions)?.value ?? "minimal_analytics");
@@ -540,7 +541,7 @@ function Workbench() {
       const doc = sliceDoc ?? (await postJson<WorkbenchSlice>("/slices", { ...slicePayload, title: humanSliceTitle(filters) }));
       const sliceId = String(doc.slice_id ?? "");
       setSliceDoc(doc);
-      return postJson<MaterializationPlanPayload>(`/slices/${encodeURIComponent(sliceId)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy, download_dir: downloadDir.trim() || undefined });
+      return postJson<MaterializationPlanPayload>(`/slices/${encodeURIComponent(sliceId)}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy, download_dir: downloadDir.trim() || undefined, snapshot_dir: snapshotDir.trim() || undefined });
     },
     onSuccess: (plan) => {
       setMaterialization(plan);
@@ -551,7 +552,7 @@ function Workbench() {
     mutationFn: async () => {
       const plan = materialization ?? (await createMaterialization.mutateAsync());
       const materializationId = String(plan.materialization_id ?? "");
-      return postJson<{ run?: WorkbenchRun }>(`/materializations/${encodeURIComponent(materializationId)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb));
+      return postJson<{ run?: WorkbenchRun }>(`/materializations/${encodeURIComponent(materializationId)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb, snapshotDir));
     },
     onSuccess: (result) => {
       setApiKey("");
@@ -573,10 +574,10 @@ function Workbench() {
         const reason = [...(decision.reasons ?? []), ...(decision.warnings ?? [])].filter(Boolean).join(" ");
         throw new Error(reason || "OpenAlex не вернул работ для выбранных фильтров.");
       }
-      const plan = await postJson<MaterializationPlanPayload>(`/slices/${encodeURIComponent(doc.slice_id ?? "")}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy, download_dir: downloadDir.trim() || undefined });
+      const plan = await postJson<MaterializationPlanPayload>(`/slices/${encodeURIComponent(doc.slice_id ?? "")}/materialization-plans`, { storage_profile_id: activeStorageProfileId, source_strategy: activeSourceStrategy, download_policy: downloadPolicy, download_dir: downloadDir.trim() || undefined, snapshot_dir: snapshotDir.trim() || undefined });
       const materializationId = String(plan.materialization_id ?? "");
       setMaterialization(plan);
-      return postJson<{ run?: WorkbenchRun }>(`/materializations/${encodeURIComponent(materializationId)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb));
+      return postJson<{ run?: WorkbenchRun }>(`/materializations/${encodeURIComponent(materializationId)}/run`, materializationRunPayload(apiKey, downloadDir, maxDownloadMb, snapshotDir));
     },
     onSuccess: (result) => {
       setApiKey("");
@@ -826,8 +827,13 @@ function Workbench() {
             materialization={materialization ?? sliceDoc?.current_materialization_plan}
             downloadDir={downloadDir}
             setDownloadDir={setDownloadDir}
+            snapshotDir={snapshotDir}
+            setSnapshotDir={setSnapshotDir}
             maxDownloadMb={maxDownloadMb}
             setMaxDownloadMb={setMaxDownloadMb}
+            sourceStrategyOptions={sourceStrategyOptions}
+            activeSourceStrategy={activeSourceStrategy}
+            setSourceStrategy={setSourceStrategy}
             onPickDownloadDir={() => pickDownloadDir.mutate()}
             pickingDownloadDir={pickDownloadDir.isPending}
             dataRoot={String(catalog.data?.data_root ?? "")}
@@ -992,8 +998,13 @@ function SlicesPage({
   materialization,
   downloadDir,
   setDownloadDir,
+  snapshotDir,
+  setSnapshotDir,
   maxDownloadMb,
   setMaxDownloadMb,
+  sourceStrategyOptions,
+  activeSourceStrategy,
+  setSourceStrategy,
   onPickDownloadDir,
   pickingDownloadDir,
   dataRoot,
@@ -1037,8 +1048,13 @@ function SlicesPage({
   materialization: MaterializationPlanPayload | null | undefined;
   downloadDir: string;
   setDownloadDir: (value: string) => void;
+  snapshotDir: string;
+  setSnapshotDir: (value: string) => void;
   maxDownloadMb: string;
   setMaxDownloadMb: (value: string) => void;
+  sourceStrategyOptions: SelectOption[];
+  activeSourceStrategy: string;
+  setSourceStrategy: (value: string) => void;
   onPickDownloadDir: () => void;
   pickingDownloadDir: boolean;
   dataRoot: string;
@@ -1081,7 +1097,8 @@ function SlicesPage({
   const noDataEstimate = hasEstimate && (decision.status === "no_data" || Number(rawEstimate?.estimate_count ?? 0) === 0);
   const emptyEstimateValue = hasEstimate ? "0" : "—";
   const apiKeyReady = Boolean(apiKey.trim()) || backendCliApiKeyConfigured;
-  const downloadKeyMissing = openAlexDownloadKeyRequired && !apiKeyReady;
+  const snapshotMode = ["openalex_snapshot_jsonl", "snapshot_partition_scan"].includes(activeSourceStrategy);
+  const downloadKeyMissing = !snapshotMode && openAlexDownloadKeyRequired && !apiKeyReady;
 
   return (
     <div className="stack">
@@ -1218,7 +1235,7 @@ function SlicesPage({
           <b>Доступ к OpenAlex</b>
           <span>
             {downloadKeyMissing
-              ? "Для скачивания нового среза нужен ключ OpenAlex. Введите его ниже или задайте OPENALEX_API_KEY на сервере. Уже скачанные срезы можно выбирать и анализировать без ключа."
+              ? "Для скачивания нового среза нужен ключ OpenAlex. Введите его ниже или задайте OPENALEX_API_KEY на сервере. Уже скачанные срезы и локальный snapshot можно выбирать и анализировать без ключа."
               : backendCliApiKeyConfigured && !apiKey.trim()
                 ? "Ключ задан на сервере. Новую загрузку можно запускать."
                 : "Ключ введен для текущей загрузки. После запуска поле будет очищено в интерфейсе."}
@@ -1247,6 +1264,18 @@ function SlicesPage({
                 Пусто = стандартная папка внутри хранилища данных{dataRoot ? `: ${dataRoot}/raw/openalex_cli/<slice_id>` : ""}. Кнопка открывает системный выбор папки на этом компьютере.
               </small>
             </Field>
+            <Field label="Способ получения данных">
+              <select value={activeSourceStrategy} onChange={(event) => setSourceStrategy(event.target.value)}>
+                {sourceStrategyOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+              <small className="field-hint">Для больших повторяемых срезов используйте локальный snapshot JSONL. API cursor поддерживает checkpoint/resume, но не предназначен для полного OpenAlex.</small>
+            </Field>
+            {snapshotMode && (
+              <Field label="Папка локального OpenAlex snapshot">
+                <input value={snapshotDir} onChange={(event) => setSnapshotDir(event.target.value)} placeholder="/path/to/openalex-snapshot/works" />
+                <small className="field-hint">Папка должна содержать JSONL или JSONL.GZ partition files. Система отфильтрует их локально и создаст scoped dump.</small>
+              </Field>
+            )}
             <Field label="Лимит загрузки, МБ">
               <input
                 type="number"
@@ -1290,13 +1319,15 @@ function SlicesPage({
   );
 }
 
-function materializationRunPayload(apiKey: string, downloadDir: string, maxDownloadMb: string) {
+function materializationRunPayload(apiKey: string, downloadDir: string, maxDownloadMb: string, snapshotDir = "") {
   const payload: Record<string, unknown> = {};
   const key = apiKey.trim();
   const dir = downloadDir.trim();
   const limit = Number(maxDownloadMb);
+  const snapshot = snapshotDir.trim();
   if (key) payload.api_key = key;
   if (dir) payload.download_dir = dir;
+  if (snapshot) payload.snapshot_dir = snapshot;
   if (Number.isFinite(limit) && limit > 0) payload.max_download_mb = limit;
   return payload;
 }

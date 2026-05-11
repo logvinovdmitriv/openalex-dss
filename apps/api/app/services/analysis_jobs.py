@@ -108,6 +108,7 @@ def _protocol_result(mode: str, analysis: dict[str, Any], payload: dict[str, Any
             "protocol": "bootstrap_interval_job",
             "iterations_requested": iterations,
             "scope": analysis.get("scope") or {},
+            "methodology_checks": _methodology_checks(rows, analysis),
             "summary": _bootstrap_summary(rows, analysis, iterations, payload),
         }
     if mode == "permutation":
@@ -115,12 +116,14 @@ def _protocol_result(mode: str, analysis: dict[str, Any], payload: dict[str, Any
             "protocol": "permutation_overlap_job",
             "iterations_requested": iterations,
             "scope": analysis.get("scope") or {},
+            "methodology_checks": _methodology_checks(rows, analysis),
             "summary": _permutation_summary(rows, analysis, iterations, payload),
         }
     return {
         "protocol": "convergence_by_prefix_job",
         "prefix_sizes": _prefix_sizes(payload, int((analysis.get("scope") or {}).get("n_authors") or analysis.get("n_authors") or 0)),
         "scope": analysis.get("scope") or {},
+        "methodology_checks": _methodology_checks(rows, analysis),
         "summary": _convergence_summary(rows, analysis, payload),
     }
 
@@ -159,6 +162,20 @@ def _bootstrap_summary(rows: list[dict[str, Any]], analysis: dict[str, Any], ite
                 samples[pair].append(value)
     output: list[dict[str, Any]] = []
     for left, right in pairs:
+        if _metric_is_constant(rows, left) or _metric_is_constant(rows, right):
+            output.append(
+                {
+                    "metric_a": left,
+                    "metric_b": right,
+                    "statistic": "spearman",
+                    "status": "constant_metric",
+                    "message": "Bootstrap CI не рассчитан: один из показателей не изменяется в выбранном срезе.",
+                    "iterations": 0,
+                    "sample_size": sample_size,
+                    "method": "bootstrap_resampling_authors",
+                }
+            )
+            continue
         values = sorted(samples[(left, right)])
         if not values:
             continue
@@ -173,6 +190,7 @@ def _bootstrap_summary(rows: list[dict[str, Any]], analysis: dict[str, Any], ite
                 "iterations": len(values),
                 "sample_size": sample_size,
                 "method": "bootstrap_resampling_authors",
+                "status": "ok",
             }
         )
     return output
@@ -188,6 +206,19 @@ def _permutation_summary(rows: list[dict[str, Any]], analysis: dict[str, Any], i
     ranks = {metric: _ordered_authors(rows, metric) for metric in metrics}
     output: list[dict[str, Any]] = []
     for left, right in _metric_pairs(metrics):
+        if _metric_is_constant(rows, left) or _metric_is_constant(rows, right):
+            output.append(
+                {
+                    "metric_a": left,
+                    "metric_b": right,
+                    "top_n": top_n,
+                    "status": "constant_metric",
+                    "message": "Permutation test не рассчитан: один из показателей не изменяется в выбранном срезе.",
+                    "iterations": 0,
+                    "null_model": "random_top_n_without_replacement",
+                }
+            )
+            continue
         left_top = set(ranks.get(left, [])[:top_n])
         right_top = set(ranks.get(right, [])[:top_n])
         observed = len(left_top & right_top)
@@ -207,8 +238,11 @@ def _permutation_summary(rows: list[dict[str, Any]], analysis: dict[str, Any], i
                 "permutation_p_value": (extreme + 1) / (iterations + 1),
                 "iterations": iterations,
                 "null_model": "random_top_n_without_replacement",
+                "p_value_holm": None,
+                "status": "ok",
             }
         )
+    _apply_holm_adjustment(output)
     return output
 
 
@@ -256,6 +290,38 @@ def _prefix_sizes(payload: dict[str, Any], n_authors: int) -> list[int]:
 def _metric_pairs(metrics: list[str]) -> list[tuple[str, str]]:
     cleaned = [metric for metric in metrics if metric]
     return [(left, right) for index, left in enumerate(cleaned) for right in cleaned[index + 1 :]]
+
+
+def _methodology_checks(rows: list[dict[str, Any]], analysis: dict[str, Any]) -> dict[str, Any]:
+    metrics = list(analysis.get("metrics") or [])
+    constant_metrics = [metric for metric in metrics if _metric_is_constant(rows, metric)]
+    all_zero_metrics = [metric for metric in metrics if rows and all(_numeric(row.get(metric)) == 0.0 for row in rows)]
+    return {
+        "n_authors": len(rows),
+        "min_rows_for_rank_correlation": 3,
+        "min_rows_for_topn_overlap": 2,
+        "constant_metrics": constant_metrics,
+        "all_zero_metrics": all_zero_metrics,
+        "status": "ok" if len(rows) >= 3 and not constant_metrics else "limited",
+    }
+
+
+def _metric_is_constant(rows: list[dict[str, Any]], metric: str) -> bool:
+    if len(rows) < 2:
+        return True
+    values = {round(_numeric(row.get(metric)), 12) for row in rows}
+    return len(values) <= 1
+
+
+def _apply_holm_adjustment(rows: list[dict[str, Any]]) -> None:
+    tests = [row for row in rows if row.get("status") == "ok" and isinstance(row.get("permutation_p_value"), (int, float))]
+    ordered = sorted(tests, key=lambda row: float(row["permutation_p_value"]))
+    m = len(ordered)
+    running = 0.0
+    for index, row in enumerate(ordered):
+        adjusted = min(1.0, float(row["permutation_p_value"]) * (m - index))
+        running = max(running, adjusted)
+        row["p_value_holm"] = running
 
 
 def _ordered_authors(rows: list[dict[str, Any]], metric: str) -> list[str]:

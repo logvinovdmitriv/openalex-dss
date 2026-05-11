@@ -45,6 +45,7 @@ AUTHOR_INDEX_FIELDS = [
     "top1_share",
     "f5",
     "fm5",
+    "pci",
     "iupv",
     "islv",
     "lrdi",
@@ -128,13 +129,15 @@ def assign_iupv_percentiles(rows: list[dict[str, Any]], group_field: str = "frac
         }
         for row in group:
             if as_float(row.get("p")) <= 0 or as_float(row.get("h")) <= 0 or as_float(row.get("c_frac")) <= 0:
+                row["pci"] = 0.0
                 row["iupv"] = 0.0
             else:
-                row["iupv"] = iupv_from_percentiles(
+                row["pci"] = iupv_from_percentiles(
                     percentile_maps["p"][id(row)],
                     percentile_maps["h"][id(row)],
                     percentile_maps["c_frac"][id(row)],
                 )
+                row["iupv"] = row["pci"]
             row["islv"] = islv_from_percentiles(
                 percentile_maps["h"][id(row)],
                 percentile_maps["c_frac"][id(row)],
@@ -632,6 +635,7 @@ def _index_row(
         "top1_share": (max(citations) / c) if c > 0 and citations else 0.0,
         "f5": f5_value,
         "fm5": fm5_value,
+        "pci": 0.0,
         "iupv": 0.0,
         "islv": 0.0,
         "lrdi": lrdi(group, analysis_year=analysis_year, p0=lrdi_p0, lam=lrdi_lambda),

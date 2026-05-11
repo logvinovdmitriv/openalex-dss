@@ -120,6 +120,7 @@ def build_report_bundle(
     current_slice = state.get("slice") or state.get("current_slice") or {}
     request = state.get("request") or {}
     analysis_eligibility = calculation_passport.get("analysis_eligibility") or {"status": "unknown", "allowed_for_final_analysis": False}
+    analysis_status = _analysis_status(analysis_eligibility, checksums)
 
     data_selection_kwargs = _data_selection_kwargs(data_filters=data_filters, data_sort=data_sort, data_direction=data_direction, data_limit=data_limit)
     top = warehouse.metric_ranking(
@@ -281,6 +282,7 @@ def build_report_bundle(
         "slice_passport": slice_passport,
         "calculation_passport": calculation_passport,
         "analysis_eligibility": analysis_eligibility,
+        "analysis_status": analysis_status,
         "current_slice": current_slice,
         "openalex_request": request,
         "quality_report": quality,
@@ -297,6 +299,8 @@ def build_report_bundle(
             "scientometrics_conclusion_md": "Contains the deterministic conclusion draft rendered as Markdown for the selected scientometric analysis scope.",
         },
         "methodology_protocol": {
+            "analysis_protocol_id": "baseline_core" if not custom_metric_defs else "custom_formula_validation",
+            "protocol_version": _analysis_protocol_version(),
             "source_mode": "openalex_cli_filtered_metadata",
             "storage_rule": "raw immutable dump -> dump tables -> run-scoped metric tables",
             "topic_mapping_rule": "ВАК-код не является OpenAlex-фильтром; mapping фиксируется отдельно как resolved entities / mapping file.",
@@ -307,6 +311,37 @@ def build_report_bundle(
     }
     _write_report_bundle(run_id, scope_hash, report)
     return report
+
+
+def _analysis_status(analysis_eligibility: dict[str, Any], checksums: dict[str, Any]) -> dict[str, Any]:
+    allowed = bool(analysis_eligibility.get("allowed_for_final_analysis"))
+    if not allowed:
+        status = "blocked" if analysis_eligibility.get("status") not in {"unknown", "exploratory"} else "exploratory"
+    elif checksums.get("sha256_manifest"):
+        status = "final_reproducible"
+    else:
+        status = "pilot_ready"
+    return {
+        "status": status,
+        "allowed_for_final_report": status == "final_reproducible",
+        "message": {
+            "final_reproducible": "Финальный воспроизводимый анализ: dump полный, gate пройден, checksums доступны.",
+            "pilot_ready": "Пилотный анализ: расчет разрешен, но полный checksum-manifest не найден.",
+            "exploratory": "Предварительный анализ: результат можно исследовать, но нельзя выдавать как финальный.",
+            "blocked": "Финальный анализ заблокирован условиями качества или полноты данных.",
+        }.get(status, status),
+    }
+
+
+def _analysis_protocol_version() -> str:
+    path = ROOT / "configs/analysis_protocols.yaml"
+    if not path.is_file():
+        return "0"
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return "0"
+    return str(data.get("version") or "1.0")
 
 
 def report_bundle_json(

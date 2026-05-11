@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.core.paths import DATA, ROOT, SRC
-from app.providers import openalex_api_provider, openalex_cli_provider
+from app.providers import openalex_api_provider, openalex_cli_provider, openalex_snapshot_provider
 from app.services import artifact_context, author_slice
 from app.services.filesystem import file_profile, resolve_safe_path
 from app.services import metadata_store, query_planner, reports
@@ -138,10 +138,29 @@ def fetch_slice_dump(
                 max_download_bytes=_max_download_bytes(payload),
             )
         elif source_strategy == "ids_then_hydrate":
+            work_ids = _work_ids_from_payload(payload)
+            if not work_ids:
+                work_ids = openalex_api_provider.collect_work_ids_cursor(
+                    cfg,
+                    api_key=api_key,
+                    progress_callback=progress_callback,
+                    cancel_callback=cancel_callback,
+                    max_ids=int(estimate.get("estimate_count") or 0),
+                )
             passport = openalex_api_provider.hydrate_work_ids(
                 cfg,
-                work_ids=_work_ids_from_payload(payload),
+                work_ids=work_ids,
                 api_key=api_key,
+                out_dir=_download_output_dir(payload, cfg, source_strategy=source_strategy),
+                estimate=estimate_payload,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
+                max_download_bytes=_max_download_bytes(payload),
+            )
+        elif source_strategy in {"openalex_snapshot_jsonl", "snapshot_partition_scan"}:
+            passport = openalex_snapshot_provider.scan_snapshot_partitions(
+                cfg,
+                snapshot_dir=_snapshot_dir_from_payload(payload),
                 out_dir=_download_output_dir(payload, cfg, source_strategy=source_strategy),
                 estimate=estimate_payload,
                 progress_callback=progress_callback,
@@ -150,7 +169,7 @@ def fetch_slice_dump(
             )
         else:
             raise ValueError(
-                "Неизвестный способ загрузки среза. Доступны openalex_cli, openalex_api/api_cursor_selected_fields и ids_then_hydrate."
+                "Неизвестный способ загрузки среза. Доступны openalex_cli, openalex_api/api_cursor_selected_fields, ids_then_hydrate и openalex_snapshot_jsonl."
             )
         passport["query_plan"] = plan
         if not passport.get("dump_id"):
@@ -758,6 +777,8 @@ def _download_output_dir(payload: dict[str, Any], cfg: Any, *, source_strategy: 
             "openalex_api": "openalex_api",
             "api_cursor_selected_fields": "openalex_api",
             "ids_then_hydrate": "openalex_ids",
+            "openalex_snapshot_jsonl": "openalex_snapshot",
+            "snapshot_partition_scan": "openalex_snapshot",
         }.get(str(source_strategy or "openalex_cli"), "openalex_cli")
         base = DATA / "raw" / source_root / _safe_id(str(cfg.slice_name or "slice"))
         return base / folder_id if folder_id else base
@@ -790,6 +811,18 @@ def _work_ids_from_payload(payload: dict[str, Any]) -> list[str]:
         path = resolve_safe_path(ids_file)
         ids.extend(part.strip() for part in path.read_text(encoding="utf-8").replace("\n", ",").split(",") if part.strip())
     return ids
+
+
+def _snapshot_dir_from_payload(payload: dict[str, Any]) -> Path:
+    raw = str(payload.get("snapshot_dir") or payload.get("source_dir") or payload.get("snapshot_path") or "").strip()
+    if not raw:
+        raise ValueError("Для режима snapshot/partition scan укажите snapshot_dir с локальными JSONL/JSONL.GZ файлами OpenAlex.")
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = (DATA / path).resolve()
+    if not path.exists() or not path.is_dir():
+        raise ValueError(f"Папка snapshot не найдена: {path}")
+    return path
 
 
 def _max_download_bytes(payload: dict[str, Any]) -> int:

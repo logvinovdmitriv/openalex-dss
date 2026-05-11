@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from app.application import scientometric_workflow
 from app.api.query_contracts import AnalysisFilterQuery, DataSelectionQuery, ScopeQuery
-from app.services import cohorts, custom_metrics, warehouse
+from app.services import cohorts, custom_metrics, formula_validation, warehouse
 
 
 router = APIRouter(tags=["analytics"])
@@ -169,6 +169,18 @@ def save_custom_metric_model(payload: dict[str, Any] = Body(...)) -> dict[str, A
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"message": str(exc), "action": "Исправьте формулу и повторите сохранение."}) from exc
     return {"run_id": run_id, "model": model}
+
+
+@router.post("/analytics/custom-metrics/validate")
+def validate_custom_metric_model(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        result = formula_validation.validate_formula(payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "action": "Исправьте формулу, параметры или выберите расчет и повторите проверку."},
+        ) from exc
+    return result
 
 
 @router.delete("/analytics/custom-metrics/{model_id}")

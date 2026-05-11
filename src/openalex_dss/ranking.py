@@ -9,7 +9,7 @@ from .io_utils import as_float, as_int, read_table_dicts, write_csv_dicts, write
 
 CORE_METRICS = ("p", "c", "c_frac", "h", "i10", "g")
 SUPPORT_METRICS = ("cpp", "m_local", "top1_share")
-EXPERIMENTAL_METRICS = ("f5", "fm5", "iupv", "islv", "lrdi")
+EXPERIMENTAL_METRICS = ("f5", "fm5", "pci", "iupv", "islv", "lrdi")
 METRICS = (*CORE_METRICS, *SUPPORT_METRICS, *EXPERIMENTAL_METRICS)
 DEFAULT_TIE_BREAKERS = ("c", "p", "author_id")
 

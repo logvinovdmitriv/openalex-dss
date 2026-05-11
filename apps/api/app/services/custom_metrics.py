@@ -26,6 +26,7 @@ BASE_NUMERIC_FIELDS = metric_registry.computed_metric_ids() | {
     "top1_share",
     "f5",
     "fm5",
+    "pci",
     "iupv",
     "islv",
     "lrdi",

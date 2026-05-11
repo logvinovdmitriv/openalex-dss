@@ -1,69 +1,67 @@
 version: "1.0"
 protocols:
-  - protocol_id: "baseline_core_protocol"
-    label: "Базовый протокол сравнения популярных показателей"
-    description: "Воспроизводимое сравнение популярных наукометрических показателей на фиксированном локальном срезе."
-    metrics:
-      core:
-        - p
-        - c
-        - c_frac
-        - h
-        - i10
-        - g
-      diagnostic:
-        - cpp
-        - top1_share
-        - mean_authors_per_work
-        - share_single_authored
-        - n_flagged_works
-        - n_truncated_works
-      experimental:
-        - f5
-        - fm5
-        - iupv
-        - islv
-        - lrdi
-    baseline_metric: "h"
-    fraction_mode: "strict_authors_count"
+  baseline_core:
+    label_ru: "Базовое сравнение популярных индексов"
+    description_ru: "Воспроизводимый базовый протокол: P, C, C_frac, h, i10 и g по полному backend-срезу."
+    metrics: [p, c, c_frac, h, i10, g]
+    fraction_mode: strict_authors_count
     eligibility:
-      primary_mode: "all_authors"
-      optional_min_publications: 2
-    comparisons:
-      correlations:
-        - spearman
-        - kendall_tau_b
-        - pearson_log1p
-      overlap_n:
-        - 10
-        - 20
-        - 50
-        - 100
-      rank_delta_pairs:
-        - [c, c_frac]
-        - [h, g]
-        - [h, i10]
-        - [p, h]
-    sensitivity:
-      planned:
-        - top1_per_author_removed
-        - global_top_k_removed
-        - integer_vs_fractional
-        - strict_vs_renorm
-        - exclude_flagged_works
+      min_p: 1
     outputs:
-      tables:
-        - slice_quality_summary
-        - metric_rank_summary
-        - pairwise_metric_comparison
-      figures:
-        - quality_funnel
-        - works_by_year
-        - citations_log_hist
-        - authors_per_work_hist
-        - metric_boxplots
-        - metric_ecdf
-        - spearman_heatmap
-        - kendall_heatmap
-        - top_overlap_heatmaps
-        - rank_delta
+      - descriptive
+      - chart_readiness
+      - spearman
+      - kendall_tau_b
+      - topn_overlap
+      - rank_delta
+      - report_findings
+    final_gate:
+      require_complete_dump: true
+      require_signatures: true
+      require_backfill_complete: true
+      require_core_metrics: true
+      require_checksums: true
+  custom_formula_validation:
+    label_ru: "Проверка пользовательской формулы"
+    description_ru: "СППР-протокол для проверки новой формулы относительно baseline-метрик."
+    baseline_metrics: [p, c, c_frac, h, i10, g]
+    required_tests:
+      - distribution_readiness
+      - correlation_vs_core
+      - topn_overlap_vs_h
+      - topn_overlap_vs_c_frac
+      - top1_removed_stability
+      - fractional_vs_integer_shift
+      - coauthorship_bias_check
+      - tie_rate_check
+    acceptance_hints:
+      high_duplicate_threshold: 0.98
+      low_relation_threshold: 0.30
+      useful_relation_min: 0.60
+      useful_relation_max: 0.95
+templates:
+  iupv_light:
+    label_ru: "IUPV-Light"
+    description_ru: "Сбалансированная формула: публикационная устойчивость, долевая цитируемость и штраф за зависимость от одной сверхцитируемой работы."
+    expression_template: "100 * sqrt(p / (p + {N0})) * (log1p(c_frac) / (1 + log1p(c_frac))) * (1 - {alpha} * max(0, (top1_share - {tau}) / (1 - {tau})))"
+    parameters:
+      N0:
+        value: 5
+        min: 1
+        max: 20
+        step: 1
+        label_ru: "Порог публикационной устойчивости"
+      alpha:
+        value: 0.25
+        min: 0
+        max: 0.8
+        step: 0.05
+        label_ru: "Сила штрафа за концентрацию"
+      tau:
+        value: 0.6
+        min: 0.3
+        max: 0.9
+        step: 0.05
+        label_ru: "Допустимая доля top-1 работы"
+    base_fields: [p, c_frac, top1_share]
+    range: [0, 100]

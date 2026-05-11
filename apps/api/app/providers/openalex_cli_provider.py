@@ -190,7 +190,15 @@ def download_works_metadata(
     dump_id = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
     finished_at = datetime.now(timezone.utc)
     actual_raw_bytes = raw_path.stat().st_size
-    completeness = "partial" if partial_stop and records > 0 else "complete" if records > 0 else "empty"
+    records_count_verified = records > 0 and (planned_records <= 0 or records == planned_records)
+    if records <= 0:
+        completeness = "empty"
+    elif partial_stop:
+        completeness = "partial"
+    elif not records_count_verified:
+        completeness = "partial_count_mismatch"
+    else:
+        completeness = "complete"
     allowed_for_final_analysis = (
         bool(consistency.get("compatible"))
         and estimate_signature_verified
@@ -198,6 +206,7 @@ def download_works_metadata(
         and download_signature_verified
         and records > 0
         and completeness == "complete"
+        and records_count_verified
     )
     dump_manifest = {
         "slice_id": cfg.slice_name,
@@ -235,6 +244,7 @@ def download_works_metadata(
         "records_expected": planned_records or None,
         "records_downloaded": records,
         "records_delta": (records - planned_records) if planned_records else None,
+        "records_count_verified": bool(records_count_verified),
         "no_data": records == 0,
         "bytes_written": actual_raw_bytes,
         "estimated_raw_bytes": planned_raw_bytes or None,

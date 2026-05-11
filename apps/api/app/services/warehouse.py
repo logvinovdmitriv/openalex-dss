@@ -38,6 +38,7 @@ _SEARCHABLE_FIELDS_BY_TABLE = {
     "author_institutions": {"work_id", "author_id", "institution_id", "institution_display_name", "country_code"},
     "author_countries": {"work_id", "author_id", "country_code"},
 }
+_AUTHOR_RELATION_FILTER_FIELDS = {"country_code", "author_country_code", "institution_id"}
 logger = logging.getLogger(__name__)
 
 
@@ -88,6 +89,7 @@ INDEX_NUMERIC_FIELDS = {
     "top1_share",
     "f5",
     "fm5",
+    "pci",
     "iupv",
     "islv",
     "lrdi",
@@ -109,6 +111,7 @@ AUTHOR_INDEX_DETAIL_FIELDS = (
     "m_local",
     "f5",
     "fm5",
+    "pci",
     "iupv",
     "islv",
     "lrdi",
@@ -157,7 +160,7 @@ AUTHOR_WORK_DETAIL_FIELDS = (
 
 NATIVE_LINE_CHART_METRICS = ("p", "c", "h", "i10")
 CORE_LINE_CHART_METRICS = ("p", "c", "c_frac", "h", "i10", "g")
-EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "cpp", "m_local", "top1_share", "iupv", "islv", "lrdi")
+EXTENDED_LINE_CHART_METRICS = (*CORE_LINE_CHART_METRICS, "cpp", "m_local", "top1_share", "pci", "iupv", "islv", "lrdi")
 LINE_CHART_METRICS = EXTENDED_LINE_CHART_METRICS
 
 FilterSet = dict[str, Any]
@@ -642,6 +645,7 @@ def _table_query_parts(
         where.append("work_id = ?")
         args.append(work_id)
     _append_column_filter_clauses(where, args, fields, data_filters)
+    _append_author_relation_filter_clauses(where, args, fields, data_filters)
 
     where_sql = "WHERE " + " AND ".join(where) if where else ""
     order_sql = ""
@@ -719,6 +723,27 @@ def _append_column_filter_clauses(where: list[str], args: list[Any], fields: lis
             max_value = _parse_filter_number(max_text, field)
             where.append(f"TRY_CAST({field} AS DOUBLE) <= ?")
             args.append(max_value)
+
+
+def _append_author_relation_filter_clauses(where: list[str], args: list[Any], fields: list[str] | set[str], data_filters: dict[str, Any] | None) -> None:
+    field_set = set(fields)
+    if "author_id" not in field_set:
+        return
+    filters = parse_column_filters(data_filters)
+    country_value = _relation_filter_value(filters, "country_code") or _relation_filter_value(filters, "author_country_code")
+    if country_value and "country_code" not in field_set and "author_country_code" not in field_set:
+        where.append("author_id IN (SELECT DISTINCT author_id FROM author_countries WHERE upper(coalesce(country_code, '')) = ?)")
+        args.append(country_value.upper()[:2])
+    institution_value = _relation_filter_value(filters, "institution_id")
+    if institution_value and "institution_id" not in field_set:
+        short_id = _short_openalex_id(institution_value)
+        where.append("author_id IN (SELECT DISTINCT author_id FROM author_institutions WHERE institution_id = ? OR institution_id ILIKE ?)")
+        args.extend([institution_value, f"%{short_id}%"])
+
+
+def _relation_filter_value(filters: dict[str, dict[str, str]], field: str) -> str:
+    payload = filters.get(field) or {}
+    return str(payload.get("contains") or "").strip()
 
 
 def _append_qualified_column_filter_clauses(where: list[str], args: list[Any], *, alias: str, fields: set[str], data_filters: dict[str, Any] | None) -> None:
@@ -831,9 +856,9 @@ def _validate_table_selection(fields: list[str] | set[str], *, sort: str = "", d
             raise ValueError(f"Поле «{_COLUMN_LABELS.get(sort_field, sort_field)}» нельзя использовать для сортировки.")
     filters = parse_column_filters(data_filters)
     for field in filters:
-        if field not in field_set:
+        if field not in field_set and not (field in _AUTHOR_RELATION_FILTER_FIELDS and "author_id" in field_set):
             raise ValueError(f"Поле «{field}» отсутствует в выбранной таблице.")
-        if not _column_filterable(field):
+        if field in field_set and not _column_filterable(field):
             raise ValueError(f"Поле «{_COLUMN_LABELS.get(field, field)}» нельзя использовать для фильтрации.")
 
 
@@ -1106,8 +1131,12 @@ def _selected_registered_index_rows(
     select_fields: list[str] | tuple[str, ...] | set[str] | None,
 ) -> list[dict[str, Any]]:
     custom_ids = custom_metrics.custom_metric_ids(custom_metric_defs)
-    native_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field in fields}
-    python_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field not in fields}
+    native_filters = {
+        field: value
+        for field, value in parse_column_filters(data_filters).items()
+        if field in fields or (field in _AUTHOR_RELATION_FILTER_FIELDS and "author_id" in fields)
+    }
+    python_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field not in native_filters}
     sort_is_native = not data_sort or data_sort in fields
     needs_python_selection = bool(author_ids) or bool(python_filters) or bool(data_sort and not sort_is_native)
     required_fields = _selected_index_query_fields(
@@ -1190,8 +1219,12 @@ def _selected_cached_index_rows(
             fields = list(field_set)
         custom_ids = custom_metrics.custom_metric_ids(custom_metric_defs)
         field_set = set(fields)
-        native_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field in field_set}
-        python_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field not in field_set}
+        native_filters = {
+            field: value
+            for field, value in parse_column_filters(data_filters).items()
+            if field in field_set or (field in _AUTHOR_RELATION_FILTER_FIELDS and "author_id" in field_set)
+        }
+        python_filters = {field: value for field, value in parse_column_filters(data_filters).items() if field not in native_filters}
         sort_is_native = not data_sort or data_sort in field_set
         needs_python_selection = bool(author_ids) or bool(python_filters) or bool(data_sort and not sort_is_native)
         required_fields = _selected_index_query_fields(
@@ -1854,6 +1887,7 @@ def _indices_from_filtered_author_work_rows(
                 "top1_share": (max(citations) / c) if c > 0 and citations else 0.0,
                 "f5": f5_value,
                 "fm5": fm5_value,
+                "pci": 0.0,
                 "iupv": 0.0,
                 "islv": 0.0,
                 "lrdi": lrdi_metric(
@@ -1992,7 +2026,7 @@ def _metric_ranking_sql_payload(
         source_is_cached = True
 
     if source_is_cached and source_path is not None:
-        conn = duckdb.connect(":memory:")
+        conn = connect_scope(run_id=run_id, dump_id=dump_id)
         escaped = str(source_path).replace("'", "''")
         conn.execute(f"CREATE VIEW ranking_indices AS SELECT * FROM read_parquet('{escaped}')")
         close_conn = True
@@ -2111,7 +2145,7 @@ def iter_metric_ranking_csv(
 
     def generate() -> Iterator[str]:
         if source_is_cached and source_path is not None:
-            conn = duckdb.connect(":memory:")
+            conn = connect_scope(run_id=run_id, dump_id=dump_id)
             escaped = str(source_path).replace("'", "''")
             conn.execute(f"CREATE VIEW ranking_indices AS SELECT * FROM read_parquet('{escaped}')")
         else:
@@ -2196,6 +2230,7 @@ def _metric_ranking_sql_query(
         where.append(f"author_id IN ({', '.join('?' for _ in ids)})")
         args.extend(ids)
     _append_column_filter_clauses(where, args, fields, data_filters)
+    _append_author_relation_filter_clauses(where, args, fields, data_filters)
     where_sql = "WHERE " + " AND ".join(where) if where else ""
     source_args = list(args)
     source_sql = f"SELECT * FROM {table_name} {where_sql}"
@@ -2428,7 +2463,7 @@ def _metric_distribution_sql_payload(
         source_is_cached = True
 
     if source_is_cached and source_path is not None:
-        conn = duckdb.connect(":memory:")
+        conn = connect_scope(run_id=run_id, dump_id=dump_id)
         escaped = str(source_path).replace("'", "''")
         conn.execute(f"CREATE VIEW distribution_indices AS SELECT * FROM read_parquet('{escaped}')")
         close_conn = True
@@ -2531,6 +2566,7 @@ def _distribution_source_sql(
         where.append(f"author_id IN ({', '.join('?' for _ in ids)})")
         args.extend(ids)
     _append_column_filter_clauses(where, args, fields, data_filters)
+    _append_author_relation_filter_clauses(where, args, fields, data_filters)
     where_sql = "WHERE " + " AND ".join(where) if where else ""
     source_sql = f"SELECT * FROM {table_name} {where_sql}"
     limit = max(0, min(int(data_limit or 0), 500_000))

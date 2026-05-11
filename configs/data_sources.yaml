@@ -36,12 +36,14 @@ sources:
       - upsert_by_id
   - id: openalex_snapshot_jsonl
     label: "OpenAlex public snapshot JSONL"
-    role: "Полная квартальная копия OpenAlex через S3/AWS CLI без авторизации; не используется как основной режим ноутбука."
-    status: "prepared"
+    role: "Локальная папка OpenAlex snapshot JSONL/JSONL.GZ для partition scan больших или повторяемых срезов без bulk cursor API."
+    status: "implemented"
     supports:
       - aws_s3_sync
       - manifest
       - jsonl_gz
+      - partition_scan
+      - local_full_slice_extraction
   - id: openalex_snapshot_parquet
     label: "OpenAlex snapshot Parquet"
     role: "Parquet snapshot для серверного/enterprise режима; не является основным режимом ноутбука и не используется без локального/серверного lakehouse."

@@ -179,6 +179,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
     profile = profiles.get(profile_id) or next(iter(profiles.values()))
     source_strategy = str(payload.get("source_strategy") or payload.get("data_source_id") or "openalex_cli")
     download_dir = str(payload.get("download_dir") or "").strip()
+    snapshot_dir = str(payload.get("snapshot_dir") or "").strip()
     download_policy = _download_policy(payload, fallback=doc.get("download_policy_default"))
     plan_id = _safe_id(f"mat_{slice_id}_{profile['profile_id']}_{uuid.uuid4().hex[:8]}")
     cfg = author_slice.config_from_payload({**doc["technical_payload"], "workflow_mode": "strict_works"})
@@ -205,6 +206,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
             **doc["technical_payload"],
             "source_strategy": source_strategy,
             **({"download_dir": download_dir} if download_dir else {}),
+            **({"snapshot_dir": snapshot_dir} if snapshot_dir else {}),
             "download_policy": download_policy,
             "accepted_estimate_signature": (estimate.get("estimate") or {}).get("estimate_signature"),
             "accepted_download_signature": (estimate.get("estimate") or {}).get("download_signature"),
@@ -215,6 +217,8 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         "openalex_api": "openalex_api",
         "api_cursor_selected_fields": "openalex_api",
         "ids_then_hydrate": "openalex_ids",
+        "openalex_snapshot_jsonl": "openalex_snapshot",
+        "snapshot_partition_scan": "openalex_snapshot",
     }.get(source_strategy, "openalex_cli")
     materialization = {
         "materialization_id": plan_id,
@@ -227,6 +231,7 @@ def create_materialization_plan(slice_id: str, payload: dict[str, Any] | None = 
         "profile": profile,
         "source_strategy": source_strategy,
         "download_dir": download_dir,
+        "snapshot_dir": snapshot_dir,
         "download_policy": download_policy,
         "estimated": estimate,
         "storage_estimate": estimate.get("storage_estimate") or {},
