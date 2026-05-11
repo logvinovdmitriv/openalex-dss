@@ -12,7 +12,7 @@ from app.core.paths import DATA, ROOT, SRC
 from app.providers import openalex_api_provider, openalex_cli_provider, openalex_snapshot_provider
 from app.services import artifact_context, author_slice
 from app.services.filesystem import file_profile, resolve_safe_path
-from app.services import metadata_store, query_planner, reports
+from app.services import dump_integrity, metadata_store, query_planner, reports
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -201,7 +201,14 @@ def import_local_file(
         raise ValueError("Only OpenAlex JSONL or JSONL.GZ dumps are importable in this pipeline")
 
     dump_manifest = payload.get("dump_manifest") if isinstance(payload.get("dump_manifest"), dict) else {}
+    if dump_manifest:
+        dump_manifest = dump_integrity.manifest_with_integrity(
+            {**dump_manifest, "raw_jsonl": str(source)},
+            require_expected_count=str(dump_manifest.get("scientific_completeness") or "") in {"complete", "full"},
+        )
     analysis_eligibility = payload.get("analysis_eligibility") if isinstance(payload.get("analysis_eligibility"), dict) else analysis_eligibility_from_dump(dump_manifest)
+    if isinstance(dump_manifest.get("integrity_validation"), dict) and not dump_manifest["integrity_validation"].get("ok"):
+        analysis_eligibility = analysis_eligibility_from_dump(dump_manifest)
     import_mode = str(payload.get("import_mode") or "exploratory")
     if import_mode == "final_reproducible" and not analysis_eligibility.get("allowed_for_final_analysis"):
         raise ValueError("Финальный импорт требует dump_manifest с allowed_for_final_analysis=true. Используйте exploratory import для чернового просмотра.")
@@ -466,6 +473,7 @@ def _run_compute(
     ratings_csv = run_tables / "ratings.csv"
 
     step(0.18, "Формирование авторского уровня данных")
+    input_counts = _table_counts(input_tables)
     build_author_work_metrics(
         input_tables["works"],
         input_tables["authorships"],
@@ -480,6 +488,12 @@ def _run_compute(
         from_publication_date=str(getattr(cfg, "from_publication_date", "") or ""),
         to_publication_date=str(getattr(cfg, "to_publication_date", "") or ""),
     )
+    author_work_count = _table_row_count(author_work_parquet if author_work_parquet.exists() else author_work_csv)
+    if _positive_count(input_counts.get("works")) and _positive_count(input_counts.get("authorships")) and author_work_count == 0:
+        raise ValueError(
+            "Расчет авторского уровня дал 0 строк при непустых works/authorships. "
+            "Проверьте, что параметры среза в run совпадают с dump_manifest и локальными фильтрами."
+        )
     step(0.48, "Расчет наукометрических показателей")
     compute_indices(
         author_work_parquet if author_work_parquet.exists() else author_work_csv,
@@ -489,8 +503,14 @@ def _run_compute(
         cfg.analysis_year,
         return_rows=False,
     )
+    indices_count = _table_row_count(indices_parquet if indices_parquet.exists() else indices_csv)
+    if author_work_count and indices_count == 0:
+        raise ValueError("Расчет индексов дал 0 строк при непустом author_work.")
     step(0.72, "Построение рейтингов")
     build_ratings(indices_parquet if indices_parquet.exists() else indices_csv, ratings_csv, return_rows=False)
+    ratings_count = _table_row_count(ratings_csv)
+    if indices_count and ratings_count == 0:
+        raise ValueError("Построение рейтингов дало 0 строк при непустой таблице indices.")
     run_table_outputs = {
         "author_work": author_work_csv,
         "indices": indices_csv,
@@ -710,6 +730,29 @@ def _table_checksums(paths: dict[str, Path]) -> dict[str, str]:
     return {name: sha256_file(path) for name, path in paths.items() if path.is_file()}
 
 
+def _table_counts(paths: dict[str, Path]) -> dict[str, int | None]:
+    return {name: _table_row_count(path) for name, path in paths.items() if path.is_file()}
+
+
+def _table_row_count(path: str | Path) -> int | None:
+    target = Path(path)
+    if not target.is_file():
+        return None
+    try:
+        import duckdb
+
+        escaped = str(target).replace("'", "''")
+        reader = "read_parquet" if target.suffix == ".parquet" else "read_csv_auto"
+        with duckdb.connect(":memory:") as conn:
+            return int(conn.execute(f"SELECT count(*) FROM {reader}('{escaped}')").fetchone()[0])
+    except Exception:
+        return None
+
+
+def _positive_count(value: int | None) -> bool:
+    return value is not None and value > 0
+
+
 def _table_manifest(paths: dict[str, Path], checksums: dict[str, str]) -> dict[str, dict[str, Any]]:
     return {
         name: {
@@ -908,7 +951,7 @@ def _archive_run_artifacts(cfg: Any, payload: dict[str, Any]) -> dict[str, Any]:
     if fetch_meta:
         _copy_or_record_artifact(fetch_meta, run_dir / "passports" / "fetch_meta.json", copied, "passports/fetch_meta.json")
 
-    for name in ("works", "authorships", "work_topics"):
+    for name in ("works", "authorships", "work_topics", "author_institutions", "author_countries"):
         source = _artifact_path(input_tables.get(name))
         if source:
             rel = f"{name}.parquet"
@@ -971,7 +1014,10 @@ def _dump_id_from_payload(payload: dict[str, Any]) -> str:
 
 
 def analysis_eligibility_from_dump(dump: dict[str, Any], *, dev_override: bool = False) -> dict[str, Any]:
+    integrity = dump.get("integrity_validation") if isinstance(dump.get("integrity_validation"), dict) else {}
     allowed = bool(dump.get("allowed_for_final_analysis"))
+    if integrity and not integrity.get("ok"):
+        allowed = False
     signatures = dump.get("signatures") if isinstance(dump.get("signatures"), dict) else {}
     status = "final" if allowed else ("dev_only_not_for_final_analysis" if dev_override else "blocked_not_for_final_analysis")
     return {
@@ -983,6 +1029,7 @@ def analysis_eligibility_from_dump(dump: dict[str, Any], *, dev_override: bool =
         "stop_reason": dump.get("stop_reason") or "",
         "records_downloaded": int(dump.get("records_downloaded") or 0),
         "raw_jsonl_sha256": dump.get("raw_jsonl_sha256") or "",
+        "integrity_validation": integrity,
         "signature_checks": {
             "estimate_signature_verified": bool(signatures.get("estimate_signature_verified")),
             "accepted_estimate_signature_verified": bool(signatures.get("accepted_estimate_signature_verified")),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import gzip
 import json
 import os
 import tempfile
@@ -644,7 +645,8 @@ class PipelineIntegrityTests(unittest.TestCase):
     def test_repair_dump_progress_hands_off_to_compute_phase(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             raw = Path(tmp) / "works.jsonl.gz"
-            raw.write_bytes(b"not-empty")
+            with gzip.open(raw, "wt", encoding="utf-8") as handle:
+                handle.write(json.dumps({"id": "https://openalex.org/W1"}) + "\n")
             progress: list[tuple[int | None, str]] = []
             with (
                 patch.object(materialization_jobs.pipeline, "analysis_eligibility_from_dump", return_value={"allowed_for_final_analysis": True, "status": "allowed"}),
@@ -664,7 +666,8 @@ class PipelineIntegrityTests(unittest.TestCase):
     def test_backfill_truncated_authorships_hands_off_to_import(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             raw = Path(tmp) / "works.jsonl.gz"
-            raw.write_bytes(b"not-empty")
+            with gzip.open(raw, "wt", encoding="utf-8") as handle:
+                handle.write(json.dumps({"id": "https://openalex.org/W1"}) + "\n")
             manifest = {
                 "dump_id": "dump_a",
                 "raw_jsonl": str(raw),
@@ -960,6 +963,37 @@ class PipelineIntegrityTests(unittest.TestCase):
             self.assertTrue((root / "runs" / "run_scoped" / "tables" / "indices.csv").is_file())
             self.assertTrue((root / "runs" / "run_scoped" / "passports" / "checksums.json").is_file())
             self.assertEqual(result["passport_outputs"]["checksums"], str(root / "runs" / "run_scoped" / "passports" / "checksums.json"))
+
+    def test_run_compute_fails_when_author_work_empty_after_nonempty_dump(self) -> None:
+        cfg = SimpleNamespace(
+            fraction_modes=("integer",),
+            lrdi_p0=5,
+            lrdi_lambda=0.15,
+            analysis_year=2026,
+            fraction_mode_default="integer",
+            slice_name="slice_empty_author_work_guard",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "inputs"
+            input_dir.mkdir()
+            works = input_dir / "works.csv"
+            authorships = input_dir / "authorships.csv"
+            topics = input_dir / "work_topics.csv"
+            works.write_text("work_id\nW1\n", encoding="utf-8")
+            authorships.write_text("work_id,author_id\nW1,A1\n", encoding="utf-8")
+            topics.write_text("work_id\nW1\n", encoding="utf-8")
+            with (
+                patch.object(pipeline, "DATA", root),
+                patch.object(pipeline, "build_author_work_metrics", side_effect=lambda *_args, **_kwargs: Path(_args[2]).write_text("author_id\n", encoding="utf-8")),
+            ):
+                with self.assertRaisesRegex(ValueError, "авторского уровня дал 0 строк"):
+                    pipeline._run_compute(
+                        cfg,
+                        run_id="run_empty_guard",
+                        dump_id="dump_empty_guard",
+                        input_tables={"works": works, "authorships": authorships, "work_topics": topics},
+                    )
 
     def test_recalculate_writes_pipeline_summary_before_archive_and_report(self) -> None:
         events: list[str] = []

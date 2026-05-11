@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 import socket
 import time
 import urllib.error
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from app.core.paths import DATA, SRC
+from app.services import dump_integrity
 
 import sys
 
@@ -127,24 +129,80 @@ def hydrate_work_ids(
     cancel_callback: Callable[[], bool] | None = None,
     max_download_bytes: int = 0,
 ) -> dict[str, Any]:
-    ids = [str(item).strip().rstrip("/").rsplit("/", 1)[-1] for item in work_ids if str(item).strip()]
+    ids = list(dict.fromkeys(str(item).strip().rstrip("/").rsplit("/", 1)[-1] for item in work_ids if str(item).strip()))
     if not ids:
         raise ValueError("Для режима ids_then_hydrate нужен непустой список OpenAlex work IDs.")
     base_dir = ensure_dir(Path(out_dir) if out_dir else DATA / "raw/openalex_ids" / cfg.slice_name)
     raw_path = base_dir / "works.jsonl.gz"
+    manifest_path = base_dir / "hydration_manifest.jsonl"
+    checkpoint_path = base_dir / "ids_hydration_checkpoint.json"
+    chunks_dir = ensure_dir(base_dir / "hydrated")
     started_at = datetime.now(timezone.utc)
     total = len(ids)
-    records = 0
-    bytes_written = 0
-    with gzip.open(raw_path, "wt", encoding="utf-8", newline="\n") as handle:
+    manifest_rows = _read_jsonl_manifest(manifest_path)
+    completed_ids = {
+        str(row.get("requested_id") or "")
+        for row in manifest_rows
+        if row.get("status") == "ok" and _manifest_chunk_ok(row)
+    }
+    records = len(completed_ids)
+    bytes_written = sum(int(row.get("bytes") or 0) for row in manifest_rows if row.get("status") == "ok")
+    stop_reason = "api_completed"
+    with _download_lock(base_dir):
         for index, work_id in enumerate(ids, start=1):
+            if work_id in completed_ids:
+                continue
             if cancel_callback and cancel_callback():
+                stop_reason = "user_cancelled"
                 break
-            row = _get_json(f"{API_BASE}/{urllib.parse.quote(work_id)}", _auth_params(api_key))
+            try:
+                row = _get_json(f"{API_BASE}/{urllib.parse.quote(work_id)}", _auth_params(api_key))
+                returned_id = _short_work_id(str(row.get("id") or ""))
+                if returned_id and returned_id != work_id:
+                    raise RuntimeError(f"OpenAlex returned {returned_id} for requested work {work_id}")
+            except Exception as exc:
+                _append_jsonl_manifest(
+                    manifest_path,
+                    {
+                        "index": index,
+                        "requested_id": work_id,
+                        "status": "failed",
+                        "error": _safe_error_text(str(exc)),
+                        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+                continue
             line = json.dumps(row, ensure_ascii=False, sort_keys=True)
-            handle.write(line + "\n")
+            chunk_path = chunks_dir / f"work_{index:08d}_{work_id}.jsonl.gz"
+            with gzip.open(chunk_path, "wt", encoding="utf-8", newline="\n") as handle:
+                handle.write(line + "\n")
+            chunk_sha = sha256_file(chunk_path)
+            chunk_bytes = chunk_path.stat().st_size
+            _append_jsonl_manifest(
+                manifest_path,
+                {
+                    "index": index,
+                    "requested_id": work_id,
+                    "returned_id": _short_work_id(str(row.get("id") or "")),
+                    "status": "ok",
+                    "records": 1,
+                    "bytes": chunk_bytes,
+                    "sha256": chunk_sha,
+                    "chunk_path": str(chunk_path),
+                    "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                },
+            )
             records += 1
-            bytes_written += len((line + "\n").encode("utf-8"))
+            bytes_written += chunk_bytes
+            _write_checkpoint(
+                checkpoint_path,
+                status="in_progress",
+                next_cursor="",
+                records_downloaded=records,
+                records_expected=total,
+                bytes_written=bytes_written,
+                stop_reason=stop_reason,
+            )
             if progress_callback and (index == total or index % 25 == 0):
                 progress_callback(
                     {
@@ -156,7 +214,27 @@ def hydrate_work_ids(
                     }
                 )
             if max_download_bytes > 0 and bytes_written >= max_download_bytes:
+                stop_reason = "size_limit_reached"
                 break
+        manifest_rows = _read_jsonl_manifest(manifest_path)
+        completed_ids = {
+            str(row.get("requested_id") or "")
+            for row in manifest_rows
+            if row.get("status") == "ok" and _manifest_chunk_ok(row)
+        }
+        failed_rows = [row for row in manifest_rows if row.get("status") != "ok" and str(row.get("requested_id") or "") not in completed_ids]
+        _assemble_chunks(raw_path, [Path(str(row["chunk_path"])) for row in manifest_rows if row.get("status") == "ok" and row.get("chunk_path")])
+        _write_checkpoint(
+            checkpoint_path,
+            status="complete" if stop_reason == "api_completed" else "in_progress",
+            next_cursor="",
+            records_downloaded=records,
+            records_expected=total,
+            bytes_written=bytes_written,
+            stop_reason=stop_reason,
+        )
+        if failed_rows and stop_reason == "api_completed":
+            stop_reason = "ids_hydration_failed"
     return _manifest(
         cfg,
         raw_path=raw_path,
@@ -169,7 +247,12 @@ def hydrate_work_ids(
         records_downloaded=records,
         estimate=estimate or {},
         api_key=api_key,
-        stop_reason="size_limit_reached" if max_download_bytes > 0 and bytes_written >= max_download_bytes else "api_completed",
+        stop_reason=stop_reason,
+        checkpoint_path=checkpoint_path,
+        extra_manifest={
+            "hydration_manifest": str(manifest_path),
+            "hydration_failed": len(failed_rows),
+        },
     )
 
 
@@ -190,15 +273,21 @@ def _download_query(
     source_strategy: str,
 ) -> dict[str, Any]:
     checkpoint = _read_checkpoint(checkpoint_path)
-    resume_allowed = checkpoint.get("status") == "in_progress" and raw_path.is_file()
+    pages_dir = ensure_dir(base_dir / "pages")
+    page_manifest_path = base_dir / "api_cursor_pages.jsonl"
+    page_rows = _read_jsonl_manifest(page_manifest_path)
+    resume_allowed = checkpoint.get("status") == "in_progress" and bool(page_rows)
     cursor = str(checkpoint.get("next_cursor") or "*") if resume_allowed else "*"
-    records = int(checkpoint.get("records_downloaded") or 0) if resume_allowed else 0
+    records = sum(int(row.get("records") or 0) for row in page_rows) if resume_allowed else 0
     total = int(estimate.get("estimate_count") or 0)
-    bytes_written = int(checkpoint.get("bytes_written") or 0) if resume_allowed else 0
+    bytes_written = sum(int(row.get("bytes") or 0) for row in page_rows) if resume_allowed else 0
     stop_reason = "api_completed"
-    mode = "at" if resume_allowed else "wt"
     seen_cursors: set[str] = set()
-    with gzip.open(raw_path, mode, encoding="utf-8", newline="\n") as handle:
+    page_no = len(page_rows)
+    if not resume_allowed:
+        page_manifest_path.unlink(missing_ok=True)
+        raw_path.unlink(missing_ok=True)
+    with _download_lock(base_dir):
         while cursor:
             if cursor in seen_cursors:
                 raise RuntimeError(f"OpenAlex cursor did not advance while downloading Works: {cursor}")
@@ -223,11 +312,36 @@ def _download_query(
             results = payload.get("results") if isinstance(payload.get("results"), list) else []
             if not results:
                 break
+            page_no += 1
+            page_path = pages_dir / f"page_{page_no:08d}.jsonl.gz"
+            page_records = 0
+            page_bytes = 0
+            page_cursor_in = cursor
             for row in results:
                 line = json.dumps(row, ensure_ascii=False, sort_keys=True)
-                handle.write(line + "\n")
+                with gzip.open(page_path, "at" if page_path.exists() else "wt", encoding="utf-8", newline="\n") as handle:
+                    handle.write(line + "\n")
                 records += 1
-                bytes_written += len((line + "\n").encode("utf-8"))
+                page_records += 1
+                page_bytes += len((line + "\n").encode("utf-8"))
+            page_sha = sha256_file(page_path)
+            next_cursor = str(meta.get("next_cursor") or "")
+            _append_jsonl_manifest(
+                page_manifest_path,
+                {
+                    "page_no": page_no,
+                    "cursor_in": page_cursor_in,
+                    "cursor_out": next_cursor,
+                    "records": page_records,
+                    "bytes": page_path.stat().st_size,
+                    "payload_bytes": page_bytes,
+                    "sha256": page_sha,
+                    "chunk_path": str(page_path),
+                    "status": "ok",
+                    "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            bytes_written += page_path.stat().st_size
             if progress_callback:
                 percent = round(records * 100 / max(1, total), 3) if total else None
                 progress_callback(
@@ -252,7 +366,6 @@ def _download_query(
                     stop_reason=stop_reason,
                 )
                 break
-            next_cursor = str(meta.get("next_cursor") or "")
             if next_cursor and next_cursor == cursor:
                 _write_checkpoint(
                     checkpoint_path,
@@ -274,6 +387,10 @@ def _download_query(
                 bytes_written=bytes_written,
                 stop_reason=stop_reason,
             )
+        page_rows = _read_jsonl_manifest(page_manifest_path)
+        _assert_manifest_chunks(page_rows)
+        if page_rows:
+            _assemble_chunks(raw_path, [Path(str(row["chunk_path"])) for row in page_rows if row.get("chunk_path")])
     if stop_reason == "api_completed":
         _write_checkpoint(
             checkpoint_path,
@@ -298,6 +415,7 @@ def _download_query(
         api_key=str(params.get("api_key") or ""),
         stop_reason=stop_reason,
         checkpoint_path=checkpoint_path,
+        extra_manifest={"page_manifest": str(page_manifest_path), "pages_dir": str(pages_dir)},
     )
 
 
@@ -316,6 +434,7 @@ def _manifest(
     api_key: str,
     stop_reason: str,
     checkpoint_path: Path | None = None,
+    extra_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checksum = sha256_file(raw_path) if raw_path.is_file() else ""
     dump_id = f"dump_{checksum[:16]}" if checksum else f"dump_{cfg.slice_name}"
@@ -394,6 +513,9 @@ def _manifest(
             "kept_raw_files": True,
         },
     }
+    if extra_manifest:
+        manifest.update(extra_manifest)
+    manifest = dump_integrity.manifest_with_integrity(manifest, require_expected_count=True)
     write_json(base_dir / "dump_manifest.json", manifest)
     return manifest
 
@@ -431,12 +553,12 @@ def _get_json(url: str, params: dict[str, str]) -> dict[str, Any]:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             if exc.code != 429 or attempt >= 4:
-                body = exc.read().decode("utf-8", errors="replace")
+                body = _safe_error_text(exc.read().decode("utf-8", errors="replace"))
                 raise RuntimeError(f"OpenAlex HTTP {exc.code}: {body}") from exc
             time.sleep(min(30.0, 2.0**attempt))
         except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
             if attempt >= 4:
-                raise RuntimeError(f"OpenAlex API is unavailable: {exc}") from exc
+                raise RuntimeError(f"OpenAlex API is unavailable: {_safe_error_text(str(exc))}") from exc
             time.sleep(min(20.0, 1.5**attempt))
     raise RuntimeError("OpenAlex API request failed")
 
@@ -449,6 +571,107 @@ def _read_checkpoint(path: Path) -> dict[str, Any]:
     except (json.JSONDecodeError, OSError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _read_jsonl_manifest(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    with path.open("rt", encoding="utf-8") as handle:
+        for line in handle:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                rows.append(payload)
+    return rows
+
+
+def _append_jsonl_manifest(path: Path, row: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("at", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _assert_manifest_chunks(rows: list[dict[str, Any]]) -> None:
+    seen: set[str] = set()
+    for row in rows:
+        path = Path(str(row.get("chunk_path") or ""))
+        if not path.is_file():
+            raise RuntimeError(f"OpenAlex page chunk is missing: {path}")
+        sha = str(row.get("sha256") or "")
+        if sha and sha256_file(path) != sha:
+            raise RuntimeError(f"OpenAlex page chunk checksum mismatch: {path}")
+        cursor_in = str(row.get("cursor_in") or "")
+        if cursor_in:
+            if cursor_in in seen:
+                raise RuntimeError(f"OpenAlex cursor repeated in page manifest: {cursor_in}")
+            seen.add(cursor_in)
+
+
+def _manifest_chunk_ok(row: dict[str, Any]) -> bool:
+    path = Path(str(row.get("chunk_path") or ""))
+    if not path.is_file():
+        return False
+    sha = str(row.get("sha256") or "")
+    return not sha or sha256_file(path) == sha
+
+
+def _assemble_chunks(raw_path: Path, chunks: list[Path]) -> int:
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    records = 0
+    with gzip.open(raw_path, "wt", encoding="utf-8", newline="\n") as output:
+        for chunk in chunks:
+            with gzip.open(chunk, "rt", encoding="utf-8", newline="\n") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    output.write(line if line.endswith("\n") else line + "\n")
+                    records += 1
+    return records
+
+
+class _download_lock:
+    def __init__(self, base_dir: Path) -> None:
+        self.path = base_dir / ".download.lock"
+        self.handle: Any = None
+
+    def __enter__(self) -> "_download_lock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a+", encoding="utf-8")
+        try:
+            import fcntl
+
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX)
+        except ImportError:  # pragma: no cover
+            pass
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        if self.handle is not None:
+            try:
+                import fcntl
+
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+            except ImportError:  # pragma: no cover
+                pass
+            self.handle.close()
+
+
+def _short_work_id(value: str) -> str:
+    text = str(value or "").strip().rstrip("/")
+    return text.rsplit("/", 1)[-1]
+
+
+def _safe_error_text(value: str) -> str:
+    text = str(value or "")
+    text = urllib.parse.unquote(text)
+    text = re.sub(r"([?&]api_key=)[^\s'\"&]+", r"\1***", text)
+    return text
 
 
 def _write_checkpoint(

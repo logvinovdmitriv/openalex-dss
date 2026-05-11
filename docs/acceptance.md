@@ -57,6 +57,15 @@ python scripts/validate_scientometric_dss.py --reset
 - Ошибки OpenAlex API возвращаются как контролируемые `502` с диагностикой, а не
   как необработанный Internal Server Error.
 - Уже скачанные срезы можно выбрать, проанализировать и удалить без API.
+- API cursor-загрузка и `ids_then_hydrate` ведут checkpoint/chunk manifests,
+  могут продолжаться после прерывания и не допускают финальный статус при
+  расхождении `records_expected`, `records_downloaded` и фактического числа
+  строк в `works.jsonl.gz`.
+- Snapshot scan ведет manifest по partitions, фиксирует ошибки JSON-разбора и
+  запрещает final analysis при поврежденных строках.
+- Dump integrity validator дочитывает `works.jsonl.gz` до конца, сверяет
+  checksum и число строк; при несоответствиях `allowed_for_final_analysis`
+  принудительно становится `false`.
 - Scoped dump tables доступны для `works`, `authorships`, `work_topics`,
   `author_institutions`, `author_countries`, а расчетные таблицы доступны для
   `author_work`, `indices`, `ratings`.

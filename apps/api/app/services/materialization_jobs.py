@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.providers import openalex_cli_provider
-from app.services import authorship_backfill, pipeline
+from app.services import authorship_backfill, dump_integrity, pipeline
 from app.services.internal_payloads import normalize_internal_pipeline_payload
 
 
@@ -114,7 +114,12 @@ def _repair_dump(
     raw_jsonl = str(payload.get("source_path") or dump.get("raw_jsonl") or "").strip()
     if update_progress_callback:
         update_progress_callback(None, "Проверка локальных файлов среза", {"source_path": raw_jsonl})
-    raw_jsonl, dump = _ensure_repair_raw_file(dump, raw_jsonl, update_progress_callback)
+    raw_jsonl, dump = _ensure_repair_raw_file(
+        dump,
+        raw_jsonl,
+        update_progress_callback,
+        api_key=str(payload.get("api_key") or ""),
+    )
     analysis_eligibility = pipeline.analysis_eligibility_from_dump(dump, dev_override=True)
     built = pipeline.import_local_file(
         normalize_internal_pipeline_payload(
@@ -147,7 +152,12 @@ def _backfill_truncated_authorships(
     raw_jsonl = str(payload.get("source_path") or dump.get("raw_jsonl") or "").strip()
     if update_progress_callback:
         update_progress_callback(None, "Проверка локального среза перед backfill", {"source_path": raw_jsonl})
-    raw_jsonl, dump = _ensure_repair_raw_file(dump, raw_jsonl, update_progress_callback)
+    raw_jsonl, dump = _ensure_repair_raw_file(
+        dump,
+        raw_jsonl,
+        update_progress_callback,
+        api_key=str(payload.get("api_key") or ""),
+    )
     backfill = authorship_backfill.backfill_truncated_authorships(
         raw_jsonl,
         api_key=str(payload.get("api_key") or ""),
@@ -236,11 +246,31 @@ def _ensure_repair_raw_file(
     dump: dict[str, Any],
     raw_jsonl: str,
     update_progress_callback: StageProgressCallback | None,
+    *,
+    api_key: str = "",
 ) -> tuple[str, dict[str, Any]]:
     raw_path = Path(raw_jsonl).expanduser() if raw_jsonl else Path("")
     if raw_jsonl and raw_path.is_file():
-        return str(raw_path), dump
-    files_dir_raw = str(dump.get("cli_files_dir") or "").strip()
+        validated = dump_integrity.manifest_with_integrity({**dump, "raw_jsonl": str(raw_path)}, require_expected_count=False)
+        if validated.get("integrity_validation", {}).get("ok"):
+            return str(raw_path), validated
+        repair_status = openalex_cli_provider.repair_missing_cli_files(
+            {**dump, "raw_jsonl": str(raw_path)},
+            api_key=api_key,
+            progress_callback=(
+                lambda progress: update_progress_callback(
+                    None,
+                    str(progress.get("stage") or "Проверка файлов OpenAlex CLI"),
+                    {key: value for key, value in progress.items() if key != "stage"},
+                )
+                if update_progress_callback
+                else None
+            ),
+        )
+        if not repair_status.get("repairable"):
+            raise ValueError("Локальный raw_jsonl поврежден, а исходные файлы OpenAlex CLI недоступны для повторной упаковки.")
+    storage_plan = dump.get("storage_plan") if isinstance(dump.get("storage_plan"), dict) else {}
+    files_dir_raw = str(dump.get("cli_files_dir") or storage_plan.get("cli_output_dir") or "").strip()
     if not files_dir_raw:
         raise ValueError("Для восстановления нужен локальный файл среза или папка скачанных файлов OpenAlex.")
     files_dir = Path(files_dir_raw).expanduser()
@@ -295,6 +325,7 @@ def _ensure_repair_raw_file(
             "raw_jsonl": str(raw_path),
         },
     }
+    restored = dump_integrity.manifest_with_integrity(restored, require_expected_count=False)
     openalex_cli_provider.write_json(base_dir / "dump_manifest.json", restored)
     return str(raw_path), restored
 

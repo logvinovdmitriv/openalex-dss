@@ -979,18 +979,21 @@ def _dump_match_status(
 
 
 def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
-    raw_jsonl = Path(str(dump.get("raw_jsonl") or ""))
-    raw_exists = raw_jsonl.is_file()
+    raw_jsonl_raw = str(dump.get("raw_jsonl") or "").strip()
+    raw_jsonl = Path(raw_jsonl_raw) if raw_jsonl_raw else None
+    raw_exists = bool(raw_jsonl is not None and raw_jsonl.is_file())
     storage_plan = dump.get("storage_plan") if isinstance(dump.get("storage_plan"), dict) else {}
     cli_files_dir_raw = str(dump.get("cli_files_dir") or storage_plan.get("cli_output_dir") or "").strip()
     cli_files_dir = Path(cli_files_dir_raw) if cli_files_dir_raw else None
-    manifest_path = Path(str(dump.get("dump_manifest") or dump.get("manifest_path") or raw_jsonl.with_name("dump_manifest.json")))
+    fallback_manifest = raw_jsonl.with_name("dump_manifest.json") if raw_jsonl is not None else DATA / "dumps" / _safe_id(str(dump_id or dump.get("dump_id") or "")) / "dump_manifest.json"
+    manifest_path = Path(str(dump.get("dump_manifest") or dump.get("manifest_path") or fallback_manifest))
     files_manifest_path = Path(str(dump.get("files_manifest") or manifest_path.with_name("files_manifest.json")))
     cli_files_snapshot = _downloaded_files_snapshot(cli_files_dir, files_manifest_path) if cli_files_dir is not None else {"files_seen": 0, "bytes_written": 0}
     cli_files_ready = bool(cli_files_dir is not None and cli_files_snapshot["files_seen"] > 0)
     manifest_exists = manifest_path.is_file()
     records = int(dump.get("records_downloaded") or 0)
     completeness = str(dump.get("scientific_completeness") or "").strip()
+    integrity = dump.get("integrity_validation") if isinstance(dump.get("integrity_validation"), dict) else {}
     safe_dump_id = _safe_id(str(dump_id or dump.get("dump_id") or ""))
     table_dir = DATA / "tables" / safe_dump_id
     dump_dir = DATA / "dumps" / safe_dump_id
@@ -1032,6 +1035,20 @@ def _dump_health(dump_id: str, dump: dict[str, Any]) -> dict[str, Any]:
             "label": "нет работ",
             "reason": "В локальном срезе нет записей для анализа.",
             "repairable": False,
+            "raw_exists": True,
+            "manifest_exists": manifest_exists,
+            "tables_ready": tables_ready,
+            "indices_ready": indices_ready,
+            "associated_run_id": associated_run,
+            "files_seen": cli_files_snapshot["files_seen"],
+            "bytes_written": cli_files_snapshot["bytes_written"],
+        }
+    if completeness in {"partial_count_mismatch", "partial_integrity_failed"} or (integrity and not integrity.get("ok")):
+        return {
+            "status": "needs_repair",
+            "label": "требует проверки",
+            "reason": "Manifest и фактический локальный срез не совпадают; финальный анализ запрещен до восстановления или пересборки.",
+            "repairable": True,
             "raw_exists": True,
             "manifest_exists": manifest_exists,
             "tables_ready": tables_ready,

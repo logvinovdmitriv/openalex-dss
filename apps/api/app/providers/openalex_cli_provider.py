@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from app.core.paths import DATA, SRC
+from app.services import dump_integrity
 
 import sys
 
@@ -277,6 +278,7 @@ def download_works_metadata(
             "max_download_bytes": max_download_bytes or None,
         },
     }
+    dump_manifest = dump_integrity.manifest_with_integrity(dump_manifest, require_expected_count=True)
     write_json(dump_manifest_path, dump_manifest)
 
     if progress_callback:
@@ -349,6 +351,61 @@ def pack_existing_cli_files(
     )
 
 
+def repair_missing_cli_files(
+    dump: dict[str, Any],
+    *,
+    api_key: str = "",
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Validate CLI file manifest and report whether repacking can proceed.
+
+    The OpenAlex CLI stores implementation-specific chunk files, so missing
+    chunks cannot be reconstructed safely unless the already packed raw JSONL is
+    available. This function makes that condition explicit instead of letting
+    repair silently produce an incomplete dump.
+    """
+
+    storage = dump.get("storage_plan") if isinstance(dump.get("storage_plan"), dict) else {}
+    files_dir_raw = str(dump.get("cli_files_dir") or storage.get("cli_output_dir") or "").strip()
+    manifest_raw = str(dump.get("files_manifest") or "").strip()
+    raw_jsonl = Path(str(dump.get("raw_jsonl") or "")).expanduser()
+    if not manifest_raw:
+        return {"status": "unknown", "repairable": raw_jsonl.is_file(), "missing_files": []}
+    manifest_path = Path(manifest_raw).expanduser()
+    if not manifest_path.is_file():
+        return {"status": "missing_manifest", "repairable": raw_jsonl.is_file(), "missing_files": []}
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"status": "broken_manifest", "repairable": raw_jsonl.is_file(), "missing_files": []}
+    files = payload.get("files") if isinstance(payload.get("files"), list) else []
+    base = Path(files_dir_raw).expanduser() if files_dir_raw else manifest_path.parent
+    missing = [
+        str(item.get("path") or "")
+        for item in files
+        if isinstance(item, dict) and item.get("path") and not (base / str(item.get("path"))).is_file()
+    ]
+    failed = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("status") == "failed"]
+    status = "ok" if not missing and not failed else "needs_manual_redownload"
+    if progress_callback:
+        progress_callback(
+            {
+                "stage": "Проверка файлов OpenAlex CLI",
+                "missing_files": len(missing),
+                "failed_files": len(failed),
+                "repairable_from_raw": raw_jsonl.is_file(),
+                "progress_scope": "repair",
+            }
+        )
+    return {
+        "status": status,
+        "repairable": raw_jsonl.is_file() or (not missing and not failed),
+        "missing_files": missing,
+        "failed_files": failed,
+        "api_key_used": bool(api_key),
+    }
+
+
 def _run_cli_download(
     command: list[str],
     *,
@@ -364,7 +421,7 @@ def _run_cli_download(
     max_download_bytes: int,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     stop_reason = "cli_completed"
-    with stdout_path.open("w", encoding="utf-8", newline="\n") as stdout_handle, stderr_path.open("w", encoding="utf-8", newline="\n") as stderr_handle:
+    with _download_lock(base_dir), stdout_path.open("w", encoding="utf-8", newline="\n") as stdout_handle, stderr_path.open("w", encoding="utf-8", newline="\n") as stderr_handle:
         process = subprocess.Popen(command, cwd=str(base_dir), text=True, stdout=stdout_handle, stderr=stderr_handle, start_new_session=True)
         while process.poll() is None:
             time.sleep(5)
@@ -575,3 +632,31 @@ def _iter_work_payloads(path: Path) -> Iterator[dict[str, Any]]:
 def _cli_version(executable: str) -> str:
     completed = subprocess.run([executable, "--version"], text=True, capture_output=True, check=False)
     return (completed.stdout or completed.stderr or "").strip()
+
+
+class _download_lock:
+    def __init__(self, base_dir: Path) -> None:
+        self.path = base_dir / ".download.lock"
+        self.handle: Any = None
+
+    def __enter__(self) -> "_download_lock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a+", encoding="utf-8")
+        try:
+            import fcntl
+
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX)
+        except ImportError:  # pragma: no cover
+            pass
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        if self.handle is None:
+            return
+        try:
+            import fcntl
+
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        except ImportError:  # pragma: no cover
+            pass
+        self.handle.close()
