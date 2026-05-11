@@ -22,6 +22,7 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+AGENTS.md
 
 # Data must live outside the repository.
 # Default external root: ../openalex-dss-data
