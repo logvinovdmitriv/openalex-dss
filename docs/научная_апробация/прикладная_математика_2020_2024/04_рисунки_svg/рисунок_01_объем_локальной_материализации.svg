@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="620" viewBox="0 0 1260 620">
+<rect width="100%" height="100%" fill="white"/>
+<text x="630.0" y="34" text-anchor="middle" font-family="Arial" font-size="22" font-weight="700" fill="#111827">Объем локальной материализации</text>
+<text x="220" y="114.0" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">Страны авторов</text>
+<rect x="230" y="78.0" width="30.2" height="53.0" fill="#2563eb" rx="2"/>
+<text x="266.2" y="114.0" font-family="Arial" font-size="12" fill="#111827">226,027</text>
+<text x="220" y="173.0" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">Организации авторов</text>
+<rect x="230" y="137.0" width="34.0" height="53.0" fill="#059669" rx="2"/>
+<text x="270.0" y="173.0" font-family="Arial" font-size="12" fill="#111827">255,065</text>
+<text x="220" y="232.0" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">Авторские вклады</text>
+<rect x="230" y="196.0" width="103.7" height="53.0" fill="#d97706" rx="2"/>
+<text x="339.7" y="232.0" font-family="Arial" font-size="12" fill="#111827">777,369</text>
+<text x="220" y="291.0" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">Записи авторства</text>
+<rect x="230" y="255.0" width="36.8" height="53.0" fill="#7c3aed" rx="2"/>
+<text x="272.8" y="291.0" font-family="Arial" font-size="12" fill="#111827">276,179</text>
+<text x="220" y="350.0" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">Индексы</text>
+<rect x="230" y="314.0" width="47.9" height="53.0" fill="#dc2626" rx="2"/>
+<text x="283.9" y="350.0" font-family="Arial" font-size="12" fill="#111827">359,343</text>
+<text x="220" y="409.0" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">Рейтинги</text>
+<rect x="230" y="373.0" width="815.0" height="53.0" fill="#0891b2" rx="2"/>
+<text x="1051.0" y="409.0" font-family="Arial" font-size="12" fill="#111827">6,108,831</text>
+<text x="220" y="468.0" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">Темы работ</text>
+<rect x="230" y="432.0" width="42.0" height="53.0" fill="#4b5563" rx="2"/>
+<text x="278.0" y="468.0" font-family="Arial" font-size="12" fill="#111827">314,836</text>
+<text x="220" y="527.0" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">Работы</text>
+<rect x="230" y="491.0" width="14.5" height="53.0" fill="#2563eb" rx="2"/>
+<text x="250.5" y="527.0" font-family="Arial" font-size="12" fill="#111827">108,691</text>
+<text x="637.5" y="596" text-anchor="middle" font-family="Arial" font-size="12" fill="#6b7280">Количество строк</text>
+</svg>

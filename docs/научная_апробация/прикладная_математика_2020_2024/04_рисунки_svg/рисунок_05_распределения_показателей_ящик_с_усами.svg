@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620">
+<rect width="100%" height="100%" fill="white"/>
+<text x="550.0" y="34" text-anchor="middle" font-family="Arial" font-size="22" font-weight="700" fill="#111827">Распределения показателей: ящик с усами</text>
+<text x="550.0" y="60" text-anchor="middle" font-family="Arial" font-size="13" fill="#6b7280">Ось X: log10(1 + значение); квартильные статистики взяты из описательной статистики полного среза</text>
+<line x1="115.0" y1="84" x2="115.0" y2="534" stroke="#e5e7eb"/>
+<text x="115.0" y="555" text-anchor="middle" font-family="Arial" font-size="11" fill="#6b7280">0</text>
+<line x1="239.8" y1="84" x2="239.8" y2="534" stroke="#e5e7eb"/>
+<text x="239.8" y="555" text-anchor="middle" font-family="Arial" font-size="11" fill="#6b7280">0.5</text>
+<line x1="364.5" y1="84" x2="364.5" y2="534" stroke="#e5e7eb"/>
+<text x="364.5" y="555" text-anchor="middle" font-family="Arial" font-size="11" fill="#6b7280">1</text>
+<line x1="489.3" y1="84" x2="489.3" y2="534" stroke="#e5e7eb"/>
+<text x="489.3" y="555" text-anchor="middle" font-family="Arial" font-size="11" fill="#6b7280">1.5</text>
+<line x1="614.0" y1="84" x2="614.0" y2="534" stroke="#e5e7eb"/>
+<text x="614.0" y="555" text-anchor="middle" font-family="Arial" font-size="11" fill="#6b7280">2</text>
+<line x1="738.8" y1="84" x2="738.8" y2="534" stroke="#e5e7eb"/>
+<text x="738.8" y="555" text-anchor="middle" font-family="Arial" font-size="11" fill="#6b7280">2.5</text>
+<line x1="863.5" y1="84" x2="863.5" y2="534" stroke="#e5e7eb"/>
+<text x="863.5" y="555" text-anchor="middle" font-family="Arial" font-size="11" fill="#6b7280">3</text>
+<line x1="988.3" y1="84" x2="988.3" y2="534" stroke="#e5e7eb"/>
+<text x="988.3" y="555" text-anchor="middle" font-family="Arial" font-size="11" fill="#6b7280">3.5</text>
+<text x="103" y="121.1" text-anchor="end" font-family="Arial" font-size="13" font-weight="700" fill="#111827">P</text>
+<line x1="190.1" y1="116.1" x2="340.3" y2="116.1" stroke="#374151" stroke-width="2"/>
+<line x1="190.1" y1="106.1" x2="190.1" y2="126.1" stroke="#374151" stroke-width="2"/>
+<line x1="340.3" y1="106.1" x2="340.3" y2="126.1" stroke="#374151" stroke-width="2"/>
+<rect x="190.1" y="98.1" width="43.9" height="36" fill="#2563eb" opacity="0.75" stroke="#111827"/>
+<line x1="190.1" y1="96.1" x2="190.1" y2="136.1" stroke="#111827" stroke-width="3"/>
+<text x="103" y="185.4" text-anchor="end" font-family="Arial" font-size="13" font-weight="700" fill="#111827">C</text>
+<line x1="115.0" y1="180.4" x2="503.3" y2="180.4" stroke="#374151" stroke-width="2"/>
+<line x1="115.0" y1="170.4" x2="115.0" y2="190.4" stroke="#374151" stroke-width="2"/>
+<line x1="503.3" y1="170.4" x2="503.3" y2="190.4" stroke="#374151" stroke-width="2"/>
+<rect x="115.0" y="162.4" width="194.1" height="36" fill="#059669" opacity="0.75" stroke="#111827"/>
+<line x1="190.1" y1="160.4" x2="190.1" y2="200.4" stroke="#111827" stroke-width="3"/>
+<text x="103" y="249.7" text-anchor="end" font-family="Arial" font-size="13" font-weight="700" fill="#111827">C_frac</text>
+<line x1="115.0" y1="244.7" x2="397.0" y2="244.7" stroke="#374151" stroke-width="2"/>
+<line x1="115.0" y1="234.7" x2="115.0" y2="254.7" stroke="#374151" stroke-width="2"/>
+<line x1="397.0" y1="234.7" x2="397.0" y2="254.7" stroke="#374151" stroke-width="2"/>
+<rect x="115.0" y="226.7" width="119.0" height="36" fill="#d97706" opacity="0.75" stroke="#111827"/>
+<line x1="158.9" y1="224.7" x2="158.9" y2="264.7" stroke="#111827" stroke-width="3"/>
+<text x="103" y="314.0" text-anchor="end" font-family="Arial" font-size="13" font-weight="700" fill="#111827">h-индекс</text>
+<line x1="115.0" y1="309.0" x2="265.2" y2="309.0" stroke="#374151" stroke-width="2"/>
+<line x1="115.0" y1="299.0" x2="115.0" y2="319.0" stroke="#374151" stroke-width="2"/>
+<line x1="265.2" y1="299.0" x2="265.2" y2="319.0" stroke="#374151" stroke-width="2"/>
+<rect x="115.0" y="291.0" width="75.1" height="36" fill="#7c3aed" opacity="0.75" stroke="#111827"/>
+<line x1="190.1" y1="289.0" x2="190.1" y2="329.0" stroke="#111827" stroke-width="3"/>
+<text x="103" y="378.3" text-anchor="end" font-family="Arial" font-size="13" font-weight="700" fill="#111827">i10-индекс</text>
+<line x1="115.0" y1="373.3" x2="190.1" y2="373.3" stroke="#374151" stroke-width="2"/>
+<line x1="115.0" y1="363.3" x2="115.0" y2="383.3" stroke="#374151" stroke-width="2"/>
+<line x1="190.1" y1="363.3" x2="190.1" y2="383.3" stroke="#374151" stroke-width="2"/>
+<rect x="115.0" y="355.3" width="1.0" height="36" fill="#dc2626" opacity="0.75" stroke="#111827"/>
+<line x1="115.0" y1="353.3" x2="115.0" y2="393.3" stroke="#111827" stroke-width="3"/>
+<text x="103" y="442.6" text-anchor="end" font-family="Arial" font-size="13" font-weight="700" fill="#111827">g-индекс</text>
+<line x1="115.0" y1="437.6" x2="289.4" y2="437.6" stroke="#374151" stroke-width="2"/>
+<line x1="115.0" y1="427.6" x2="115.0" y2="447.6" stroke="#374151" stroke-width="2"/>
+<line x1="289.4" y1="427.6" x2="289.4" y2="447.6" stroke="#374151" stroke-width="2"/>
+<rect x="115.0" y="419.6" width="75.1" height="36" fill="#0891b2" opacity="0.75" stroke="#111827"/>
+<line x1="190.1" y1="417.6" x2="190.1" y2="457.6" stroke="#111827" stroke-width="3"/>
+<text x="103" y="506.9" text-anchor="end" font-family="Arial" font-size="13" font-weight="700" fill="#111827">IUPV-S</text>
+<line x1="115.0" y1="501.9" x2="606.1" y2="501.9" stroke="#374151" stroke-width="2"/>
+<line x1="115.0" y1="491.9" x2="115.0" y2="511.9" stroke="#374151" stroke-width="2"/>
+<line x1="606.1" y1="491.9" x2="606.1" y2="511.9" stroke="#374151" stroke-width="2"/>
+<rect x="115.0" y="483.9" width="442.4" height="36" fill="#4b5563" opacity="0.75" stroke="#111827"/>
+<line x1="456.0" y1="481.9" x2="456.0" y2="521.9" stroke="#111827" stroke-width="3"/>
+<text x="585.0" y="588" text-anchor="middle" font-family="Arial" font-size="12" fill="#374151">Для читаемости правый ус ограничен P95; максимум, IQR и выбросы приведены в Excel-листе «Описательная статистика».</text>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620">
+<rect width="100%" height="100%" fill="white"/>
+<text x="550.0" y="34" text-anchor="middle" font-family="Arial" font-size="22" font-weight="700" fill="#111827">Распределение работ по годам публикации</text>
+<text x="220" y="138.1" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">2020</text>
+<rect x="230" y="78.0" width="801.4" height="88.4" fill="#2563eb" rx="2"/>
+<text x="1037.4" y="138.1" font-family="Arial" font-size="12" fill="#111827">21,736</text>
+<text x="220" y="232.5" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">2021</text>
+<rect x="230" y="172.4" width="788.5" height="88.4" fill="#059669" rx="2"/>
+<text x="1024.5" y="232.5" font-family="Arial" font-size="12" fill="#111827">21,386</text>
+<text x="220" y="326.9" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">2022</text>
+<rect x="230" y="266.8" width="810.9" height="88.4" fill="#d97706" rx="2"/>
+<text x="1046.9" y="326.9" font-family="Arial" font-size="12" fill="#111827">21,995</text>
+<text x="220" y="421.3" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">2023</text>
+<rect x="230" y="361.20000000000005" width="815.0" height="88.4" fill="#7c3aed" rx="2"/>
+<text x="1051.0" y="421.3" font-family="Arial" font-size="12" fill="#111827">22,105</text>
+<text x="220" y="515.7" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">2024</text>
+<rect x="230" y="455.6" width="791.6" height="88.4" fill="#dc2626" rx="2"/>
+<text x="1027.6" y="515.7" font-family="Arial" font-size="12" fill="#111827">21,469</text>
+<text x="637.5" y="596" text-anchor="middle" font-family="Arial" font-size="12" fill="#6b7280">Количество работ</text>
+</svg>

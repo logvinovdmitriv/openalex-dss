@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620">
+<rect width="100%" height="100%" fill="white"/>
+<text x="550.0" y="34" text-anchor="middle" font-family="Arial" font-size="22" font-weight="700" fill="#111827">Согласованность IUPV-S с базовыми показателями</text>
+<text x="220" y="127.4" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">P</text>
+<rect x="230" y="78.0" width="471.1" height="72.7" fill="#2563eb" rx="2"/>
+<text x="707.1" y="127.4" font-family="Arial" font-size="12" fill="#111827">1</text>
+<text x="220" y="206.1" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">C</text>
+<rect x="230" y="156.66666666666669" width="799.7" height="72.7" fill="#059669" rx="2"/>
+<text x="1035.7" y="206.1" font-family="Arial" font-size="12" fill="#111827">1</text>
+<text x="220" y="284.7" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">C_frac</text>
+<rect x="230" y="235.33333333333334" width="815.0" height="72.7" fill="#d97706" rx="2"/>
+<text x="1051.0" y="284.7" font-family="Arial" font-size="12" fill="#111827">1</text>
+<text x="220" y="363.4" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">h-индекс</text>
+<rect x="230" y="314.0" width="761.5" height="72.7" fill="#7c3aed" rx="2"/>
+<text x="997.5" y="363.4" font-family="Arial" font-size="12" fill="#111827">1</text>
+<text x="220" y="442.1" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">i10-индекс</text>
+<rect x="230" y="392.6666666666667" width="443.0" height="72.7" fill="#dc2626" rx="2"/>
+<text x="679.0" y="442.1" font-family="Arial" font-size="12" fill="#111827">1</text>
+<text x="220" y="520.7" text-anchor="end" font-family="Arial" font-size="13" fill="#374151">g-индекс</text>
+<rect x="230" y="471.33333333333337" width="767.0" height="72.7" fill="#0891b2" rx="2"/>
+<text x="1003.0" y="520.7" font-family="Arial" font-size="12" fill="#111827">1</text>
+<text x="637.5" y="596" text-anchor="middle" font-family="Arial" font-size="12" fill="#6b7280">Коэффициент корреляции Спирмена</text>
+</svg>

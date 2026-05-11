@@ -40,6 +40,7 @@ data/*
 *.jsonl.gz
 *.csv.gz
 *.xlsx
+!docs/научная_апробация/**/*.xlsx
 *.zip
 
 # Generated local report/artifact folders
