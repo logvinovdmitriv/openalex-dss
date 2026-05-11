@@ -1044,7 +1044,6 @@ function metricShortLabel(value: string, metricLabels?: Record<string, string>) 
     f5: "Работы 5+",
     fm5: "Долевой вклад 5+",
     pci: "PCI",
-    iupv: "IUPV alias",
     iupv_s: "IUPV-S",
     iupv_sb: "IUPV-SB",
     islv: "Формула баланса",

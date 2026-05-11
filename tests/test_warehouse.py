@@ -283,7 +283,7 @@ class WarehouseTests(unittest.TestCase):
     def test_selected_index_rows_limits_precomputed_columns_for_analytics(self) -> None:
         with (
             patch.object(warehouse, "table_exists", return_value=True),
-            patch.object(warehouse, "table_schema", return_value=["fraction_mode", "author_id", "author_display_name", "h", "p", "c", "unused_blob"]),
+            patch.object(warehouse, "table_schema", return_value=["fraction_mode", "author_id", "author_display_name", "h", "p", "c", "extra_blob"]),
             patch.object(
                 warehouse,
                 "query_table",

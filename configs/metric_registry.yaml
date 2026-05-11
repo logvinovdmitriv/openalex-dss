@@ -97,16 +97,6 @@ metrics:
     local_only: true
     visible: false
     warning: "Экспериментальная процентильная формула PCI. Не является IUPV из расширенной методологии и не входит в baseline популярных индексов."
-  - metric_id: "iupv"
-    label: "IUPV служебный алиас: используйте PCI или IUPV-S"
-    group: "Служебные совместимые алиасы"
-    formula: "alias(pci)"
-    source: "computed_from_slice_works"
-    local_only: true
-    visible: false
-    selectable: false
-    deprecated: true
-    warning: "Служебный алиас для прежних отчетов. Новые формулы IUPV сохраняйте как пользовательские модели."
   - metric_id: "iupv_s"
     label: "IUPV-S: простой робастный долевой вклад"
     group: "Дополнительные показатели"

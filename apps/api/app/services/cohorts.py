@@ -362,7 +362,6 @@ def _metric_fields(rows: list[dict[str, Any]]) -> list[str]:
         "iupv_s",
         "iupv_sb",
         "islv",
-        "iupv",
         "lrdi",
         "mean_authors_per_work",
         "share_single_authored",

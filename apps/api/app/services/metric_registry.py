@@ -25,8 +25,7 @@ def computed_metrics() -> tuple[dict[str, Any], ...]:
                 "algorithm": item.get("algorithm"),
                 "warning": item.get("warning"),
                 "visible": bool(item.get("visible", True)),
-                "selectable": bool(item.get("selectable", not item.get("deprecated", False))),
-                "deprecated": bool(item.get("deprecated", False)),
+                "selectable": bool(item.get("selectable", True)),
                 "local_only": bool(item.get("local_only", True)),
                 "params": item.get("params") or {},
             }
@@ -46,7 +45,7 @@ def selectable_metric_ids() -> set[str]:
     return {
         str(item["id"])
         for item in computed_metrics()
-        if item.get("visible", True) and item.get("selectable", True) and not item.get("deprecated", False)
+        if item.get("visible", True) and item.get("selectable", True)
     }
 
 

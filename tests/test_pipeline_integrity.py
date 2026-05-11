@@ -1796,8 +1796,8 @@ class PipelineIntegrityTests(unittest.TestCase):
             "filter_mode": "analysis_override",
         }
         rows = [
-            {"author_id": "https://openalex.org/A1", "author_display_name": "Author One", "h": 3, "p": 4, "c": 10, "c_frac": 10, "cpp": 2, "i10": 1, "g": 3, "m_local": 1, "top1_share": 0.5, "islv": 10, "iupv": 20, "lrdi": 30},
-            {"author_id": "https://openalex.org/A2", "author_display_name": "Author Two", "h": 2, "p": 3, "c": 7, "c_frac": 7, "cpp": 2.3, "i10": 0, "g": 2, "m_local": 1, "top1_share": 0.4, "islv": 20, "iupv": 30, "lrdi": 40},
+            {"author_id": "https://openalex.org/A1", "author_display_name": "Author One", "h": 3, "p": 4, "c": 10, "c_frac": 10, "cpp": 2, "i10": 1, "g": 3, "m_local": 1, "top1_share": 0.5, "islv": 10, "pci": 20, "lrdi": 30},
+            {"author_id": "https://openalex.org/A2", "author_display_name": "Author Two", "h": 2, "p": 3, "c": 7, "c_frac": 7, "cpp": 2.3, "i10": 0, "g": 2, "m_local": 1, "top1_share": 0.4, "islv": 20, "pci": 30, "lrdi": 40},
         ]
         captured: dict[str, object] = {}
 

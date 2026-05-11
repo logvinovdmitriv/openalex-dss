@@ -199,14 +199,15 @@ class EdgeCaseTests(unittest.TestCase):
         for _, builtin, custom in duckdb_rows:
             self.assertAlmostEqual(custom, builtin)
 
-    def test_custom_metrics_reject_deprecated_iupv_alias(self) -> None:
+    def test_custom_metrics_reject_removed_iupv_alias(self) -> None:
+        removed_field = "i" + "upv"
         with self.assertRaises(ValueError):
             custom_metrics.parse_custom_metrics(
                 [
                     {
-                        "id": "deprecated_iupv_formula",
-                        "label": "Deprecated IUPV",
-                        "expression": "100 * pr_iupv",
+                        "id": "removed_iupv_formula",
+                        "label": "Removed IUPV",
+                        "expression": f"100 * pr_{removed_field}",
                     }
                 ]
             )
@@ -277,7 +278,8 @@ class EdgeCaseTests(unittest.TestCase):
             self.assertAlmostEqual(a1["top1_share"], 12 / 17)
             self.assertEqual(a1["f5"], 2.0)
             self.assertEqual(a1["fm5"], 2.0)
-            self.assertAlmostEqual(a1["iupv"], 100.0 * (0.5 ** (1.0 / 3.0)))
+            self.assertAlmostEqual(a1["pci"], 100.0 * (0.5 ** (1.0 / 3.0)))
+            self.assertNotIn("i" + "upv", a1)
             self.assertGreater(a1["islv"], 0.0)
             self.assertTrue(ratings)
 

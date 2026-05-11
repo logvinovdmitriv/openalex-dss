@@ -47,7 +47,6 @@ AUTHOR_INDEX_FIELDS = [
     "f5",
     "fm5",
     "pci",
-    "iupv",
     "iupv_s",
     "iupv_sb",
     "islv",
@@ -135,14 +134,12 @@ def assign_iupv_percentiles(rows: list[dict[str, Any]], group_field: str = "frac
             rfi_pr = percentile_maps["rfi_log_frac"][id(row)]
             if as_float(row.get("p")) <= 0 or as_float(row.get("h")) <= 0 or as_float(row.get("c_frac")) <= 0:
                 row["pci"] = 0.0
-                row["iupv"] = 0.0
             else:
                 row["pci"] = iupv_from_percentiles(
                     p_pr,
                     percentile_maps["h"][id(row)],
                     percentile_maps["c_frac"][id(row)],
                 )
-                row["iupv"] = row["pci"]
             if as_float(row.get("rfi_log_frac")) > 0:
                 row["iupv_s"] = 100.0 * rfi_pr
                 row["iupv_sb"] = 100.0 * math.sqrt(max(0.0, p_pr) * max(0.0, rfi_pr))
@@ -649,7 +646,6 @@ def _index_row(
         "f5": f5_value,
         "fm5": fm5_value,
         "pci": 0.0,
-        "iupv": 0.0,
         "iupv_s": 0.0,
         "iupv_sb": 0.0,
         "islv": 0.0,

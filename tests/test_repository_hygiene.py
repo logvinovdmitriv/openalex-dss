@@ -14,7 +14,7 @@ OLD_PROTO_UPPER = "M" + "VP"
 
 
 class RepositoryHygieneTests(unittest.TestCase):
-    def test_current_contract_does_not_reintroduce_retired_markers(self) -> None:
+    def test_current_contract_does_not_reintroduce_removed_markers(self) -> None:
         markers = (
             LEG,
             LAT,
@@ -42,7 +42,7 @@ class RepositoryHygieneTests(unittest.TestCase):
             OLD_PROTO_LOWER,
             "Backward-" + "comp" + "atible",
             "older " + "imports",
-            "unused_" + "previous",
+            "extra_" + "previous",
             "iupv_" + "n0",
             "iupv_" + "lambda",
         )
