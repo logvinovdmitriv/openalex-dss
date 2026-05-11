@@ -32,7 +32,9 @@ def test_data_sorting_does_not_eagerly_refresh_heavy_analytics() -> None:
     assert "enabled: dataViewActive && scopeReady && localDataKindAvailable" in main
     assert "enabled: (rankingsViewActive || analyticsViewActive) && hasLocalAnalyticsData" in main
     assert 'sort: ""' in main
-    assert "enabled: analyticsViewActive && hasLocalAnalyticsData && scientometricMetrics.length > 0" in main
+    assert "enabled: analyticsViewActive && hasLocalAnalyticsData && effectiveScientometricMetrics.length > 0" in main
+    assert "includeCustomMetricsInAnalysis" in main
+    assert "analyticsCustomMetrics" in main
     assert "{ signal }) => getJson<TableResponse>" in main
     assert "data: rows" in grid
     assert "manualSorting: Boolean(onSortChange)" in grid

@@ -12,7 +12,7 @@ node_modules/
 apps/*/node_modules/
 apps/web/dist/
 *.tsbuildinfo
-output/
+/output/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -44,10 +44,10 @@ data/*
 *.zip
 
 # Generated local report/artifact folders
-artifacts/
-exports/
-reports/
-warehouse/
+/artifacts/
+/exports/
+/reports/
+/warehouse/
 
 # OS/editor noise
 .DS_Store

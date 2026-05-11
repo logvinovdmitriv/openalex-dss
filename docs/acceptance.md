@@ -9,16 +9,16 @@ build, чистота репозитория и детерминированны
 Запускайте из корня репозитория:
 
 ```bash
-pytest tests/test_repository_hygiene.py -q
-pytest tests/test_pipeline_integrity.py -q
-pytest tests/test_edge_cases.py -q
-pytest tests/test_slice_workbench.py -q
-pytest tests/test_analytics_routes.py -q
-pytest tests/test_local_data_routes.py -q
-pytest tests/test_web_workbench_scope.py -q
-pytest tests/test_api_surface.py -q
-pytest tests/test_validation_script.py -q
-pytest tests/test_scientometrics.py -q
+.venv/bin/pytest tests/test_repository_hygiene.py -q
+.venv/bin/pytest tests/test_pipeline_integrity.py -q
+.venv/bin/pytest tests/test_edge_cases.py -q
+.venv/bin/pytest tests/test_slice_workbench.py -q
+.venv/bin/pytest tests/test_analytics_routes.py -q
+.venv/bin/pytest tests/test_local_data_routes.py -q
+.venv/bin/pytest tests/test_web_workbench_scope.py -q
+.venv/bin/pytest tests/test_api_surface.py -q
+.venv/bin/pytest tests/test_validation_script.py -q
+.venv/bin/pytest tests/test_scientometrics.py -q
 ```
 
 Затем соберите frontend:
@@ -32,7 +32,7 @@ cd ../..
 Затем запустите детерминированную end-to-end проверку:
 
 ```bash
-python scripts/validate_scientometric_dss.py --reset
+.venv/bin/python scripts/validate_scientometric_dss.py --reset
 ```
 
 ## Критерии приемки

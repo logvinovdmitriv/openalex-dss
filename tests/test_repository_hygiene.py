@@ -14,6 +14,21 @@ OLD_PROTO_UPPER = "M" + "VP"
 
 
 class RepositoryHygieneTests(unittest.TestCase):
+    def test_generated_artifact_ignores_do_not_hide_source_folders(self) -> None:
+        source_probe = subprocess.run(
+            ["git", "check-ignore", "-q", "apps/web/src/features/reports/NewFile.tsx"],
+            cwd=ROOT,
+            check=False,
+        )
+        root_report_probe = subprocess.run(
+            ["git", "check-ignore", "-q", "reports/generated.json"],
+            cwd=ROOT,
+            check=False,
+        )
+
+        self.assertNotEqual(source_probe.returncode, 0)
+        self.assertEqual(root_report_probe.returncode, 0)
+
     def test_current_contract_does_not_reintroduce_removed_markers(self) -> None:
         markers = (
             LEG,

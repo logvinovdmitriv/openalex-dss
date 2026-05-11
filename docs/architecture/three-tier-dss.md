@@ -81,7 +81,7 @@ The DSS treats OpenAlex as an external source, not as the working database.
 Every heavy run should follow:
 
 ```text
-resolve -> estimate -> plan -> download Works slice through the installed OpenAlex downloader -> normalize minimal fields -> analyze locally
+resolve -> estimate -> plan -> materialize Works slice through a selected backend provider -> normalize minimal fields -> analyze locally
 ```
 
 The supported estimate endpoint is:
@@ -95,9 +95,9 @@ It sends lightweight `/works` estimate/sample/group_by requests, reads
 `can_fetch`, `medium_slice`, `large_slice`, `very_large_slice` or `no_data`.
 These statuses are user-facing guidance, not hard download caps.
 The planner also records `estimate_signature` and `download_signature`.
-If the API estimate uses a parameter that the installed OpenAlex downloader
-cannot express, such as `search`, the run is marked `unsupported_cli_filter`
-instead of silently downloading a different corpus.
+If the selected backend provider cannot express the normalized request, the
+planner either recommends a compatible provider or marks the plan as
+non-final/exploratory instead of silently downloading a different corpus.
 The same planner feeds slice estimates and materialization plans; it is not
 exposed as a public `/runs` action.
 
@@ -121,9 +121,11 @@ directory. The repository-local `data/` directory is only a small
 README/placeholder and is ignored by git.
 
 ```text
-$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/     raw JSONL.GZ files from the installed OpenAlex downloader
+$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/     raw JSONL.GZ files from OpenAlex CLI provider
+$OPENALEX_DSS_DATA_DIR/raw/openalex_api/{slice_id}/     API cursor and ids-then-hydrate chunks/manifests
+$OPENALEX_DSS_DATA_DIR/raw/openalex_snapshot/{slice_id}/ local snapshot-scan result files
 $OPENALEX_DSS_DATA_DIR/dumps/{dump_id}/                 slice manifest, fetch metadata and quality report
-$OPENALEX_DSS_DATA_DIR/tables/{dump_id}/                canonical Parquet tables: works, authorships, work_topics
+$OPENALEX_DSS_DATA_DIR/tables/{dump_id}/                canonical Parquet tables: works, authorships, topics, institutions, countries
 $OPENALEX_DSS_DATA_DIR/runs/{run_id}/tables/            derived author_work, indices and ratings
 $OPENALEX_DSS_DATA_DIR/runs/{run_id}/passports/         passports and checksums
 $OPENALEX_DSS_DATA_DIR/runs/{run_id}/analytics/         reusable analysis cache manifests
@@ -149,24 +151,26 @@ conclusions about indices must use this mode.
 
 For reproducible DSS runs,
 `POST /api/v1/materializations/{materialization_id}/run` materializes the strict
-Works request through the installed OpenAlex downloader. API calls are
-kept for field catalogs, entity resolving, estimates, rate-limit visibility and
-explicit selected-entity lookup. The downloader output is packed as
-`$OPENALEX_DSS_DATA_DIR/raw/openalex_cli/{slice_id}/works.jsonl.gz` with a
-passport and checksum. The `build_from_openalex` materialization path then
-imports this fixed file locally, normalizes works/authorships and writes
-run-scoped author tables, ratings, passports and checksums. A fetch-only path is
-kept for downloading or repairing a local slice before calculation. This is the
-DSS local slice mode and is intentionally separate from the full S3 snapshot.
+Works request through the provider selected by the materialization plan:
+OpenAlex CLI, API cursor, ids-then-hydrate, local snapshot partition scan or
+import of an already downloaded JSONL file. API calls are used for field
+catalogs, entity resolving, estimates, rate-limit visibility, cursor downloads
+and explicit selected-entity lookup. Provider output is packed as a fixed
+`works.jsonl.gz` with manifest, passport and checksum. The local materialization
+path then imports this fixed file, normalizes works/authorships/topics/
+institutions/countries and writes run-scoped author tables, ratings, passports
+and checksums.
 
 ## Primary Workflow
 
 The primary DSS workflow is:
 
 1. choose OpenAlex field, subfield or topic by name;
-2. choose filter mode: primary topic, any topic or keyword; fixed text search is estimate-only until an ID-based CLI download mode is added;
+2. choose filter mode: primary topic, any topic, keyword, ID-based hydration or
+   explicitly exploratory text-search workflow;
 3. optionally restrict by organization and country code;
-4. download the Works request as a fixed JSONL.GZ local slice through the installed OpenAlex downloader;
+4. materialize the Works request as a fixed JSONL.GZ local slice through the
+   selected backend provider;
 5. import the fixed local slice with streaming JSONL normalization and scoped
    staging cleanup;
 6. build canonical `tables/{dump_id}` once, then build run-scoped
@@ -202,8 +206,8 @@ gzip-compressed JSON Lines and partitioned by `updated_date`. Incremental
 updates should download the manifest, identify new partitions, verify the
 manifest did not change during download, and upsert by OpenAlex entity ID.
 
-The full snapshot is a future bulk-ingestion mode. For the DSS, API calls are
-reserved for dropdown suggestions, field catalogs, estimates, usage limits and
-explicit lookup of selected authors/publications. Materializing the actual
-works corpus uses the installed OpenAlex downloader, then local offline calculation
-from the fixed raw file.
+The DSS supports local JSONL/JSONL.GZ snapshot partition scan as an explicit
+provider for large or repeatable workloads. Full managed snapshot ingestion,
+incremental changefile upserts and multi-user warehouse maintenance remain
+production extensions. Regardless of provider, analytical calculations run only
+from the fixed local raw file and normalized local tables.

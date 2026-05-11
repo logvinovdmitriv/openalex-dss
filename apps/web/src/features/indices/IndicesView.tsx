@@ -16,6 +16,8 @@ export function IndicesView({
   authorIndexTable,
   selectedMetrics,
   setSelectedMetrics,
+  includeCustomMetricsInAnalysis,
+  setIncludeCustomMetricsInAnalysis,
   customMetrics,
   setCustomMetrics,
   onSaveCustomMetric,
@@ -42,6 +44,8 @@ export function IndicesView({
   authorIndexTable?: TableResponse;
   selectedMetrics: string[];
   setSelectedMetrics: (value: string[]) => void;
+  includeCustomMetricsInAnalysis: boolean;
+  setIncludeCustomMetricsInAnalysis: (value: boolean) => void;
   customMetrics: CustomMetricDefinition[];
   setCustomMetrics: (value: CustomMetricDefinition[]) => void;
   onSaveCustomMetric: (value: CustomMetricDefinition) => Promise<unknown>;
@@ -185,11 +189,21 @@ export function IndicesView({
         <section className="formula-summary">
           <div>
             <b>Пользовательские формулы</b>
-            <span>Можно добавить расчетный показатель по данным выбранного среза и использовать его в рейтинге, таблице и графиках.</span>
+            <span>Можно добавить расчетный показатель по данным выбранного среза. По умолчанию аналитика и отчет остаются на baseline-наборе; расширенные формулы включаются явно.</span>
           </div>
-          <button type="button" className="primary" onClick={() => setFormulaBuilderOpen(true)}>
-            <Sigma size={16} /> Открыть конструктор
-          </button>
+          <div className="row-actions">
+            <button
+              type="button"
+              className={includeCustomMetricsInAnalysis ? "choice-pill active" : "choice-pill"}
+              onClick={() => setIncludeCustomMetricsInAnalysis(!includeCustomMetricsInAnalysis)}
+              title="Включает сохраненные пользовательские формулы в аналитический пакет и отчет. Рейтинг по выбранной формуле доступен отдельно через основной индекс."
+            >
+              {includeCustomMetricsInAnalysis ? "Расширенный набор" : "Только baseline"}
+            </button>
+            <button type="button" className="primary" onClick={() => setFormulaBuilderOpen(true)}>
+              <Sigma size={16} /> Открыть конструктор
+            </button>
+          </div>
         </section>
         {formulaBuilderOpen && (
           <FormulaBuilderDialog

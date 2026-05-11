@@ -148,6 +148,7 @@ function Workbench() {
   const [dataOffset, setDataOffset] = useState(0);
   const [dataPageCursors, setDataPageCursors] = useState<Record<number, string>>({ 0: "" });
   const [customMetrics, setCustomMetrics] = useState<CustomMetricDefinition[]>(DEFAULT_CUSTOM_METRICS);
+  const [includeCustomMetricsInAnalysis, setIncludeCustomMetricsInAnalysis] = useState(false);
   const [scientometricMetrics, setScientometricMetrics] = useState<string[]>(["p", "c", "c_frac", "h", "i10", "g"]);
   const [baselineMetric, setBaselineMetric] = useState("h");
   const [storageProfileId, setStorageProfileId] = useState("");
@@ -286,6 +287,25 @@ function Workbench() {
     [customMetricKey],
   );
   const activeCustomMetricKey = useMemo(() => JSON.stringify(activeCustomMetrics), [activeCustomMetrics]);
+  const customMetricIds = useMemo(
+    () => activeCustomMetrics.map((item) => String(item.id ?? "").trim()).filter(Boolean),
+    [activeCustomMetricKey],
+  );
+  const customMetricIdKey = customMetricIds.join("|");
+  const customMetricIdSet = useMemo(() => new Set(customMetricIds), [customMetricIdKey]);
+  const scientometricMetricKey = useMemo(() => scientometricMetrics.join(","), [scientometricMetrics]);
+  const effectiveScientometricMetrics = useMemo(
+    () => scientometricMetrics.filter((item) => includeCustomMetricsInAnalysis || !customMetricIdSet.has(item)),
+    [scientometricMetricKey, includeCustomMetricsInAnalysis, customMetricIdKey],
+  );
+  const effectiveScientometricMetricKey = effectiveScientometricMetrics.join(",");
+  const analyticsCustomMetrics = useMemo(
+    () => includeCustomMetricsInAnalysis
+      ? activeCustomMetrics.filter((item) => effectiveScientometricMetrics.includes(String(item.id ?? "").trim()))
+      : [],
+    [includeCustomMetricsInAnalysis, activeCustomMetricKey, effectiveScientometricMetricKey],
+  );
+  const analyticsCustomMetricKey = useMemo(() => JSON.stringify(analyticsCustomMetrics), [analyticsCustomMetrics]);
   const analysisFilters = useMemo(() => DATA_ONLY_ANALYSIS_FILTERS, []);
   const analysisDataSelection = useDataSelection({
     kind: localDataKind,
@@ -296,7 +316,6 @@ function Workbench() {
     limit: 0,
     authorIds: [],
   });
-  const scientometricMetricKey = useMemo(() => scientometricMetrics.join(","), [scientometricMetrics]);
   const localDataSummary = useQuery({
     queryKey: ["local-data-summary", effectiveRunId, effectiveDumpId],
     queryFn: () => getJson<LocalDataSummary>(localDataSummaryUrl(effectiveRunId, effectiveDumpId)),
@@ -400,19 +419,19 @@ function Workbench() {
   });
   const authorIndexTable = ranking;
   const scientometrics = useQuery({
-    queryKey: ["scientometrics", scientometricMetricKey, baselineMetric, fractionMode, effectiveRunId, effectiveDumpId, localDataKind, debouncedDataSearch, debouncedDataFilterKey, activeCustomMetricKey],
+    queryKey: ["scientometrics", effectiveScientometricMetricKey, baselineMetric, fractionMode, effectiveRunId, effectiveDumpId, localDataKind, debouncedDataSearch, debouncedDataFilterKey, analyticsCustomMetricKey],
     queryFn: ({ signal }) => getJson<ScientometricAnalysisPayload>(scientometricsUrl({
       filters: analysisFilters,
       fractionMode,
-      metrics: scientometricMetrics,
+      metrics: effectiveScientometricMetrics,
       baselineMetric,
       rankTopN: analysisRankTopN,
       runId: effectiveRunId,
       dumpId: effectiveDumpId,
       dataSelection: analysisDataSelection,
-      customMetrics: activeCustomMetrics,
+      customMetrics: analyticsCustomMetrics,
     }), { signal }),
-    enabled: analyticsViewActive && hasLocalAnalyticsData && scientometricMetrics.length > 0,
+    enabled: analyticsViewActive && hasLocalAnalyticsData && effectiveScientometricMetrics.length > 0,
     placeholderData: (previous) => previous,
     staleTime: 10 * 60_000,
     gcTime: 30 * 60_000,
@@ -443,11 +462,6 @@ function Workbench() {
     formula: item.expression,
     custom: true,
   }));
-  const customMetricIds = useMemo(
-    () => activeCustomMetrics.map((item) => String(item.id ?? "").trim()).filter(Boolean),
-    [activeCustomMetricKey],
-  );
-  const customMetricIdKey = customMetricIds.join("|");
   const allMetricOptions = [
     ...primaryMetricOptions,
     ...METRIC_OPTIONS.filter((item) => !primaryMetricOptions.some((option) => option.value === item.value)),
@@ -524,7 +538,7 @@ function Workbench() {
   }, [activeCustomMetricKey, allMetricOptions.map((item) => item.value).join("|"), metric, baselineMetric]);
 
   useEffect(() => {
-    if (!customMetricIds.length) return;
+    if (!includeCustomMetricsInAnalysis || !customMetricIds.length) return;
     setScientometricMetrics((prev) => {
       const next = [...prev];
       for (const id of customMetricIds) {
@@ -532,7 +546,7 @@ function Workbench() {
       }
       return next.length === prev.length ? prev : next;
     });
-  }, [customMetricIdKey]);
+  }, [customMetricIdKey, includeCustomMetricsInAnalysis]);
 
   useEffect(() => {
     setScientometricMetrics((prev) => {
@@ -698,10 +712,10 @@ function Workbench() {
       run_id: effectiveRunId,
       dump_id: effectiveDumpId,
       limit: 0,
-      scientometric_metrics: scientometricMetrics.join(","),
+      scientometric_metrics: effectiveScientometricMetrics.join(","),
       baseline_metric: baselineMetric,
       rank_top_n: analysisRankTopN,
-      custom_metric_defs: customMetricDefsQuery(activeCustomMetrics, scientometricMetrics),
+      custom_metric_defs: customMetricDefsQuery(analyticsCustomMetrics, effectiveScientometricMetrics),
       ...dataSelectionQuery({
         filters: dataColumnFilters,
         search: dataSearch,
@@ -942,6 +956,8 @@ function Workbench() {
             authorIndexTable={authorIndexTable.data}
             selectedMetrics={scientometricMetrics}
             setSelectedMetrics={setScientometricMetrics}
+            includeCustomMetricsInAnalysis={includeCustomMetricsInAnalysis}
+            setIncludeCustomMetricsInAnalysis={setIncludeCustomMetricsInAnalysis}
             customMetrics={activeCustomMetrics}
             setCustomMetrics={setCustomMetrics}
             onSaveCustomMetric={(model) => saveCustomMetric.mutateAsync(model)}
@@ -976,8 +992,8 @@ function Workbench() {
             runId={effectiveRunId}
             dumpId={effectiveDumpId}
             metricLabels={metricLabelMap}
-            customMetrics={activeCustomMetrics}
-            scientometricMetrics={scientometricMetrics}
+            customMetrics={analyticsCustomMetrics}
+            scientometricMetrics={effectiveScientometricMetrics}
             baselineMetric={baselineMetric}
             rankTopN={analysisRankTopN}
             dataFilters={dataColumnFilters}
@@ -991,7 +1007,7 @@ function Workbench() {
         )}
 
         {view === "reports" && (
-          <ReportsPage filters={analysisFilters} metric={metric} fractionMode={fractionMode} runId={effectiveRunId} dumpId={effectiveDumpId} scientometricMetrics={scientometricMetrics} baselineMetric={baselineMetric} rankTopN={analysisRankTopN} dataFilters={dataColumnFilters} dataSort={dataSort} dataDirection={dataDirection} customMetrics={activeCustomMetrics} metricLabels={metricLabelMap} onBuild={() => buildReport.mutate()} building={buildReport.isPending} state={workbench.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
+          <ReportsPage filters={analysisFilters} metric={metric} fractionMode={fractionMode} runId={effectiveRunId} dumpId={effectiveDumpId} scientometricMetrics={effectiveScientometricMetrics} baselineMetric={baselineMetric} rankTopN={analysisRankTopN} dataFilters={dataColumnFilters} dataSort={dataSort} dataDirection={dataDirection} customMetrics={analyticsCustomMetrics} metricLabels={metricLabelMap} onBuild={() => buildReport.mutate()} building={buildReport.isPending} state={workbench.data} sliceDoc={sliceDoc} estimate={estimate} materialization={materialization} />
         )}
         </motion.section>
       </AnimatePresence>

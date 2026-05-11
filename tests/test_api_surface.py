@@ -28,7 +28,7 @@ from app.api.routes import openalex as openalex_routes  # noqa: E402
 from app.api.routes import runs as runs_routes  # noqa: E402
 from app.api.routes import slices as slices_routes  # noqa: E402
 from app.api import schemas as public_schemas  # noqa: E402
-from app.api.schemas import AnalysisRunRequest, MaterializationPlanRequest, RunRequest, SliceCreateRequest, SliceEstimateRequest  # noqa: E402
+from app.api.schemas import AnalysisRunRequest, MaterializationPlanRequest, MaterializationRunRequest, RunRequest, SliceCreateRequest, SliceEstimateRequest  # noqa: E402
 from app.services.internal_payloads import InternalPipelinePayload, normalize_internal_pipeline_payload  # noqa: E402
 
 
@@ -168,6 +168,39 @@ class PublicApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 502)
         self.assertIn("OpenAlex HTTP 400", str(raised.exception.detail))
+
+    def test_materialization_snapshot_dir_is_preserved_by_public_schemas(self) -> None:
+        plan_request = MaterializationPlanRequest(source_strategy="snapshot_partition_scan", snapshot_dir="/tmp/openalex-snapshot")
+        run_request = MaterializationRunRequest(snapshot_dir="/tmp/openalex-snapshot")
+
+        self.assertEqual(plan_request.model_dump(exclude_none=True)["snapshot_dir"], "/tmp/openalex-snapshot")
+        self.assertEqual(run_request.model_dump(exclude_none=True)["snapshot_dir"], "/tmp/openalex-snapshot")
+
+    def test_materialization_routes_forward_snapshot_dir(self) -> None:
+        captured_plan: dict[str, object] = {}
+        captured_run: dict[str, object] = {}
+
+        def fake_plan(_slice_id: str, payload: dict[str, object]) -> dict[str, object]:
+            captured_plan.update(payload)
+            return {"materialization_id": "mat_a"}
+
+        def fake_run(_materialization_id: str, payload: dict[str, object]) -> dict[str, object]:
+            captured_run.update(payload)
+            return {"run": {"run_id": "run_a"}}
+
+        with patch.object(slices_routes.slice_workbench, "create_materialization_plan", side_effect=fake_plan):
+            slices_routes.create_materialization_plan(
+                "slice_a",
+                MaterializationPlanRequest(source_strategy="snapshot_partition_scan", snapshot_dir="/tmp/openalex-snapshot"),
+            )
+        with patch.object(slices_routes.slice_workbench, "run_materialization", side_effect=fake_run):
+            slices_routes.run_materialization(
+                "mat_a",
+                MaterializationRunRequest(snapshot_dir="/tmp/openalex-snapshot"),
+            )
+
+        self.assertEqual(captured_plan["snapshot_dir"], "/tmp/openalex-snapshot")
+        self.assertEqual(captured_run["snapshot_dir"], "/tmp/openalex-snapshot")
 
     def test_openalex_catalog_routes_map_runtime_errors_to_http(self) -> None:
         with patch.object(openalex_routes.openalex_catalog, "search_subjects", side_effect=RuntimeError("OpenAlex subjects is unavailable")):

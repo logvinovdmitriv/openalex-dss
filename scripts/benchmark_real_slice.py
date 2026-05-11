@@ -34,7 +34,7 @@ def main() -> int:
     parser.add_argument("--from-date", default="2020-01-01")
     parser.add_argument("--to-date", default="2024-12-31")
     parser.add_argument("--work-type", default="article")
-    parser.add_argument("--source-strategy", default="openalex_api", choices=["openalex_cli", "openalex_api", "api_cursor_selected_fields", "ids_then_hydrate", "openalex_snapshot_jsonl"])
+    parser.add_argument("--source-strategy", default="openalex_api", choices=["openalex_cli", "openalex_api", "api_cursor_selected_fields", "ids_then_hydrate", "openalex_snapshot_jsonl", "snapshot_partition_scan"])
     parser.add_argument("--download", action="store_true", help="Actually download and compute. Without this flag the script only estimates.")
     parser.add_argument("--api-key", default=os.environ.get("OPENALEX_API_KEY", ""))
     parser.add_argument("--max-download-mb", type=float, default=0.0)
@@ -73,7 +73,7 @@ def main() -> int:
         "decision": plan.get("decision"),
     }
     if args.download:
-        if not args.api_key and args.source_strategy != "openalex_snapshot_jsonl":
+        if not args.api_key and args.source_strategy not in {"openalex_snapshot_jsonl", "snapshot_partition_scan"}:
             raise SystemExit("OPENALEX_API_KEY or --api-key is required for live download.")
         estimate = plan.get("estimate") if isinstance(plan.get("estimate"), dict) else {}
         payload.update(

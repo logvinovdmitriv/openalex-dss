@@ -64,3 +64,29 @@ Baseline-анализ и baseline-отчет по умолчанию испол�
 - CSV exports для descriptive, correlations, findings и outliers;
 - `conclusion.md`;
 - checksum manifest.
+
+Для воспроизводимой выгрузки аналитического пакета используйте:
+
+```bash
+.venv/bin/python scripts/export_analysis_bundle.py \
+  --run-id <RUN_ID> \
+  --dump-id <DUMP_ID> \
+  --fraction-mode strict_authors_count \
+  --metrics p,c,c_frac,h,i10,g \
+  --baseline h \
+  --out <OUTPUT_DIR>
+```
+
+Если нужно включить сохраненные пользовательские формулы, передайте JSON-файл
+с их определениями и явно укажите, что пакет относится к extension-анализу:
+
+```bash
+.venv/bin/python scripts/export_analysis_bundle.py \
+  --run-id <RUN_ID> \
+  --dump-id <DUMP_ID> \
+  --fraction-mode strict_authors_count \
+  --metrics p,c,c_frac,h,i10,g \
+  --baseline h \
+  --custom-metric-defs-json <CUSTOM_METRICS_JSON> \
+  --out <OUTPUT_DIR>
+```

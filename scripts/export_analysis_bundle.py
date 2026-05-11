@@ -24,6 +24,11 @@ def main() -> None:
     parser.add_argument("--top-n", type=int, default=100)
     parser.add_argument("--out", required=True, help="Output directory for JSON/CSV/Markdown exports.")
     parser.add_argument("--data-dir", default="", help="Optional OPENALEX_DSS_DATA_DIR override.")
+    parser.add_argument(
+        "--custom-metric-defs-json",
+        default="",
+        help="Optional JSON file with custom metric definitions. A list, {'models': [...]}, or {'custom_metrics': [...]} is accepted.",
+    )
     args = parser.parse_args()
 
     if args.data_dir:
@@ -32,9 +37,15 @@ def main() -> None:
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
 
-    from app.services import reports, scientometrics
+    from app.services import custom_metrics, reports, scientometrics
 
     metrics = [item.strip() for item in args.metrics.replace("|", ",").split(",") if item.strip()]
+    custom_metric_defs = _load_custom_metric_defs(args.custom_metric_defs_json)
+    custom_metric_defs = custom_metrics.parse_custom_metrics(custom_metric_defs)
+    for definition in custom_metric_defs:
+        metric_id = str(definition.get("id") or "").strip()
+        if metric_id and metric_id not in metrics:
+            metrics.append(metric_id)
     out_dir = Path(args.out).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -46,6 +57,7 @@ def main() -> None:
         "run_id": args.run_id,
         "dump_id": args.dump_id,
         "top_n": args.top_n,
+        "custom_metric_defs": custom_metric_defs,
     }
     payload = scientometrics.build_scientometric_analysis(**analysis_kwargs)
     report = reports.build_report_bundle(
@@ -58,6 +70,7 @@ def main() -> None:
         scientometric_metrics=metrics,
         baseline_metric=args.baseline,
         rank_top_n=args.top_n,
+        custom_metric_defs=custom_metric_defs,
     )
 
     artifacts = {
@@ -86,6 +99,7 @@ def main() -> None:
         "fraction_mode": args.fraction_mode,
         "baseline_metric": args.baseline,
         "metrics": metrics,
+        "custom_metrics": custom_metric_defs,
         "data_scope": (payload.get("scope") or {}).get("data_scope"),
         "analysis_author_scope": (payload.get("scope") or {}).get("analysis_author_scope"),
         "analysis_id": (payload.get("scope") or {}).get("analysis_id"),
@@ -101,6 +115,22 @@ def main() -> None:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+
+
+def _load_custom_metric_defs(raw_path: str) -> list[dict[str, Any]]:
+    if not raw_path:
+        return []
+    path = Path(raw_path).expanduser().resolve()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = payload.get("models") or payload.get("custom_metrics") or payload.get("metrics") or []
+    else:
+        items = []
+    if not isinstance(items, list):
+        raise SystemExit(f"custom metric definitions must be a JSON list: {path}")
+    return [item for item in items if isinstance(item, dict) and item.get("enabled") is not False]
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]], fields: list[str]) -> None:
